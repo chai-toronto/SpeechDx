@@ -6,8 +6,6 @@
 
 This repository provides scripts for training and evaluating your customized model on **17 datasets covering 11 different pathologies**.
 
-This repository can be used to (1) conduct training of *WavRx* on the 6 datasets; (2) run inference using the pretrained *WavRx* backbones; (3) train and test your self-customized models on the 6 datasets without efforts needed for editing training/evaluation scripts.
-
 For detailed information, refer to [paper]():
 
 ```bibtex
