@@ -1,1 +1,1 @@
-Store downloaded zip files here.
+Store downloaded compressed files in `DATASET/raw` and extracted files in `DATASET/processed`.

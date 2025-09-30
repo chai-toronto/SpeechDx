@@ -1,0 +1,120 @@
+File: hparams/respiratory.yaml
+random_seed: 2025
+__set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
+
+
+task: Cambridge_Respiratory
+model_name: wavrx
+data_folder: ./data
+dataset: Cambridge
+rir_folder: !ref <data_folder>
+
+# ----------------------------------
+# DYNAMIC SCRIPT CONFIGURATION (Generic)
+# ----------------------------------
+# Path to the file containing the dataset-specific preparation and IO functions
+data_io_script: !ref <data_io_template.py>
+
+# Name of the function to call for manifest generation
+prepare_data_fn: prepare_data
+
+# Name of the function to call for defining the data pipelines
+dataio_prep_fn: dataio_prep
+
+# Key used in the SpeechBrain batch object for the label
+label_key: label_encoded
+
+# ----------------------------------
+# DATA PATHS AND PREPARATION
+# ----------------------------------
+# Original audio and label file paths
+wav_folder: !ref <data_folder>/<dataset>/processed/
+audio_archive_path: !ref <data_folder>/<dataset>/raw/YOUR_ARCHIVE.zip # change this to your own path
+metadata_path: !ref <data_folder>/<dataset>/processed/Cambridge-metadata.csv
+
+# Output folder structure
+output_folder: !ref ./exps/<task>/brain-logs
+save_folder: !ref <output_folder>/save
+train_log: !ref <output_folder>/train_log.txt
+
+# Manifest files created by prepare_data_fn
+train_annotation: !ref ./exps/<task>/manifest/train.json
+valid_annotation: !ref ./exps/<task>/manifest/valid.json
+test_annotation: !ref ./exps/<task>/manifest/test.json
+
+# Data preparation
+skip_prep: False
+ratio: [0.7, 0.1, 0.2] # Train/Valid/Test split ratio
+
+# ----------------------------------
+# MODEL DEFINITION
+# ----------------------------------
+# model hyper-parameters
+model: !new:wavrx.WavRx
+ssl_encoder_source: "microsoft/wavlm-base-plus"
+num_ssl_feat: 768
+num_fc_neurons: 768
+num_classes: 1
+freeze_encoder: True
+pooling_1: 'atn'
+pooling_2: 'atn'
+dp: 0.25
+sample_rate: 50
+win_length: 256
+hop_length: 64
+
+# modules (for nested modules)
+modules:
+model: !ref <model>
+
+# Additional model-related parameters
+freeze_encoder: True
+clamp_length: 160000
+
+# ----------------------------------
+# TRAINING AND METRICS
+# ----------------------------------
+number_of_epochs: 20
+batch_size: 1
+lr_start: 0.0001
+lr_final: 0.00001
+n_classes: 1
+sample_rate: 16000
+
+# Data loader
+dataloader_options:
+batch_size: !ref <batch_size>
+drop_last: True
+num_workers: 4
+
+# Logger
+train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
+save_file: !ref <train_log>
+
+# Error/Metric calculation
+error_stats: !name:speechbrain.utils.metric_stats.BinaryMetricStats
+
+# Epoch management
+epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounterWithStopper
+limit: !ref <number_of_epochs>
+limit_to_stop: 3
+limit_warmup: 2
+direction: 'max'
+
+# Optimizer
+opt_class: !name:torch.optim.AdamW
+lr: !ref <lr_start>
+
+# Learning rate scheduler
+lr_annealing: !new:speechbrain.nnet.schedulers.LinearScheduler
+initial_value: !ref <lr_start>
+final_value: !ref <lr_final>
+epoch_count: !ref <number_of_epochs>
+
+# Checkpointing
+ckpt_interval_minutes: 15 # save checkpoint every N min
+checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
+checkpoints_dir: !ref <save_folder>
+recoverables:
+model: !ref <model>
+counter: !ref <epoch_counter>
