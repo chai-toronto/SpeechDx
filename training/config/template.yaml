@@ -39,12 +39,13 @@ train_log: !ref <output_folder>/train_log.txt
 
 # Manifest files created by prepare_data_fn
 train_annotation: !ref ./exps/<task>/manifest/train.json
-valid_annotation: !ref ./exps/<task>/manifest/valid.json
+fold_annotation: !ref ./exps/<task>/manifest/valid.json
 test_annotation: !ref ./exps/<task>/manifest/test.json
 
 # Data preparation
 skip_prep: False
 ratio: [0.7, 0.1, 0.2] # Train/Valid/Test split ratio
+new_test: True # Set False to use metadata's test split.
 
 # ----------------------------------
 # MODEL DEFINITION
@@ -86,6 +87,7 @@ dataloader_options:
 batch_size: !ref <batch_size>
 drop_last: True
 num_workers: 4
+
 
 # Logger
 train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger

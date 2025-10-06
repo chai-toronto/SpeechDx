@@ -166,7 +166,7 @@ if __name__ == "__main__":
         overrides=overrides,
     )
 
-    # ynamically load the data preparation module specified in the YAML
+    # Dynamically load the data preparation module specified in the YAML
     # This module contains the 'prepare_data' and 'dataio_prep' functions.
     try:
         data_io_module = sb.import_module(hparams["data_io_script"])
@@ -184,10 +184,12 @@ if __name__ == "__main__":
                 "audio_archive_path": hparams["audio_archive_path"],
                 "metadata_path": hparams["metadata_path"],
                 "manifest_train_path": hparams["train_annotation"],
-                "manifest_valid_path": hparams["valid_annotation"],
+                "manifest_fold_path": hparams["fold_annotation"],
                 "manifest_test_path": hparams["test_annotation"],
                 "ratio": hparams["ratio"],
-                "random_seed": hparams["random_seed"]
+                "random_seed": hparams["random_seed"],
+                "label_key": hparams["label_key"],
+                "new_test": hparams["new_test"]
             },
         )
 
