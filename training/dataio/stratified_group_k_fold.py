@@ -23,7 +23,7 @@ def stratified_group_kfold_df(
 
     y = work_df[label_col].to_numpy()
     groups = work_df[group_col].to_numpy()
-    X = work_df[id_col].to_numpy()
+    X = np.zeros(len(work_df))
 
     sgkf = StratifiedGroupKFold(
         n_splits=n_splits,
@@ -33,9 +33,9 @@ def stratified_group_kfold_df(
 
     folds = []
     for train_idx, val_idx in sgkf.split(X, y, groups):
-        train_ids = X[train_idx]
-        val_ids   = X[val_idx]
-        folds.append((train_ids, val_ids))
+        train_df = work_df.iloc[train_idx].copy()
+        val_df = work_df.iloc[val_idx].copy()
+        folds.append((train_df, val_df))
     return folds
 
 

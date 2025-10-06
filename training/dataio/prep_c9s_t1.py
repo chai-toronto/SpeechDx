@@ -9,6 +9,7 @@ To adapt to a new dataset, copy this file and modify:
 2. label_pipeline (to handle the specific labels and label-to-index mapping).
 3. The 'output_keys' in dataio_prep (if the label key changes).
 """
+import json
 
 import torchaudio
 import torchaudio.functional as F
@@ -24,12 +25,13 @@ def prepare_data(
         audio_archive_path,
         metadata_path,
         manifest_train_path,
-        manifest_fold_path,
+        manifest_val_path,
         manifest_test_path,
         ratio,
         random_seed,
         label_key,
-        new_test
+        new_test,
+        num_fold
 ):
     """
     This function is dataset-specific.
@@ -47,7 +49,7 @@ def prepare_data(
     if not all(
             (
                     sb.utils.checkpoints.is_pytorch_object_in_folder(manifest_train_path),
-                    sb.utils.checkpoints.is_pytorch_object_in_folder(manifest_fold_path),
+                    sb.utils.checkpoints.is_pytorch_object_in_folder(manifest_val_path),
                     sb.utils.checkpoints.is_pytorch_object_in_folder(manifest_test_path)
             )
     ):
@@ -68,23 +70,21 @@ def prepare_data(
                                           'uid',
                                           label_key,
                                           "Participant_ID",
-                                          random_seed=random_seed)
+                                          random_seed=random_seed,
+                                          n_splits=num_fold)
 
-        folds_dict = {}
-        for i, (train_ids, val_ids) in enumerate(folds):
-            folds_dict[f'{i}'] = {
-                'train': train_ids,
-                'val': val_ids
-            }
-
-        train_data = df_nontest.set_index("uid").to_dict(orient='index')
+        train_dicts = []
+        valid_dicts = [] # list of folds
+        for train_df, val_df in folds:
+            train_dicts.append(train_df.set_index('uid').to_dict(orient='index'))
+            valid_dicts.append(val_df.set_index('uid').to_dict(orient='index'))
         test_data = df_test.set_index("uid").to_dict(orient='index')
 
         import json
         with open(manifest_train_path, 'w') as f:
-            json.dump(train_data, f, indent=4)
-        with open(manifest_fold_path, 'w') as f:
-            json.dump(folds_dict, f, indent=4)
+            json.dump(train_dicts, f, indent=5)
+        with open(manifest_val_path, 'w') as f:
+            json.dump(valid_dicts, f, indent=5)
         with open(manifest_test_path, 'w') as f:
             json.dump(test_data, f, indent=4)
         print("Manifests created.")
@@ -136,16 +136,25 @@ def dataio_prep(hparams):
 
     # Define datasets.
     datasets = {}
-    data_info = {
-        "train": hparams["train_annotation"],
-        "test": hparams["test_annotation"]
-    }
+
+    data_info = {}
+    with open(hparams["train_annotation"], "r") as f:
+        train_folds = json.load(f)
+
+    with open(hparams["val_annotation"], "r") as f:
+        val_folds = json.load(f)
+
+    for i in range(hparams['num_fold']):
+        data_info[f'train_{i}'] = train_folds[i]
+        data_info[f'val_{i}'] = val_folds[i]
+
+    data_info['test'] = hparams['test_annotation']
 
     for dataset in data_info:
         datasets[dataset] = sb.dataio.dataset.DynamicItemDataset.from_json(
             json_path=data_info[dataset],
             dynamic_items=[audio_pipeline, label_pipeline],
-            output_keys=["uid", "signal", "duration", "path", "label_encoded"],
+            output_keys=["id", "signal", "duration", "path", "label_encoded"],
         )
 
     return datasets

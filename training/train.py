@@ -20,6 +20,8 @@ import sys
 import torch
 import speechbrain as sb
 from hyperpyyaml import load_hyperpyyaml
+from speechbrain.dataio.dataloader import LoopedLoader
+from torch.utils.data import DataLoader
 
 
 class DiagnosticsBrain(sb.Brain):
@@ -145,6 +147,58 @@ class DiagnosticsBrain(sb.Brain):
                 test_stats=stats,
             )
 
+    #Updated for CV
+    def fit(
+        self,
+        epoch_counter,
+        train_sets,
+        valid_sets=None,
+        progressbar=None,
+        train_loader_kwargs={},
+        valid_loader_kwargs={},
+    ):
+        loaders = []
+        for train_set, valid_set in zip(train_sets, valid_sets):
+            if not (
+                isinstance(train_set, DataLoader)
+                or isinstance(train_set, LoopedLoader)
+            ):
+                train_loader = self.make_dataloader(
+                    train_set, stage=sb.Stage.TRAIN, **train_loader_kwargs
+                )
+            if valid_set is not None and not (
+                isinstance(valid_set, DataLoader)
+                or isinstance(valid_set, LoopedLoader)
+            ):
+                valid_loader = self.make_dataloader(
+                    valid_set,
+                    stage=sb.Stage.VALID,
+                    ckpt_prefix=None,
+                    **valid_loader_kwargs,
+                )
+            loaders.append((train_loader, valid_loader))
+
+        self.on_fit_start()
+
+        if progressbar is None:
+            progressbar = not self.noprogressbar
+
+        # Only show progressbar if requested and main_process
+        enable = progressbar and sb.utils.distributed.if_main_process()
+
+        # Iterate epochs
+        for epoch in epoch_counter:
+
+            self._fit_train(train_set=train_set, epoch=epoch, enable=enable)
+            self._fit_valid(valid_set=valid_set, epoch=epoch, enable=enable)
+
+            # Debug mode only runs a few epochs
+            if (
+                self.debug
+                and epoch == self.debug_epochs
+                or self._optimizer_step_limit_exceeded
+            ):
+                break
 
 # Recipe begins!
 if __name__ == "__main__":
@@ -184,12 +238,13 @@ if __name__ == "__main__":
                 "audio_archive_path": hparams["audio_archive_path"],
                 "metadata_path": hparams["metadata_path"],
                 "manifest_train_path": hparams["train_annotation"],
-                "manifest_fold_path": hparams["fold_annotation"],
+                "manifest_val_path": hparams["val_annotation"],
                 "manifest_test_path": hparams["test_annotation"],
                 "ratio": hparams["ratio"],
                 "random_seed": hparams["random_seed"],
                 "label_key": hparams["label_key"],
-                "new_test": hparams["new_test"]
+                "new_test": hparams["new_test"],
+                "num_fold": hparams["num_fold"],
             },
         )
 
@@ -197,27 +252,29 @@ if __name__ == "__main__":
     dataio_prep_fn = getattr(data_io_module, hparams["dataio_prep_fn"])
     datasets = dataio_prep_fn(hparams)
 
-    # Initialize the Brain object
-    brain = DiagnosticsBrain(
-        modules=hparams["modules"],
-        opt_class=hparams["opt_class"],
-        hparams=hparams,
-        run_opts=run_opts,
-        checkpointer=hparams["checkpointer"],
-    )
 
     # Training loop
-    brain.fit(
-        epoch_counter=brain.hparams.epoch_counter,
-        train_set=datasets["train"],
-        valid_set=datasets["valid"],
-        train_loader_kwargs=hparams["dataloader_options"],
-        valid_loader_kwargs=hparams["dataloader_options"],
-    )
+    for fold in range(hparams["num_fold"]):
+        # Initialize the Brain object
+        brain = DiagnosticsBrain(
+            modules=hparams["modules"],
+            opt_class=hparams["opt_class"],
+            hparams=hparams,
+            run_opts=run_opts,
+            checkpointer=hparams["checkpointer"],
+        )
+
+        brain.fit(
+            epoch_counter=brain.hparams.epoch_counter,
+            train_set=datasets[f"train_{fold}"],
+            valid_set=datasets[f"valid_{fold}"],
+            train_loader_kwargs=hparams["train_dataloader_options"],
+            valid_loader_kwargs=hparams["val_dataloader_options"],
+        )
 
     # Evaluation
     test_stats = brain.evaluate(
         test_set=datasets["test"],
         max_key="F1",
-        test_loader_kwargs=hparams["dataloader_options"],
+        test_loader_kwargs=hparams["test_dataloader_options"],
     )
