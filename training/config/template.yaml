@@ -48,7 +48,7 @@ ratio: [0.7, 0.1, 0.2] # Train/Valid/Test split ratio
 new_test: True # Set False to use metadata's test split.
 
 # Cross Validation
-num_fold: 5
+num_fold: 5 # works from 2 to num. subjects. To be implemented: 0 -> normal split no CV, -1 -> LOSO
 
 # ----------------------------------
 # MODEL DEFINITION

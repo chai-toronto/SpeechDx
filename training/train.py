@@ -18,8 +18,10 @@ import sys
 
 import speechbrain as sb
 from hyperpyyaml import load_hyperpyyaml
+from speechbrain.utils import hpopt as hp
 
 from training.brain import DiagnosticsBrain
+from training.brains import Brains
 
 # Recipe begins!
 if __name__ == "__main__":
@@ -33,6 +35,7 @@ if __name__ == "__main__":
     # Load hyperparameters file with command-line overrides.
     with open(hparams_file) as fin:
         hparams = load_hyperpyyaml(fin, overrides)
+
 
     # Create experiment directory
     sb.create_experiment_directory(
@@ -73,9 +76,9 @@ if __name__ == "__main__":
     dataio_prep_fn = getattr(data_io_module, hparams["dataio_prep_fn"])
     datasets = dataio_prep_fn(hparams)
 
-
-    # Initialize the Brain object
-    brain = DiagnosticsBrain(
+    # Initialize the Brains object
+    brains = Brains(
+        num_brains=hparams["num_fold"],
         modules=hparams["modules"],
         opt_class=hparams["opt_class"],
         hparams=hparams,
@@ -83,17 +86,35 @@ if __name__ == "__main__":
         checkpointer=hparams["checkpointer"],
     )
 
-    brain.fit(
-        epoch_counter=brain.hparams.epoch_counter,
-        train_set=datasets[f"train_{0}"],
-        valid_set=datasets[f"valid_{0}"],
+    train_sets = [datasets[f"train_{i}"] for i in range(hparams["num_fold"])]
+    valid_sets = [datasets[f"valid_{i}"] for i in range(hparams["num_fold"])]
+
+    brains.fit(
+        epoch_counter=brains.hparams.epoch_counter,
+        train_sets=train_sets,
+        valid_sets=valid_sets,
         train_loader_kwargs=hparams["train_dataloader_options"],
         valid_loader_kwargs=hparams["val_dataloader_options"],
     )
 
-    # Evaluation
-    test_stats = brain.evaluate(
-        test_set=datasets["test"],
+    # Train and evaluate the final model
+    # Take the best hyperparams from the Tuner
+    test_brain = DiagnosticsBrain(
+        modules=hparams["modules"],
+        opt_class=hparams["opt_class"],
+        hparams=hparams,
+        run_opts=run_opts,
+        checkpointer=hparams["checkpointer"],
+    )
+
+    test_brain.fit(
+        epoch_counter=brains.hparams.epoch_counter,
+        train_set=datasets["test_train"],
+        train_loader_kwargs=hparams["train_dataloader_options"],
+    )
+
+    test_stats = test_brain.evaluate(
+        test_set=datasets["test_val"],
         max_key="F1",
         test_loader_kwargs=hparams["test_dataloader_options"],
     )

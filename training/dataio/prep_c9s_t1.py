@@ -78,7 +78,13 @@ def prepare_data(
         for train_df, val_df in folds:
             train_dicts.append(train_df.set_index('uid').to_dict(orient='index'))
             valid_dicts.append(val_df.set_index('uid').to_dict(orient='index'))
-        test_data = df_test.set_index("uid").to_dict(orient='index')
+
+        test_val = df_test.set_index("uid").to_dict(orient='index')
+        test_train = df_nontest.set_index("uid").to_dict(orient='index')
+        test_data = {
+            "train": test_train,
+            "val": test_val
+        }
 
         import json
         with open(manifest_train_path, 'w') as f:
@@ -134,29 +140,32 @@ def dataio_prep(hparams):
         label_encoded = label
         yield label_encoded
 
-    # Define datasets.
-    datasets = {}
-
-    data_info = {}
+    # Retrieve the data
     with open(hparams["train_annotation"], "r") as f:
         train_folds = json.load(f)
 
     with open(hparams["val_annotation"], "r") as f:
         val_folds = json.load(f)
 
+    with open(hparams['test_annotation'], "r") as f:
+        test_data = json.load(f)
+
+    data_dict = {}
     for i in range(hparams['num_fold']):
-        data_info[f'train_{i}'] = train_folds[i]
-        data_info[f'val_{i}'] = val_folds[i]
+        data_dict[f'train_{i}'] = train_folds[i]
+        data_dict[f'val_{i}'] = val_folds[i]
 
-    data_info['test'] = hparams['test_annotation']
+    data_dict['test_train'] = test_data['train']
+    data_dict['test_val'] = test_data['val']
 
-    for dataset in data_info:
-        datasets[dataset] = sb.dataio.dataset.DynamicItemDataset.from_json(
-            json_path=data_info[dataset],
+    # Define datasets.
+    datasets = {}
+    for dataset in data_dict:
+        datasets[dataset] = sb.dataio.dataset.DynamicItemDataset(
+            data=data_dict[dataset],
             dynamic_items=[audio_pipeline, label_pipeline],
             output_keys=["id", "signal", "duration", "path", "label_encoded"],
         )
-
     return datasets
 
 

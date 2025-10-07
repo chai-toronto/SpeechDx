@@ -1,3 +1,5 @@
+from collections import deque
+
 import torch
 import speechbrain as sb
 
