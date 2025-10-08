@@ -2,11 +2,10 @@ File: hparams/respiratory.yaml
 random_seed: 2025
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
-
-task: Cambridge_Respiratory
+task: c9s_t1
 model_name: wavrx
-data_folder: ./data
-dataset: Cambridge
+data_folder: ./data/
+dataset: c9s_t1
 rir_folder: !ref <data_folder>
 
 # ----------------------------------
@@ -28,12 +27,12 @@ label_key: label_encoded
 # DATA PATHS AND PREPARATION
 # ----------------------------------
 # Original audio and label file paths
-wav_folder: !ref <data_folder>/<dataset>/processed/
+wav_folder: !ref <data_folder>/<dataset>/processed/audio
 audio_archive_path: !ref <data_folder>/<dataset>/raw/YOUR_ARCHIVE.zip # change this to your own path
-metadata_path: !ref <data_folder>/<dataset>/processed/Cambridge-metadata.csv
+metadata_path: !ref <data_folder>/<dataset>/processed/<dataset>.csv
 
 # Output folder structure
-output_folder: !ref ./exps/<task>/brain-logs
+output_folder: !ref ./exps/<task>/brain-logs/<trial_id>
 save_folder: !ref <output_folder>/save
 train_log: !ref <output_folder>/train_log.txt
 
@@ -80,8 +79,8 @@ clamp_length: 160000
 # ----------------------------------
 number_of_epochs: 20
 batch_size: 1
-lr_start: 0.0001
-lr_final: 0.00001
+lr_start: 0.001
+lr_final: 0.000001
 n_classes: 1
 sample_rate: 16000
 
@@ -121,6 +120,10 @@ direction: 'max'
 # Optimizer
 opt_class: !name:torch.optim.AdamW
 lr: !ref <lr_start>
+
+# HP Optimizer
+hpopt_mode: null
+hpopt: null
 
 # Learning rate scheduler
 lr_annealing: !new:speechbrain.nnet.schedulers.LinearScheduler

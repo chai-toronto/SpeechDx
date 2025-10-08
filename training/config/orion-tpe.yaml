@@ -1,0 +1,8 @@
+# ~/config/orion-tpe.yaml
+experiment:
+  max_trials: 30
+  max_broken: 30
+  algorithms:
+    tpe:
+      seed: 2025
+      n_initial_points: 5

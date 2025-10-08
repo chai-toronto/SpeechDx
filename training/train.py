@@ -25,96 +25,96 @@ from training.brains import Brains
 
 # Recipe begins!
 if __name__ == "__main__":
+    with hp.hyperparameter_optimization(objective_key='F1') as hp_ctx:
+        # Reading command line arguments.
+        hparams_file, run_opts, overrides = hp_ctx.parse_arguments(sys.argv[1:])
 
-    # Reading command line arguments.
-    hparams_file, run_opts, overrides = sb.parse_arguments(sys.argv[1:])
+        # Initialize ddp.
+        sb.utils.distributed.ddp_init_group(run_opts)
 
-    # Initialize ddp.
-    sb.utils.distributed.ddp_init_group(run_opts)
-
-    # Load hyperparameters file with command-line overrides.
-    with open(hparams_file) as fin:
-        hparams = load_hyperpyyaml(fin, overrides)
+        # Load hyperparameters file with command-line overrides.
+        with open(hparams_file) as fin:
+            hparams = load_hyperpyyaml(fin, overrides)
 
 
-    # Create experiment directory
-    sb.create_experiment_directory(
-        experiment_directory=hparams["output_folder"],
-        hyperparams_to_save=hparams_file,
-        overrides=overrides,
-    )
-
-    # Dynamically load the data preparation module specified in the YAML
-    # This module contains the 'prepare_data' and 'dataio_prep' functions.
-    try:
-        data_io_module = sb.import_module(hparams["data_io_script"])
-    except KeyError:
-        sys.exit("Error: 'data_io_script' path must be defined in the YAML file.")
-
-    # Data preparation, to be run on only one process.
-    if not hparams["skip_prep"]:
-        prepare_data_fn = getattr(data_io_module, hparams["prepare_data_fn"])
-        
-        sb.utils.distributed.run_on_main(
-            prepare_data_fn,
-            kwargs={
-                "wav_folder": hparams["wav_folder"],
-                "audio_archive_path": hparams["audio_archive_path"],
-                "metadata_path": hparams["metadata_path"],
-                "manifest_train_path": hparams["train_annotation"],
-                "manifest_val_path": hparams["val_annotation"],
-                "manifest_test_path": hparams["test_annotation"],
-                "ratio": hparams["ratio"],
-                "random_seed": hparams["random_seed"],
-                "label_key": hparams["label_key"],
-                "new_test": hparams["new_test"],
-                "num_fold": hparams["num_fold"],
-            },
+        # Create experiment directory
+        sb.create_experiment_directory(
+            experiment_directory=hparams["output_folder"],
+            hyperparams_to_save=hparams_file,
+            overrides=overrides,
         )
 
-    # Create dataset objects
-    dataio_prep_fn = getattr(data_io_module, hparams["dataio_prep_fn"])
-    datasets = dataio_prep_fn(hparams)
+        # Dynamically load the data preparation module specified in the YAML
+        # This module contains the 'prepare_data' and 'dataio_prep' functions.
+        try:
+            data_io_module = sb.import_module(hparams["data_io_script"])
+        except KeyError:
+            sys.exit("Error: 'data_io_script' path must be defined in the YAML file.")
 
-    # Initialize the Brains object
-    brains = Brains(
-        num_brains=hparams["num_fold"],
-        modules=hparams["modules"],
-        opt_class=hparams["opt_class"],
-        hparams=hparams,
-        run_opts=run_opts,
-        checkpointer=hparams["checkpointer"],
-    )
+        # Data preparation, to be run on only one process.
+        if not hparams["skip_prep"]:
+            prepare_data_fn = getattr(data_io_module, hparams["prepare_data_fn"])
 
-    train_sets = [datasets[f"train_{i}"] for i in range(hparams["num_fold"])]
-    valid_sets = [datasets[f"valid_{i}"] for i in range(hparams["num_fold"])]
+            sb.utils.distributed.run_on_main(
+                prepare_data_fn,
+                kwargs={
+                    "wav_folder": hparams["wav_folder"],
+                    "audio_archive_path": hparams["audio_archive_path"],
+                    "metadata_path": hparams["metadata_path"],
+                    "manifest_train_path": hparams["train_annotation"],
+                    "manifest_val_path": hparams["val_annotation"],
+                    "manifest_test_path": hparams["test_annotation"],
+                    "ratio": hparams["ratio"],
+                    "random_seed": hparams["random_seed"],
+                    "label_key": hparams["label_key"],
+                    "new_test": hparams["new_test"],
+                    "num_fold": hparams["num_fold"],
+                },
+            )
 
-    brains.fit(
-        epoch_counter=brains.hparams.epoch_counter,
-        train_sets=train_sets,
-        valid_sets=valid_sets,
-        train_loader_kwargs=hparams["train_dataloader_options"],
-        valid_loader_kwargs=hparams["val_dataloader_options"],
-    )
+        # Create dataset objects
+        dataio_prep_fn = getattr(data_io_module, hparams["dataio_prep_fn"])
+        datasets = dataio_prep_fn(hparams)
 
-    # Train and evaluate the final model
-    # Take the best hyperparams from the Tuner
-    test_brain = DiagnosticsBrain(
-        modules=hparams["modules"],
-        opt_class=hparams["opt_class"],
-        hparams=hparams,
-        run_opts=run_opts,
-        checkpointer=hparams["checkpointer"],
-    )
+        # Initialize the Brains object
+        brains = Brains(
+            num_brains=hparams["num_fold"],
+            modules=hparams["modules"],
+            opt_class=hparams["opt_class"],
+            hparams=hparams,
+            run_opts=run_opts,
+            checkpointer=hparams["checkpointer"],
+        )
 
-    test_brain.fit(
-        epoch_counter=brains.hparams.epoch_counter,
-        train_set=datasets["test_train"],
-        train_loader_kwargs=hparams["train_dataloader_options"],
-    )
+        train_sets = [datasets[f"train_{i}"] for i in range(hparams["num_fold"])]
+        valid_sets = [datasets[f"valid_{i}"] for i in range(hparams["num_fold"])]
 
-    test_stats = test_brain.evaluate(
-        test_set=datasets["test_val"],
-        max_key="F1",
-        test_loader_kwargs=hparams["test_dataloader_options"],
-    )
+        brains.fit(
+            epoch_counter=brains.hparams.epoch_counter,
+            train_sets=train_sets,
+            valid_sets=valid_sets,
+            train_loader_kwargs=hparams["train_dataloader_options"],
+            valid_loader_kwargs=hparams["val_dataloader_options"],
+        )
+
+    # # Train and evaluate the final model
+    # # Take the best hyperparams from the Tuner
+    # test_brain = DiagnosticsBrain(
+    #     modules=hparams["modules"],
+    #     opt_class=hparams["opt_class"],
+    #     hparams=hparams,
+    #     run_opts=run_opts,
+    #     checkpointer=hparams["checkpointer"],
+    # )
+    #
+    # test_brain.fit(
+    #     epoch_counter=brains.hparams.epoch_counter,
+    #     train_set=datasets["test_train"],
+    #     train_loader_kwargs=hparams["train_dataloader_options"],
+    # )
+    #
+    # test_stats = test_brain.evaluate(
+    #     test_set=datasets["test_val"],
+    #     max_key="F1",
+    #     test_loader_kwargs=hparams["test_dataloader_options"],
+    # )

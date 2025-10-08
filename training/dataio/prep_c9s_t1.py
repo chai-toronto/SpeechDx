@@ -10,6 +10,7 @@ To adapt to a new dataset, copy this file and modify:
 3. The 'output_keys' in dataio_prep (if the label key changes).
 """
 import json
+from pathlib import Path
 
 import torchaudio
 import torchaudio.functional as F
@@ -57,6 +58,9 @@ def prepare_data(
         print(f"Creating mock manifest files for demonstration in: {manifest_train_path}")
 
         df = pd.read_csv(metadata_path)
+
+        # Resolve path to be absolute
+        df["path"] = Path(wav_folder) / df["path"].astype(str)
 
         # split into test and non-test
         if new_test:
