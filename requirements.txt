@@ -1,0 +1,7 @@
+speechbrain
+torch
+torchaudio
+hyperpyyaml
+pandas
+numpy
+scikit-learn
