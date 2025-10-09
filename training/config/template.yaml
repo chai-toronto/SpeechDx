@@ -1,4 +1,4 @@
-File: hparams/respiratory.yaml
+File: config/template.yaml
 random_seed: 2025
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
@@ -12,7 +12,7 @@ rir_folder: !ref <data_folder>
 # DYNAMIC SCRIPT CONFIGURATION (Generic)
 # ----------------------------------
 # Path to the file containing the dataset-specific preparation and IO functions
-data_io_script: !ref <data_io_template.py>
+data_io_script: training.dataio.prep_c9s_t1
 
 # Name of the function to call for manifest generation
 prepare_data_fn: prepare_data
@@ -21,7 +21,7 @@ prepare_data_fn: prepare_data
 dataio_prep_fn: dataio_prep
 
 # Key used in the SpeechBrain batch object for the label
-label_key: label_encoded
+label_key: label
 
 # ----------------------------------
 # DATA PATHS AND PREPARATION
@@ -32,7 +32,7 @@ audio_archive_path: !ref <data_folder>/<dataset>/raw/YOUR_ARCHIVE.zip # change t
 metadata_path: !ref <data_folder>/<dataset>/processed/<dataset>.csv
 
 # Output folder structure
-output_folder: !ref ./exps/<task>/brain-logs/<trial_id>
+output_folder: !ref ./exps/<task>/brain-logs/
 save_folder: !ref <output_folder>/save
 train_log: !ref <output_folder>/train_log.txt
 
@@ -42,9 +42,9 @@ val_annotation: !ref ./exps/<task>/manifest/valid.json
 test_annotation: !ref ./exps/<task>/manifest/test.json
 
 # Data preparation
-skip_prep: False
+skip_prep: True
 ratio: [0.7, 0.1, 0.2] # Train/Valid/Test split ratio
-new_test: True # Set False to use metadata's test split.
+new_test: False # Set False to use metadata's test split.
 
 # Cross Validation
 num_fold: 5 # works from 2 to num. subjects. To be implemented: 0 -> normal split no CV, -1 -> LOSO
@@ -53,22 +53,22 @@ num_fold: 5 # works from 2 to num. subjects. To be implemented: 0 -> normal spli
 # MODEL DEFINITION
 # ----------------------------------
 # model hyper-parameters
-model: !new:wavrx.WavRx
-ssl_encoder_source: "microsoft/wavlm-base-plus"
-num_ssl_feat: 768
-num_fc_neurons: 768
-num_classes: 1
-freeze_encoder: True
-pooling_1: 'atn'
-pooling_2: 'atn'
-dp: 0.25
-sample_rate: 50
-win_length: 256
-hop_length: 64
+model: !new:model.wavrx.WavRx
+  ssl_encoder_source: "microsoft/wavlm-base-plus"
+  num_ssl_feat: 768
+  num_fc_neurons: 768
+  num_classes: 1
+  freeze_encoder: True
+  pooling_1: 'atn'
+  pooling_2: 'atn'
+  dp: 0.25
+  sample_rate: 50
+  win_length: 256
+  hop_length: 64
 
 # modules (for nested modules)
 modules:
-model: !ref <model>
+  model: !ref <model>
 
 # Additional model-related parameters
 freeze_encoder: True
@@ -86,55 +86,81 @@ sample_rate: 16000
 
 # Data loader
 train_dataloader_options:
-batch_size: !ref <batch_size>
-drop_last: True
-num_workers: 4
-shuffle: True #TODO: make sure default is off
+  batch_size: !ref <batch_size>
+  drop_last: True
+  num_workers: 4
+  shuffle: True #TODO: make sure default is off
 
 val_dataloader_options:
-batch_size: !ref <batch_size>
-drop_last: True
-num_workers: 4
+  batch_size: !ref <batch_size>
+  drop_last: True
+  num_workers: 4
 
 
 test_dataloader_options:
-batch_size: !ref <batch_size>
-drop_last: True
-num_workers: 4
+  batch_size: !ref <batch_size>
+  drop_last: True
+  num_workers: 4
 
 
 # Logger
 train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
-save_file: !ref <train_log>
+  save_file: !ref <train_log>
 
 # Error/Metric calculation
 error_stats: !name:speechbrain.utils.metric_stats.BinaryMetricStats
 
 # Epoch management
 epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounterWithStopper
-limit: !ref <number_of_epochs>
-limit_to_stop: 3
-limit_warmup: 2
-direction: 'max'
+  limit: !ref <number_of_epochs>
+  limit_to_stop: 3
+  limit_warmup: 2
+  direction: 'max'
 
 # Optimizer
 opt_class: !name:torch.optim.AdamW
-lr: !ref <lr_start>
+  lr: !ref <lr_start>
 
 # HP Optimizer
-hpopt_mode: null
-hpopt: null
+# Enable Ray Tune hyperparameter optimization
+hpopt_mode: ray  # Set to 'ray' to enable, null to disable
+
+# Ray Tune specific configuration
+ray_tune_config:
+  num_samples: 20  # Number of trial runs
+  resources_per_trial:
+    cpu: 2
+    gpu: 1
+
+# Define hyperparameter search space
+# This is optional - if not provided, defaults will be used
+hpopt_config:
+  lr_start:
+    type: "!tune.loguniform"
+    values: [0.00001, 0.01]
+
+  dp:  # dropout
+    type: "!tune.uniform"
+    values: [0.1, 0.5]
+
+  num_fc_neurons:
+    type: "!tune.choice"
+    values: [512, 768, 1024]
+
+  batch_size:
+    type: "!tune.choice"
+    values: [8, 16, 32]
 
 # Learning rate scheduler
 lr_annealing: !new:speechbrain.nnet.schedulers.LinearScheduler
-initial_value: !ref <lr_start>
-final_value: !ref <lr_final>
-epoch_count: !ref <number_of_epochs>
+  initial_value: !ref <lr_start>
+  final_value: !ref <lr_final>
+  epoch_count: !ref <number_of_epochs>
 
 # Checkpointing
 ckpt_interval_minutes: 15 # save checkpoint every N min
 checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
-checkpoints_dir: !ref <save_folder>
+  checkpoints_dir: !ref <save_folder>
 recoverables:
-model: !ref <model>
-counter: !ref <epoch_counter>
+  model: !ref <model>
+  counter: !ref <epoch_counter>

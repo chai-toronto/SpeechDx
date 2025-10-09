@@ -3,9 +3,6 @@ from collections import deque
 import torch
 import speechbrain as sb
 
-from speechbrain.dataio.dataloader import LoopedLoader
-from torch.utils.data import DataLoader
-
 
 class DiagnosticsBrain(sb.Brain):
     """Class that manages the training loop for a generic diagnostics task."""

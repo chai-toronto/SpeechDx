@@ -19,6 +19,7 @@ import torch
 import pandas as pd
 
 from training.dataio.stratified_group_k_fold import stratified_group_kfold_df
+from training.dataio.utils import ensure_dir, PathEncoder
 
 
 def prepare_data(
@@ -46,16 +47,16 @@ def prepare_data(
     rest deterministically with seed. Each train manifest now contains
     k subdict for each fold. Each is like the original format.
     """
-
+    manifest_train_path = Path(manifest_train_path)
+    manifest_val_path = Path(manifest_val_path)
+    manifest_test_path = Path(manifest_test_path)
     if not all(
             (
-                    sb.utils.checkpoints.is_pytorch_object_in_folder(manifest_train_path),
-                    sb.utils.checkpoints.is_pytorch_object_in_folder(manifest_val_path),
-                    sb.utils.checkpoints.is_pytorch_object_in_folder(manifest_test_path)
+                manifest_train_path.exists(),
+                manifest_val_path.exists(),
+                manifest_test_path.exists(),
             )
     ):
-
-        print(f"Creating mock manifest files for demonstration in: {manifest_train_path}")
 
         df = pd.read_csv(metadata_path)
 
@@ -91,12 +92,15 @@ def prepare_data(
         }
 
         import json
+        ensure_dir(manifest_train_path)
         with open(manifest_train_path, 'w') as f:
-            json.dump(train_dicts, f, indent=5)
+            json.dump(train_dicts, f, indent=5, cls=PathEncoder)
+        ensure_dir(manifest_val_path)
         with open(manifest_val_path, 'w') as f:
-            json.dump(valid_dicts, f, indent=5)
+            json.dump(valid_dicts, f, indent=5, cls=PathEncoder)
+        ensure_dir(manifest_test_path)
         with open(manifest_test_path, 'w') as f:
-            json.dump(test_data, f, indent=4)
+            json.dump(test_data, f, indent=4, cls=PathEncoder)
         print("Manifests created.")
     print("--- prepare_data finished ---")
 
