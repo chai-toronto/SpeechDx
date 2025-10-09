@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yourproj"
+version = "0.1.0"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["training*", "model*"]  # choose the real packages
+exclude = ["data*", "exps*", "demos*", "download*"]

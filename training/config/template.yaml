@@ -53,15 +53,17 @@ num_fold: 5 # works from 2 to num. subjects. To be implemented: 0 -> normal spli
 # MODEL DEFINITION
 # ----------------------------------
 # model hyper-parameters
+dp: 0.25
+num_fc_neurons: 768
 model: !new:model.wavrx.WavRx
   ssl_encoder_source: "microsoft/wavlm-base-plus"
   num_ssl_feat: 768
-  num_fc_neurons: 768
+  num_fc_neurons: !ref <num_fc_neurons>
   num_classes: 1
   freeze_encoder: True
   pooling_1: 'atn'
   pooling_2: 'atn'
-  dp: 0.25
+  dp: !ref <dp>
   sample_rate: 50
   win_length: 256
   hop_length: 64

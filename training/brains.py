@@ -1,5 +1,7 @@
 from statistics import mean
 from typing import Dict
+
+from ray import tune
 from speechbrain.utils import hpopt as hp
 import speechbrain as sb
 
@@ -33,7 +35,7 @@ class Brains:
 
             # Report results to HP tuner
             # This will use Ray Tune's reporter when hpopt_mode='ray'
-            hp.report_result(aggregated_stat)
+            tune.report(**aggregated_stat)
 
             # Reset for next epoch
             self.stats = []

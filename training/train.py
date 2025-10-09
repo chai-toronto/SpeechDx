@@ -21,6 +21,7 @@ import importlib
 import sys
 import os
 from functools import partial
+from pathlib import Path
 
 import ray
 from ray import tune
@@ -28,13 +29,13 @@ from ray.tune import CLIReporter
 
 import speechbrain as sb
 from hyperpyyaml import load_hyperpyyaml
-from speechbrain.utils import hpopt as hp
+
 
 from training.brain import DiagnosticsBrain
 from training.brains import Brains
 
 
-def train_with_ray(config, *, hparams_file, run_opts, overrides):
+def train_with_ray(config, hparams_file, run_opts, overrides):
     """Ray Tune trainable function that wraps the SpeechBrain training loop.
 
     Args:
@@ -43,6 +44,7 @@ def train_with_ray(config, *, hparams_file, run_opts, overrides):
         run_opts: SpeechBrain run options
         overrides: Command line overrides
     """
+
     # Update overrides with Ray Tune config
     ray_overrides = overrides.copy() if overrides else {}
     for key, value in config.items():
@@ -53,7 +55,7 @@ def train_with_ray(config, *, hparams_file, run_opts, overrides):
         hparams = load_hyperpyyaml(fin, ray_overrides)
 
     # Create experiment directory with trial-specific folder
-    trial_id = tune.get_trial_id() or "default"
+    trial_id = tune.get_context().get_trial_id() or "default"
     hparams["output_folder"] = os.path.join(hparams["output_folder"], trial_id)
 
     sb.create_experiment_directory(
@@ -82,24 +84,16 @@ def train_with_ray(config, *, hparams_file, run_opts, overrides):
         checkpointer=hparams["checkpointer"],
     )
 
-    # Replace the report function to use Ray Tune
-    original_report = hp.report_result
-    hp.report_result = lambda results: tune.report(**results)
+    train_sets = [datasets[f"train_{i}"] for i in range(hparams["num_fold"])]
+    valid_sets = [datasets[f"valid_{i}"] for i in range(hparams["num_fold"])]
 
-    try:
-        train_sets = [datasets[f"train_{i}"] for i in range(hparams["num_fold"])]
-        valid_sets = [datasets[f"valid_{i}"] for i in range(hparams["num_fold"])]
-
-        brains.fit(
-            epoch_counter=brains.hparams.epoch_counter,
-            train_sets=train_sets,
-            valid_sets=valid_sets,
-            train_loader_kwargs=hparams["train_dataloader_options"],
-            valid_loader_kwargs=hparams["val_dataloader_options"],
-        )
-    finally:
-        # Restore original report function
-        hp.report_result = original_report
+    brains.fit(
+        epoch_counter=brains.hparams.epoch_counter,
+        train_sets=train_sets,
+        valid_sets=valid_sets,
+        train_loader_kwargs=hparams["train_dataloader_options"],
+        valid_loader_kwargs=hparams["val_dataloader_options"],
+    )
 
 
 def parse_hp_search_space(hparams):
@@ -158,6 +152,7 @@ if __name__ == "__main__":
     sb.utils.distributed.ddp_init_group(run_opts)
 
     # Load hyperparameters file with command-line overrides
+    hparams_file = Path(hparams_file).resolve()
     with open(hparams_file) as fin:
         hparams = load_hyperpyyaml(fin, overrides)
 
@@ -196,10 +191,12 @@ if __name__ == "__main__":
         # Parse search space
         search_space = parse_hp_search_space(hparams)
 
-
-        def trainable(config):
-            return train_with_ray(config=config, hparams_file=hparams_file, run_opts=run_opts, overrides=overrides)
-
+        trainable = tune.with_parameters(
+            train_with_ray,
+            hparams_file=hparams_file,
+            run_opts=run_opts,
+            overrides=overrides,
+        )
 
         # Configure Ray Tune
         tune_config = hparams.get("ray_tune_config", {})
@@ -218,7 +215,7 @@ if __name__ == "__main__":
             metric="F1",
             mode="max",
             progress_reporter=reporter,
-            storage_path=os.path.join(hparams["output_folder"], "ray_results"),
+            storage_path=(Path(hparams["output_folder"]) / "ray_results").resolve(),
             name="hp_optimization",
             stop={"training_iteration": hparams["number_of_epochs"]},
             resources_per_trial=tune_config.get("resources_per_trial", {"cpu": 1, "gpu": 1}),
@@ -237,34 +234,4 @@ if __name__ == "__main__":
         ray.shutdown()
 
     else:
-        # Standard training without HP optimization
-        sb.create_experiment_directory(
-            experiment_directory=hparams["output_folder"],
-            hyperparams_to_save=hparams_file,
-            overrides=overrides,
-        )
-
-        # Create dataset objects
-        dataio_prep_fn = getattr(data_io_module, hparams["dataio_prep_fn"])
-        datasets = dataio_prep_fn(hparams)
-
-        # Initialize the Brains object
-        brains = Brains(
-            num_brains=hparams["num_fold"],
-            modules=hparams["modules"],
-            opt_class=hparams["opt_class"],
-            hparams=hparams,
-            run_opts=run_opts,
-            checkpointer=hparams["checkpointer"],
-        )
-
-        train_sets = [datasets[f"train_{i}"] for i in range(hparams["num_fold"])]
-        valid_sets = [datasets[f"valid_{i}"] for i in range(hparams["num_fold"])]
-
-        brains.fit(
-            epoch_counter=brains.hparams.epoch_counter,
-            train_sets=train_sets,
-            valid_sets=valid_sets,
-            train_loader_kwargs=hparams["train_dataloader_options"],
-            valid_loader_kwargs=hparams["val_dataloader_options"],
-        )
+        raise NotImplementedError
