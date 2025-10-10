@@ -23,6 +23,7 @@ import os
 from functools import partial
 from pathlib import Path
 
+os.environ["RAY_CHDIR_TO_TRIAL_DIR"] = "0"
 import ray
 from ray import tune
 from ray.tune import CLIReporter
@@ -81,11 +82,11 @@ def train_with_ray(config, hparams_file, run_opts, overrides):
         opt_class=hparams["opt_class"],
         hparams=hparams,
         run_opts=run_opts,
-        checkpointer=hparams["checkpointer"],
+        checkpointer=hparams["checkpointer"]
     )
 
     train_sets = [datasets[f"train_{i}"] for i in range(hparams["num_fold"])]
-    valid_sets = [datasets[f"valid_{i}"] for i in range(hparams["num_fold"])]
+    valid_sets = [datasets[f"val_{i}"] for i in range(hparams["num_fold"])]
 
     brains.fit(
         epoch_counter=brains.hparams.epoch_counter,

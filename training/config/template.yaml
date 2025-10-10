@@ -7,6 +7,7 @@ model_name: wavrx
 data_folder: ./data/
 dataset: c9s_t1
 rir_folder: !ref <data_folder>
+device: "cpu"
 
 # ----------------------------------
 # DYNAMIC SCRIPT CONFIGURATION (Generic)
@@ -21,7 +22,7 @@ prepare_data_fn: prepare_data
 dataio_prep_fn: dataio_prep
 
 # Key used in the SpeechBrain batch object for the label
-label_key: label
+label_key: label_encoded
 
 # ----------------------------------
 # DATA PATHS AND PREPARATION
@@ -129,10 +130,11 @@ hpopt_mode: ray  # Set to 'ray' to enable, null to disable
 
 # Ray Tune specific configuration
 ray_tune_config:
-  num_samples: 20  # Number of trial runs
+  num_samples: 1  # Number of trial runs
   resources_per_trial:
-    cpu: 2
-    gpu: 1
+    cpu: 1
+    gpu: 0
+
 
 # Define hyperparameter search space
 # This is optional - if not provided, defaults will be used

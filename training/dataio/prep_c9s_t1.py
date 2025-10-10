@@ -169,6 +169,7 @@ def dataio_prep(hparams):
     # Define datasets.
     datasets = {}
     for dataset in data_dict:
+
         datasets[dataset] = sb.dataio.dataset.DynamicItemDataset(
             data=data_dict[dataset],
             dynamic_items=[audio_pipeline, label_pipeline],

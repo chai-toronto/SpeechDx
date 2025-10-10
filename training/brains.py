@@ -17,8 +17,9 @@ class Brains:
                 manager=self,
                 **kwargs
             ))
+        self.hparams = self.brains[0].hparams
         self.stats = []  # Contains one epoch stat of brains
-        self.hparams = kwargs.get("hparams")
+
 
     def __len__(self):
         return len(self.brains)
@@ -44,6 +45,7 @@ class Brains:
         train_sets = kwargs.pop("train_sets")
         valid_sets = kwargs.pop("valid_sets")
         for brain, train_set, valid_set in zip(self.brains, train_sets, valid_sets):
+            print(f"DATA TYPE DEBUG: {type(train_set)}")
             brain.fit(train_set=train_set,
                       valid_set=valid_set,
                       **kwargs)
@@ -51,7 +53,7 @@ class Brains:
 
 class DiagnosticsCVBrain(DiagnosticsBrain):
     def __init__(self, manager, **kwargs):
-        super(DiagnosticsCVBrain, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.manager = manager
 
     def on_stage_end(self, stage, stage_loss, epoch=None):

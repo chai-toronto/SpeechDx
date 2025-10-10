@@ -7,6 +7,9 @@ import speechbrain as sb
 class DiagnosticsBrain(sb.Brain):
     """Class that manages the training loop for a generic diagnostics task."""
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
     def compute_forward(self, batch, stage):
         """Runs all the computation that transforms the input into the
         output probabilities over the N classes.
