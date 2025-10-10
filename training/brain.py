@@ -55,8 +55,8 @@ class DiagnosticsBrain(sb.Brain):
         _, lens = batch.signal
 
         # Dynamically retrieve the label using the 'label_key' from hparams
-        label_key = self.hparams.get("label_key", "label_encoded")
-        lab, _ = getattr(batch, label_key)
+        label_key = getattr(self.hparams, "label_key", "label_encoded")
+        lab = getattr(batch, label_key)
         lab = lab.to(self.device)
 
         # Concatenate labels (due to data augmentation)
@@ -66,13 +66,16 @@ class DiagnosticsBrain(sb.Brain):
 
         # Compute the cost function: BCE is assumed for binary classification
         # but pos_weight is used for imbalance handling.
-        weight = torch.tensor([self.hparams.get("positive_class_weight", 1.0)]).to(self.device)
+        weight = torch.tensor([getattr(self.hparams, "positive_class_weight", 1.0)]).to(self.device)
         loss = sb.nnet.losses.bce_loss(predictions, lab, pos_weight=weight)
 
         # Append this batch of losses to the loss metric
         self.loss_metric.append(
-            batch.id, predictions, lab, lens, reduction="batch"
+            batch.id, predictions, lab, reduction="batch"
         )
+        # self.loss_metric.append(
+        #     batch.id, predictions, lab, lens, reduction="batch"
+        # )
 
         # Compute classification error at test time
         if stage != sb.Stage.TRAIN:

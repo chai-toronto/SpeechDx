@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from speechbrain.lobes.models.huggingface_wav2vec import HuggingFaceWav2Vec2
+
 from transformers import AutoModel, AutoProcessor
 from transformers import AutoFeatureExtractor, WavLMModel
 from speechbrain.lobes.models.ECAPA_TDNN import AttentiveStatisticsPooling

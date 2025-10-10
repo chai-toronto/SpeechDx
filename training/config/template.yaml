@@ -3,11 +3,11 @@ random_seed: 2025
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
 task: c9s_t1
-model_name: wavrx
+model_name: probe
 data_folder: ./data/
 dataset: c9s_t1
 rir_folder: !ref <data_folder>
-device: "cpu"
+
 
 # ----------------------------------
 # DYNAMIC SCRIPT CONFIGURATION (Generic)
@@ -54,20 +54,25 @@ num_fold: 5 # works from 2 to num. subjects. To be implemented: 0 -> normal spli
 # MODEL DEFINITION
 # ----------------------------------
 # model hyper-parameters
-dp: 0.25
-num_fc_neurons: 768
-model: !new:model.wavrx.WavRx
-  ssl_encoder_source: "microsoft/wavlm-base-plus"
-  num_ssl_feat: 768
-  num_fc_neurons: !ref <num_fc_neurons>
-  num_classes: 1
+
+#dp: 0.25
+#num_fc_neurons: 768
+#model: !new:model.wavrx.WavRx
+#  ssl_encoder_source: "microsoft/wavlm-base-plus"
+#  num_ssl_feat: 768
+#  num_fc_neurons: !ref <num_fc_neurons>
+#  num_classes: 1
+#  freeze_encoder: True
+#  pooling_1: 'atn'
+#  pooling_2: 'atn'
+#  dp: !ref <dp>
+#  sample_rate: 50
+#  win_length: 256
+#  hop_length: 64
+model: !new:model.w2v2.Wav2Vec2
+  ssl_encoder_source: "facebook/wav2vec2-base"
+  num_labels: 1
   freeze_encoder: True
-  pooling_1: 'atn'
-  pooling_2: 'atn'
-  dp: !ref <dp>
-  sample_rate: 50
-  win_length: 256
-  hop_length: 64
 
 # modules (for nested modules)
 modules:
@@ -98,7 +103,6 @@ val_dataloader_options:
   batch_size: !ref <batch_size>
   drop_last: True
   num_workers: 4
-
 
 test_dataloader_options:
   batch_size: !ref <batch_size>
@@ -133,7 +137,7 @@ ray_tune_config:
   num_samples: 1  # Number of trial runs
   resources_per_trial:
     cpu: 1
-    gpu: 0
+    gpu: 1
 
 
 # Define hyperparameter search space
@@ -143,17 +147,9 @@ hpopt_config:
     type: "!tune.loguniform"
     values: [0.00001, 0.01]
 
-  dp:  # dropout
-    type: "!tune.uniform"
-    values: [0.1, 0.5]
-
-  num_fc_neurons:
-    type: "!tune.choice"
-    values: [512, 768, 1024]
-
   batch_size:
     type: "!tune.choice"
-    values: [8, 16, 32]
+    values: [2]
 
 # Learning rate scheduler
 lr_annealing: !new:speechbrain.nnet.schedulers.LinearScheduler

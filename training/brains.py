@@ -36,7 +36,7 @@ class Brains:
 
             # Report results to HP tuner
             # This will use Ray Tune's reporter when hpopt_mode='ray'
-            tune.report(**aggregated_stat)
+            tune.report(aggregated_stat)
 
             # Reset for next epoch
             self.stats = []
@@ -45,7 +45,6 @@ class Brains:
         train_sets = kwargs.pop("train_sets")
         valid_sets = kwargs.pop("valid_sets")
         for brain, train_set, valid_set in zip(self.brains, train_sets, valid_sets):
-            print(f"DATA TYPE DEBUG: {type(train_set)}")
             brain.fit(train_set=train_set,
                       valid_set=valid_set,
                       **kwargs)
