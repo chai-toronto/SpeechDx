@@ -1,9 +1,10 @@
-File: config/template.yaml
+File: config/w2v2.yaml
 random_seed: 2025
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
 task: c9s_t1
-model_name: probe
+model_name: w2v2_mean
+
 data_folder: ./data/
 dataset: c9s_t1
 rir_folder: !ref <data_folder>
@@ -31,9 +32,10 @@ label_key: label_encoded
 wav_folder: !ref <data_folder>/<dataset>/processed/audio
 audio_archive_path: !ref <data_folder>/<dataset>/raw/YOUR_ARCHIVE.zip # change this to your own path
 metadata_path: !ref <data_folder>/<dataset>/processed/<dataset>.csv
+raw_label_key: label
 
 # Output folder structure
-output_folder: !ref ./exps/<task>/brain-logs/
+output_folder: !ref ./exps/<task>/<model_name>/brain-logs/
 save_folder: !ref <output_folder>/save
 train_log: !ref <output_folder>/train_log.txt
 
@@ -57,22 +59,28 @@ num_fold: 5 # works from 2 to num. subjects. To be implemented: 0 -> normal spli
 encoder: !new:model.w2v2.Wav2Vec2
   ssl_encoder_source: "facebook/wav2vec2-large-960h-lv60-self"
   freeze_encoder: True
-  output_hidden_states: True
+  output_hidden_states: False
   sample_rate: !ref <sample_rate>
 
 feature_dim: 1024
 
-t_pool: !new:model.pool.AttentiveTemporalPoolLite
-  input_dim: !ref <feature_dim>
+#t_pool: !new:model.pool.AttentiveTemporalPoolLite
+#  input_dim: !ref <feature_dim>
+#
+#l_pool: !new:model.pool.LayerWeightedAvgPool
+#  num_layers: 25
+#  layer_dim: 1
+#
+#probe: !new:model.probe.LayerTemporalProbe
+#  input_dim: !ref <feature_dim>
+#  num_labels: !ref <n_classes>
+#  layer_pooler: !ref <l_pool>
+#  temp_pooler: !ref <t_pool>
 
-l_pool: !new:model.pool.LayerWeightedAvgPool
-  num_layers: 25
-  layer_dim: 1
-
-probe: !new:model.probe.LayerTemporalProbe
+t_pool: !new:model.pool.AvgTPool
+probe: !new:model.probe.TemporalProbe
   input_dim: !ref <feature_dim>
   num_labels: !ref <n_classes>
-  layer_pooler: !ref <l_pool>
   temp_pooler: !ref <t_pool>
 
 model: !new:model.probe.Model
@@ -84,13 +92,13 @@ modules:
   model: !ref <model>
 
 # Additional model-related parameters
-clamp_length: 320000 # TODO: change this to chunk
+max_length: 320000 # max length in samples (20s)
 
 # ----------------------------------
 # TRAINING AND METRICS
 # ----------------------------------
 number_of_epochs: 20
-batch_size: 4
+batch_size: 16
 lr: 0.001
 l2: 0.0001
 n_classes: 1
@@ -100,33 +108,33 @@ sample_rate: 16000
 train_dataloader_options:
   batch_size: !ref <batch_size>
   drop_last: True
-  num_workers: 0
-  shuffle: True #TODO: make sure default is off
+  num_workers: 4
+  shuffle: True
 
 val_dataloader_options:
   batch_size: !ref <batch_size>
   drop_last: True
-  num_workers: 0
+  num_workers: 4
 
 test_dataloader_options:
   batch_size: !ref <batch_size>
   drop_last: True
-  num_workers: 0
-
+  num_workers: 4
 
 # Logger
 train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
   save_file: !ref <train_log>
 
 # Error/Metric calculation
+progressbar: True
 error_stats: !name:speechbrain.utils.metric_stats.BinaryMetricStats
 
 # Epoch management
-epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounterWithStopper
+epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
   limit: !ref <number_of_epochs>
-  limit_to_stop: 3
-  limit_warmup: 2
-  direction: 'max'
+#  limit_to_stop: 3
+#  limit_warmup: 2
+#  direction: !ref <optim_mode>
 
 # Optimizer
 opt_class: !name:torch.optim.AdamW
@@ -145,10 +153,10 @@ reduction_factor: 2  # Factor by which to reduce trials at each rung
 
 # Ray Tune specific configuration
 ray_tune_config:
-  num_samples: 1  # Number of trial runs
+  num_samples: 10  # Number of trial runs
   resources_per_trial:
-    cpu: 1
-    gpu: 0
+    cpu: 4
+    gpu: 1
 
 
 # Define hyperparameter search space
@@ -156,15 +164,15 @@ ray_tune_config:
 hpopt_config:
   lr:
     type: "!tune.loguniform"
-    values: [1e-4, 1e-1]
+    values: [1e-5, 1e-3]
 
   number_of_epochs:
     type: "!tune.randint"
-    values: [100, 1000]
+    values: [10, 100]
 
   l2:
     type: "!tune.loguniform"
-    values: [1e-5, 1e-2]
+    values: [1e-5, 1e-3]
 
 
 # Checkpointing

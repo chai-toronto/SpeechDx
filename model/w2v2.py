@@ -12,6 +12,10 @@ class Wav2Vec2(nn.Module):
 
         if freeze_encoder:
             self.model.requires_grad = False
+
+        for param in self.model.parameters():
+            param.requires_grad = not freeze_encoder
+
         self.freeze_encoder = freeze_encoder
 
         self.output_hidden_states = output_hidden_states
@@ -22,7 +26,7 @@ class Wav2Vec2(nn.Module):
     def forward(self, x):
         inputs = self.processor(x.cpu().numpy().tolist(),
                                 return_tensors="pt",
-                                sample_rate=self.sample_rate)
+                                sampling_rate=self.sample_rate)
 
         inputs = {k: v.to(x.device) for k, v in inputs.items()}
 

@@ -41,9 +41,9 @@ class TemporalProbe(LinearProbe):
     """
     A probe with a temporal pooling layer followed by a linear layer.
     """
-    def __init__(self, input_dim, num_labels, pooler, bias=True):
+    def __init__(self, input_dim, num_labels, temp_pooler, bias=True):
         super().__init__(input_dim, num_labels, bias=bias)
-        self.pooler = pooler
+        self.pooler = temp_pooler
 
     def forward(self, x, lengths=None):
         """

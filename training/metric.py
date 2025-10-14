@@ -26,6 +26,8 @@ class Record:
 
 def roc_auc_score_rev(pred, tgt):
     """Flipping the signatures."""
+    pred = pred.cpu().numpy()
+    tgt = tgt.cpu().numpy()
     return roc_auc_score(tgt, pred)
 
 def accuracy(pred: Tensor, tgt: Tensor) -> float:
