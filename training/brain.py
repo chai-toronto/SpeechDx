@@ -1,7 +1,7 @@
-
-
 import torch
 import speechbrain as sb
+
+from training.metric import Record, roc_auc_score_rev, accuracy
 
 
 class DiagnosticsBrain(sb.Brain):
@@ -15,8 +15,8 @@ class DiagnosticsBrain(sb.Brain):
         output probabilities over the N classes.
         """
         batch = batch.to(self.device)
-        wavs, _ = self.augment_input(batch.signal, stage)
-        predictions = self.modules.model(wavs)
+        wavs, lens = self.augment_input(batch.signal, stage)
+        predictions = self.modules.model(wavs, lens)
         return predictions
 
     def augment_input(self, wavs, stage):
@@ -52,7 +52,6 @@ class DiagnosticsBrain(sb.Brain):
         loss : torch.Tensor
             A one-element tensor used for backpropagating the gradient.
         """
-        _, lens = batch.signal
 
         # Dynamically retrieve the label using the 'label_key' from hparams
         label_key = getattr(self.hparams, "label_key", "label_encoded")
@@ -62,7 +61,7 @@ class DiagnosticsBrain(sb.Brain):
         # Concatenate labels (due to data augmentation)
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "env_corrupt"):
             lab = torch.cat([lab, lab], dim=0)
-            lens = torch.cat([lens, lens])
+
 
         # Compute the cost function: BCE is assumed for binary classification
         # but pos_weight is used for imbalance handling.
@@ -73,13 +72,11 @@ class DiagnosticsBrain(sb.Brain):
         self.loss_metric.append(
             batch.id, predictions, lab, reduction="batch"
         )
-        # self.loss_metric.append(
-        #     batch.id, predictions, lab, lens, reduction="batch"
-        # )
 
         # Compute classification error at test time
         if stage != sb.Stage.TRAIN:
             self.error_metrics.append(batch.id, predictions, lab)
+            self.record.add(predictions, lab)
 
         return loss
 
@@ -90,6 +87,7 @@ class DiagnosticsBrain(sb.Brain):
         )
 
         if stage != sb.Stage.TRAIN:
+            self.record = Record()
             self.error_metrics = self.hparams.error_stats()
 
     def on_stage_end(self, stage, stage_loss, epoch=None):
@@ -98,31 +96,31 @@ class DiagnosticsBrain(sb.Brain):
         # Store the train loss until the validation stage.
         if stage == sb.Stage.TRAIN:
             self.train_loss = stage_loss
+            self.checkpointer.delete_checkpoints(num_to_keep=0)
+            self.checkpointer.save_checkpoint(name='last_train')
             return
 
-        # Summarize the statistics from the stage for record-keeping.
-        metrics = self.error_metrics.summarize()
-        stats = {
-            "loss": stage_loss,
-            "precision": metrics["precision"],
-            "recall": metrics["recall"],
-            "F1": metrics["F-score"],
-        }
+        stats = self.calc_epoch_metrics(stage_loss)
+
+        optim_metric = getattr(self.hparams, "optim_metric", "F1")
+        optim_mode = getattr(self.hparams, "optim_mode", "max")
+        max_keys, min_keys = [], []
+        if optim_mode == "max":
+            max_keys.append(optim_metric)
+        else:
+            min_keys.append(optim_metric)
 
         # At the end of validation...
         if stage == sb.Stage.VALID:
-            old_lr, new_lr = self.hparams.lr_annealing(epoch)
-            sb.nnet.schedulers.update_learning_rate(self.optimizer, new_lr)
-
             # Log stats and save checkpoint
             self.hparams.train_logger.log_stats(
-                {"Epoch": epoch, "lr": old_lr},
+                {"Epoch": epoch},
                 train_stats={"loss": self.train_loss},
                 valid_stats=stats,
             )
 
             # Save the current checkpoint and delete previous checkpoints, based on F1
-            self.checkpointer.save_and_keep_only(meta=stats, max_keys=["F1"])
+            self.checkpointer.save_and_keep_only(meta=stats, max_keys=max_keys, min_keys=min_keys)
 
         # We also write statistics about test data to stdout and to the logfile.
         if stage == sb.Stage.TEST:
@@ -130,5 +128,23 @@ class DiagnosticsBrain(sb.Brain):
                 {"Epoch loaded": self.hparams.epoch_counter.current},
                 test_stats=stats,
             )
+
+    def calc_epoch_metrics(self, stage_loss):
+        """ Call this after the epoch only"""
+        # Summarize the statistics from the stage for record-keeping.
+        metrics = self.error_metrics.summarize()
+        preds, tgts = self.record.get_all()
+        stats = {
+            "roc": roc_auc_score_rev(preds, tgts),
+            "sens": metrics['TP'] / (metrics['TP'] + metrics['FN']),
+            "accuracy": accuracy(preds, tgts),
+            "loss": stage_loss,
+            "precision": metrics["precision"],
+            "recall": metrics["recall"],
+            "F1": metrics["F-score"],
+        }
+        self.record.clear()
+        return stats
+
 
 

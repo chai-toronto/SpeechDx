@@ -23,6 +23,10 @@ import os
 from functools import partial
 from pathlib import Path
 
+from ray.tune.schedulers import ASHAScheduler
+from ray.tune.search.optuna import OptunaSearch
+from ray.tune.search.searcher import ConcurrencyLimiter
+
 os.environ["RAY_CHDIR_TO_TRIAL_DIR"] = "0"
 import ray
 from ray import tune
@@ -30,11 +34,8 @@ from ray.tune import CLIReporter
 
 import speechbrain as sb
 from hyperpyyaml import load_hyperpyyaml
-
-
 from training.brain import DiagnosticsBrain
 from training.brains import Brains
-
 
 def train_with_ray(config, hparams_file, run_opts, overrides):
     """Ray Tune trainable function that wraps the SpeechBrain training loop.
@@ -45,10 +46,10 @@ def train_with_ray(config, hparams_file, run_opts, overrides):
         run_opts: SpeechBrain run options
         overrides: Command line overrides
     """
-
     # Update overrides with Ray Tune config
     ray_overrides = overrides.copy() if overrides else {}
     for key, value in config.items():
+        print(f"Ray Tune override: {key} = {value}")
         ray_overrides[key] = value
 
     # Load hyperparameters with Ray Tune config overrides
@@ -89,11 +90,11 @@ def train_with_ray(config, hparams_file, run_opts, overrides):
     valid_sets = [datasets[f"val_{i}"] for i in range(hparams["num_fold"])]
 
     brains.fit(
-        epoch_counter=brains.hparams.epoch_counter,
         train_sets=train_sets,
         valid_sets=valid_sets,
         train_loader_kwargs=hparams["train_dataloader_options"],
         valid_loader_kwargs=hparams["val_dataloader_options"],
+        progressbar=hparams["progressbar"]
     )
 
 
@@ -176,14 +177,18 @@ if __name__ == "__main__":
                 "manifest_train_path": hparams["train_annotation"],
                 "manifest_val_path": hparams["val_annotation"],
                 "manifest_test_path": hparams["test_annotation"],
-                "ratio": hparams["ratio"],
+                "ratio": hparams.get("ratio", None),
                 "random_seed": hparams["random_seed"],
-                "label_key": hparams["label_key"],
+                "raw_label_key": hparams["raw_label_key"],
                 "new_test": hparams["new_test"],
                 "num_fold": hparams["num_fold"],
+                "max_length": hparams.get("max_length", None)
             },
         )
 
+    optim_metric = hparams.get("optim_metric", "F1")
+    optim_mode = hparams.get("optim_mode", "max")
+    best_config = None
     # Check if hyperparameter optimization is enabled
     if hparams.get("hpopt_mode") == "ray":
         # Initialize Ray
@@ -204,8 +209,25 @@ if __name__ == "__main__":
 
         # Set up reporter
         reporter = CLIReporter(
-            metric_columns=["F1", "loss", "precision", "recall"],
+            metric_columns=["F1", "loss", "precision", "recall", "roc", "sens", "accuracy"],
             max_report_frequency=30,
+        )
+
+        optuna_search = OptunaSearch(
+            metric = optim_metric,
+            mode = optim_mode,
+        )
+
+        search_alg = ConcurrencyLimiter(
+            optuna_search,
+            max_concurrent=hparams.get("max_concurrent_trials", 4)
+        )
+
+        scheduler = ASHAScheduler(
+            metric=optim_metric,
+            mode=optim_mode,
+            grace_period=hparams.get("grace_period", 10),
+            reduction_factor=hparams.get("reduction_factor", 2),
         )
 
         # Run hyperparameter optimization
@@ -213,17 +235,16 @@ if __name__ == "__main__":
             trainable,
             config=search_space,
             num_samples=tune_config.get("num_samples", 10),
-            metric="F1",
-            mode="max",
             progress_reporter=reporter,
             storage_path=(Path(hparams["output_folder"]) / "ray_results").resolve(),
             name="hp_optimization",
-            stop={"training_iteration": hparams["number_of_epochs"]},
+            search_alg=search_alg,
+            scheduler=scheduler,
             resources_per_trial=tune_config.get("resources_per_trial", {"cpu": 1, "gpu": 1}),
         )
 
         # Print best hyperparameters
-        best_config = analysis.get_best_config(metric="F1", mode="max")
+        best_config = analysis.get_best_config(metric=optim_metric, mode=optim_mode)
         print(f"\nBest hyperparameters found: {best_config}")
 
         # Save best config
@@ -233,6 +254,52 @@ if __name__ == "__main__":
                 f.write(f"{key}: {value}\n")
 
         ray.shutdown()
+        # Final Training with best HP
 
-    else:
-        raise NotImplementedError
+    # Train final model
+    if best_config is not None:
+        # Update overrides with Ray Tune config
+        ray_overrides = overrides.copy() if overrides else {}
+        for key, value in best_config.items():
+            ray_overrides[key] = value
+
+        # Load hyperparameters with Ray Tune config overrides
+        with open(hparams_file) as fin:
+            hparams = load_hyperpyyaml(fin, ray_overrides)
+        overrides = ray_overrides
+
+    hparams["output_folder"] = os.path.join(hparams["output_folder"], 'final_model')
+
+    sb.create_experiment_directory(
+        experiment_directory=hparams["output_folder"],
+        hyperparams_to_save=hparams_file,
+        overrides=overrides,
+    )
+
+    # Seed for consistent final result
+    sb.utils.seed.seed_everything(hparams["random_seed"])
+    # Create dataset objects
+    dataio_prep_fn = getattr(data_io_module, hparams["dataio_prep_fn"])
+    datasets = dataio_prep_fn(hparams)
+
+    brain = DiagnosticsBrain(
+        modules=hparams["modules"],
+        opt_class=hparams["opt_class"],
+        hparams=hparams,
+        run_opts=run_opts,
+        checkpointer=hparams["checkpointer"]
+    )
+
+    brain.fit(
+        epoch_counter=hparams["epoch_counter"],
+        train_set=datasets["test_train"],
+        train_loader_kwargs=hparams["train_dataloader_options"],
+    )
+
+    brain.evaluate(
+        test_set=datasets["test_val"],
+        test_loader_kwargs=hparams["test_dataloader_options"]
+    )
+
+
+

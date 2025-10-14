@@ -1,5 +1,0 @@
-# hpopt.yaml
-number_of_epochs: 3
-limit_to_stop: 2
-ckpt_interval_minutes: 0
-trial_id: hpopt    # default value; will be replaced by real id from the wrapper

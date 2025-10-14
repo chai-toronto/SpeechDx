@@ -31,6 +31,7 @@ label_key: label_encoded
 wav_folder: !ref <data_folder>/<dataset>/processed/audio
 audio_archive_path: !ref <data_folder>/<dataset>/raw/YOUR_ARCHIVE.zip # change this to your own path
 metadata_path: !ref <data_folder>/<dataset>/processed/<dataset>.csv
+raw_label_key: label # column name in the csv file containing the label
 
 # Output folder structure
 output_folder: !ref ./exps/<task>/brain-logs/
@@ -43,8 +44,7 @@ val_annotation: !ref ./exps/<task>/manifest/valid.json
 test_annotation: !ref ./exps/<task>/manifest/test.json
 
 # Data preparation
-skip_prep: True
-ratio: [0.7, 0.1, 0.2] # Train/Valid/Test split ratio
+skip_prep: False
 new_test: False # Set False to use metadata's test split.
 
 # Cross Validation
@@ -55,26 +55,22 @@ num_fold: 5 # works from 2 to num. subjects. To be implemented: 0 -> normal spli
 # ----------------------------------
 # model hyper-parameters
 
-#model: !new:model.w2v2.Wav2Vec2
-#  ssl_encoder_source: "facebook/wav2vec2-base"
-#  num_labels: 1
-#  freeze_encoder: True
-
+model: !new:model.random.DummyWaveModel
+  num_classes: !ref <n_classes>
 # modules (for nested modules)
 modules:
   model: !ref <model>
 
 # Additional model-related parameters
-freeze_encoder: True
-clamp_length: 160000 # TODO: change this
+max_length: 320000 # max length in samples (20s)
 
 # ----------------------------------
 # TRAINING AND METRICS
 # ----------------------------------
 number_of_epochs: 20
 batch_size: 4
-lr_start: 0.001
-lr_final: 0.000001
+lr: 0.001
+l2: 0.0001
 n_classes: 1
 sample_rate: 16000
 
@@ -83,7 +79,7 @@ train_dataloader_options:
   batch_size: !ref <batch_size>
   drop_last: True
   num_workers: 0
-  shuffle: True #TODO: make sure default is off
+  shuffle: True
 
 val_dataloader_options:
   batch_size: !ref <batch_size>
@@ -95,11 +91,11 @@ test_dataloader_options:
   drop_last: True
   num_workers: 0
 
-
 # Logger
 train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
   save_file: !ref <train_log>
 
+progressbar: True
 # Error/Metric calculation
 error_stats: !name:speechbrain.utils.metric_stats.BinaryMetricStats
 
@@ -108,19 +104,26 @@ epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounterWithStopper
   limit: !ref <number_of_epochs>
   limit_to_stop: 3
   limit_warmup: 2
-  direction: 'max'
+  direction: !ref <optim_mode>
 
 # Optimizer
 opt_class: !name:torch.optim.AdamW
-  lr: !ref <lr_start>
+  lr: !ref <lr>
+  weight_decay: !ref <l2>
+
 
 # HP Optimizer
 # Enable Ray Tune hyperparameter optimization
 hpopt_mode: ray  # Set to 'ray' to enable, null to disable
+optim_metric: 'F1'
+optim_mode: 'max'  # 'min' or 'max' depending on the metric
+max_concurrent_trials: 1  # Number of concurrent trials to run
+grace_period: 5  # Number of epochs to wait before considering early stopping
+reduction_factor: 2  # Factor by which to reduce trials at each rung
 
 # Ray Tune specific configuration
 ray_tune_config:
-  num_samples: 1  # Number of trial runs
+  num_samples: 2  # Number of trial runs
   resources_per_trial:
     cpu: 1
     gpu: 0
@@ -129,19 +132,18 @@ ray_tune_config:
 # Define hyperparameter search space
 # This is optional - if not provided, defaults will be used
 hpopt_config:
-  lr_start:
+  lr:
     type: "!tune.loguniform"
-    values: [0.00001, 0.01]
+    values: [1e-4, 1e-1]
 
-  batch_size:
-    type: "!tune.choice"
-    values: [2]
+  number_of_epochs:
+    type: "!tune.randint"
+    values: [1, 10]
 
-# Learning rate scheduler
-lr_annealing: !new:speechbrain.nnet.schedulers.LinearScheduler
-  initial_value: !ref <lr_start>
-  final_value: !ref <lr_final>
-  epoch_count: !ref <number_of_epochs>
+  l2:
+    type: "!tune.loguniform"
+    values: [1e-5, 1e-2]
+
 
 # Checkpointing
 ckpt_interval_minutes: 15 # save checkpoint every N min

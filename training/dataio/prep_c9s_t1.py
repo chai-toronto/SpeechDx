@@ -10,6 +10,7 @@ To adapt to a new dataset, copy this file and modify:
 3. The 'output_keys' in dataio_prep (if the label key changes).
 """
 import json
+import random
 from pathlib import Path
 
 import torchaudio
@@ -31,9 +32,10 @@ def prepare_data(
         manifest_test_path,
         ratio,
         random_seed,
-        label_key,
+        raw_label_key,
         new_test,
-        num_fold
+        num_fold,
+        max_length=1e10
 ):
     """
     This function is dataset-specific.
@@ -62,6 +64,7 @@ def prepare_data(
 
         # Resolve path to be absolute
         df["path"] = Path(wav_folder) / df["path"].astype(str)
+        df["max_length"] = max_length
 
         # split into test and non-test
         if new_test:
@@ -73,7 +76,7 @@ def prepare_data(
         # split train data into folds, each goes by manifest id
         folds = stratified_group_kfold_df(df_nontest,
                                           'uid',
-                                          label_key,
+                                          raw_label_key,
                                           "Participant_ID",
                                           random_seed=random_seed,
                                           n_splits=num_fold)
@@ -117,15 +120,15 @@ def dataio_prep(hparams):
     label_encoder = sb.dataio.encoder.CategoricalEncoder()
 
     # Define audio pipeline
-    @sb.utils.data_pipeline.takes("path")
+    @sb.utils.data_pipeline.takes("path", "max_length")
     @sb.utils.data_pipeline.provides("signal", "duration")
-    def audio_pipeline(file_path):
+    def audio_pipeline(file_path, max_length):
         """Load the signal, resample, and pass it and its length."""
 
         signal, sr_og = torchaudio.load(file_path)
         # handle multi-channel
         if signal.shape[0] > 1:
-            signal = torch.mean(signal, axis=0)
+            signal = signal.mean(dim=0, keepdim=True)
 
         if sr_og != 16000:
             signal = F.resample(signal, sr_og, new_freq=16000,
@@ -134,9 +137,15 @@ def dataio_prep(hparams):
                                 resampling_method="sinc_interp_kaiser",
                                 beta=14.769656459379492
                                 )
+
         signal = signal.squeeze()
         duration = len(signal)
+        if duration > max_length: # randomly crop if too long
+            start = random.randint(0, duration - max_length)
+            signal = signal[start:start + max_length]
+            duration = max_length
         return signal, duration
+
 
     # Define label pipeline
     @sb.utils.data_pipeline.takes("label")
@@ -169,7 +178,6 @@ def dataio_prep(hparams):
     # Define datasets.
     datasets = {}
     for dataset in data_dict:
-
         datasets[dataset] = sb.dataio.dataset.DynamicItemDataset(
             data=data_dict[dataset],
             dynamic_items=[audio_pipeline, label_pipeline],

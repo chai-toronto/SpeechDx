@@ -44,7 +44,6 @@ test_annotation: !ref ./exps/<task>/manifest/test.json
 
 # Data preparation
 skip_prep: True
-ratio: [0.7, 0.1, 0.2] # Train/Valid/Test split ratio
 new_test: False # Set False to use metadata's test split.
 
 # Cross Validation
@@ -55,26 +54,45 @@ num_fold: 5 # works from 2 to num. subjects. To be implemented: 0 -> normal spli
 # ----------------------------------
 # model hyper-parameters
 
-#model: !new:model.w2v2.Wav2Vec2
-#  ssl_encoder_source: "facebook/wav2vec2-base"
-#  num_labels: 1
-#  freeze_encoder: True
+encoder: !new:model.w2v2.Wav2Vec2
+  ssl_encoder_source: "facebook/wav2vec2-large-960h-lv60-self"
+  freeze_encoder: True
+  output_hidden_states: True
+  sample_rate: !ref <sample_rate>
+
+feature_dim: 1024
+
+t_pool: !new:model.pool.AttentiveTemporalPoolLite
+  input_dim: !ref <feature_dim>
+
+l_pool: !new:model.pool.LayerWeightedAvgPool
+  num_layers: 25
+  layer_dim: 1
+
+probe: !new:model.probe.LayerTemporalProbe
+  input_dim: !ref <feature_dim>
+  num_labels: !ref <n_classes>
+  layer_pooler: !ref <l_pool>
+  temp_pooler: !ref <t_pool>
+
+model: !new:model.probe.Model
+  encoder: !ref <encoder>
+  probe: !ref <probe>
 
 # modules (for nested modules)
 modules:
   model: !ref <model>
 
 # Additional model-related parameters
-freeze_encoder: True
-clamp_length: 160000 # TODO: change this
+clamp_length: 320000 # TODO: change this to chunk
 
 # ----------------------------------
 # TRAINING AND METRICS
 # ----------------------------------
 number_of_epochs: 20
 batch_size: 4
-lr_start: 0.001
-lr_final: 0.000001
+lr: 0.001
+l2: 0.0001
 n_classes: 1
 sample_rate: 16000
 
@@ -112,11 +130,18 @@ epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounterWithStopper
 
 # Optimizer
 opt_class: !name:torch.optim.AdamW
-  lr: !ref <lr_start>
+  lr: !ref <lr>
+  weight_decay: !ref <l2>
+
 
 # HP Optimizer
 # Enable Ray Tune hyperparameter optimization
 hpopt_mode: ray  # Set to 'ray' to enable, null to disable
+optim_metric: 'F1'
+optim_mode: 'max'  # 'min' or 'max' depending on the metric
+max_concurrent_trials: 1  # Number of concurrent trials to run
+grace_period: 5  # Number of epochs to wait before considering early stopping
+reduction_factor: 2  # Factor by which to reduce trials at each rung
 
 # Ray Tune specific configuration
 ray_tune_config:
@@ -129,19 +154,18 @@ ray_tune_config:
 # Define hyperparameter search space
 # This is optional - if not provided, defaults will be used
 hpopt_config:
-  lr_start:
+  lr:
     type: "!tune.loguniform"
-    values: [0.00001, 0.01]
+    values: [1e-4, 1e-1]
 
-  batch_size:
-    type: "!tune.choice"
-    values: [2]
+  number_of_epochs:
+    type: "!tune.randint"
+    values: [100, 1000]
 
-# Learning rate scheduler
-lr_annealing: !new:speechbrain.nnet.schedulers.LinearScheduler
-  initial_value: !ref <lr_start>
-  final_value: !ref <lr_final>
-  epoch_count: !ref <number_of_epochs>
+  l2:
+    type: "!tune.loguniform"
+    values: [1e-5, 1e-2]
+
 
 # Checkpointing
 ckpt_interval_minutes: 15 # save checkpoint every N min

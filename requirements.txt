@@ -3,8 +3,11 @@ torch
 torchaudio
 hyperpyyaml
 pandas
-numpy==1.26.4
+numpy
 scikit-learn
 pyarrow
 ray
 transformers
+torchcodec
+optuna
+tensorboard
