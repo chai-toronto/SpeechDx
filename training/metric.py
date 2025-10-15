@@ -31,7 +31,8 @@ def roc_auc_score_rev(pred, tgt):
     return roc_auc_score(tgt, pred)
 
 def accuracy(pred: Tensor, tgt: Tensor) -> float:
-    correct = (tgt == pred).sum()
+    pred_label = (pred >= 0.5).long()
+    correct = (tgt == pred_label).sum()
     total = len(tgt)
     acc = correct/total
     return acc.item()

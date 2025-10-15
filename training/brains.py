@@ -39,6 +39,7 @@ class Brains:
                 aggregated_stat[key] = [stat[key] for stat in self.stats]
                 aggregated_stat[key] = np.mean(aggregated_stat[key])
 
+            print(f"Aggregated stats: {aggregated_stat}")
             # Report results to HP tuner
             # This will use Ray Tune's reporter when hpopt_mode='ray'
             tune.report(aggregated_stat)
