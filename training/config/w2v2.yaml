@@ -68,7 +68,7 @@ feature_dim: 1024
 #  input_dim: !ref <feature_dim>
 #
 #l_pool: !new:model.pool.LayerWeightedAvgPool
-#  num_layers: 25
+#  num_layers: 24
 #  layer_dim: 1
 #
 #probe: !new:model.probe.LayerTemporalProbe
@@ -126,7 +126,7 @@ train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
   save_file: !ref <train_log>
 
 # Error/Metric calculation
-progressbar: True
+progressbar: False
 error_stats: !name:speechbrain.utils.metric_stats.BinaryMetricStats
 
 # Epoch management

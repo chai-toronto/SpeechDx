@@ -76,7 +76,6 @@ class AttentiveTemporalPool(nn.Module):
         lengths = (lengths * T_max).long()  # Convert into absolute lengths
 
         # Build mask: True for real tokens
-
         t = torch.arange(T_max).unsqueeze(0)                   # (1, T_max)
         mask = t < lengths.unsqueeze(1)                        # (B, T_max)
 

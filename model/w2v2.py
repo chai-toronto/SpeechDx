@@ -1,8 +1,6 @@
 import torch
 import torch.nn as nn
 from transformers import Wav2Vec2Processor, Wav2Vec2Model
-from model.pool import AttentiveTemporalPool
-
 
 class Wav2Vec2(nn.Module):
     def __init__(self, ssl_encoder_source, freeze_encoder, output_hidden_states, sample_rate, *args, **kwargs):
@@ -34,7 +32,7 @@ class Wav2Vec2(nn.Module):
             output = self.model(**inputs)
 
         if self.output_hidden_states:
-            hidden_states = output.hidden_states  # tuple of (B, T, D), including input embeddings
+            hidden_states = output.hidden_states[1:]  # tuple of (B, T, D), including input embeddings
             output = torch.stack(hidden_states, dim=1)  # (B, L, T, D)
         else:
             output = output.last_hidden_state  # (B, T, D)
