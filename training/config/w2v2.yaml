@@ -132,9 +132,6 @@ error_stats: !name:speechbrain.utils.metric_stats.BinaryMetricStats
 # Epoch management
 epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
   limit: !ref <number_of_epochs>
-#  limit_to_stop: 3
-#  limit_warmup: 2
-#  direction: !ref <optim_mode>
 
 # Optimizer
 opt_class: !name:torch.optim.AdamW
