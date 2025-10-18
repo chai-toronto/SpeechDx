@@ -2,12 +2,12 @@ File: config/main.yaml
 random_seed: 2025
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
-model_name: w2v2_mean
+model_name: wavlm_LTProbe
 data_folder: ./data/
 #----------------------------------
 # Most of the knobs you should change
 data_params: !include:tasks/c9s_t1.yaml
-encoder_params: !include:encoders/w2v2.yaml
+encoder_params: !include:encoders/wavlm.yaml
 probe_params: !include:probes/LTProbe.yaml
   feature_dim: !ref <encoder_params[feature_dim]>
   num_labels: 1

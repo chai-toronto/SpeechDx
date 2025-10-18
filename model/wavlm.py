@@ -10,7 +10,7 @@ class WavLM(nn.Module):
         for param in self.feature_extractor.parameters():
             param.requires_grad = not freeze_encoder
         if freeze_encoder:
-            self.model.requires_grad = False
+            self.feature_extractor.requires_grad = False
         self.freeze_encoder = freeze_encoder
         self.output_hidden_states = output_hidden_states
         self.sample_rate = sample_rate

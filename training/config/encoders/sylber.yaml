@@ -1,0 +1,9 @@
+sample_rate: 16000
+feature_dim: 768
+max_length: 1e10
+num_layers: 9
+layer_dim: 1
+
+encoder: !new:model.Sylber.Sylber
+  freeze_encoder: True
+  output_hidden_states: True

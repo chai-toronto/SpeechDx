@@ -12,7 +12,7 @@ ray_tune_config:
   num_samples: 10  # Number of trial runs
   resources_per_trial:
     cpu: 4
-    gpu: 1
+    gpu: 0
 
 
 # Define hyperparameter search space
