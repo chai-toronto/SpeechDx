@@ -8,6 +8,9 @@ from torch.onnx.ops import attention
 from transformers import HubertModel, HubertConfig, BertModel, BertConfig
 import torch.nn as nn
 
+from model.utils import masked_normalize
+
+
 class Sylber(nn.Module):
     def __init__(self,
                  model_ckpt="sylber",
@@ -59,14 +62,14 @@ class Sylber(nn.Module):
           output: (B, T, D) or (B, L, T, D)
         """
         B, T = x.shape
+
         mask = None
         if lengths is not None:
             assert x.size(0) == lengths.size(0)
             # Convert lengths to absolute
             lengths = (lengths * T).long()
-
             # Build mask: 1 for valid, 0 for padded
-            t = torch.arange(T).unsqueeze(0) # (1, T)
+            t = torch.arange(T, device=x.device).unsqueeze(0) # (1, T)
             mask = (t < lengths.unsqueeze(1)) * 1 # (B, T)
 
             # Normalize
@@ -127,26 +130,6 @@ class Sylber(nn.Module):
         return torch.stack(layer_batch_features, dim=1)
 
 
-def masked_normalize(x, mask, eps=1e-8):
-    """
-    Normalize x (B, D) along the batch axis using only valid rows indicated by mask.
-
-    mask: (B,) or (B, 1) tensor of bools or 0/1s
-    returns normalized x (same shape)
-    """
-    if mask.dtype != torch.bool:
-        mask = mask.bool()
-    mask_f = mask.float().unsqueeze(-1)  # (B, 1)
-
-    # compute masked mean and std
-    valid_sum = mask_f.sum(dim=0)        # (B, 1) summed across batch
-    mean = (x * mask_f).sum(dim=0) / valid_sum.clamp_min(1.0)
-    var = ((x - mean) ** 2 * mask_f).sum(dim=0) / valid_sum.clamp_min(1.0)
-    std = var.sqrt().clamp_min(eps)
-
-    # normalize
-    x_norm = (x - mean) / std
-    return x_norm
 
 
 

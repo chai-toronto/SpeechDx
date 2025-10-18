@@ -17,7 +17,7 @@ class Model(nn.Module):
         Returns:
           logits: (B, num_labels)
         """
-        x = self.encoder(x)  # (B, T_max, D) or (B, L, T_max, D)
+        x = self.encoder(x, lengths=lengths)  # (B, T_max, D) or (B, L, T_max, D)
         return self.probe(x, lengths)
 
 class LinearProbe(nn.Module):
@@ -28,7 +28,7 @@ class LinearProbe(nn.Module):
         super().__init__()
         self.classifier = nn.Linear(input_dim, num_labels, bias=bias)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         """
         x: (B, D) matrix of batch x features
         Returns:

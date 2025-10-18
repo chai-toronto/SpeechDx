@@ -1,9 +1,9 @@
-File: config/w2v2.yaml
+File: config/sylber.yaml
 random_seed: 2025
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
 task: c9s_t1
-model_name: w2v2_mean
+model_name: sylber_LTP
 
 data_folder: ./data/
 dataset: c9s_t1
@@ -56,32 +56,30 @@ num_fold: 5 # works from 2 to num. subjects. To be implemented: 0 -> normal spli
 # ----------------------------------
 # model hyper-parameters
 
-encoder: !new:model.w2v2.Wav2Vec2
-  ssl_encoder_source: "facebook/wav2vec2-large-960h-lv60-self"
+encoder: !new:model.Sylber.Sylber
   freeze_encoder: True
-  output_hidden_states: False
-  sample_rate: !ref <sample_rate>
+  output_hidden_states: True
 
-feature_dim: 1024
+feature_dim: 768
 
-#t_pool: !new:model.pool.AttentiveTemporalPoolLite
-#  input_dim: !ref <feature_dim>
-#
-#l_pool: !new:model.pool.LayerWeightedAvgPool
-#  num_layers: 24
-#  layer_dim: 1
-#
-#probe: !new:model.probe.LayerTemporalProbe
-#  input_dim: !ref <feature_dim>
-#  num_labels: !ref <n_classes>
-#  layer_pooler: !ref <l_pool>
-#  temp_pooler: !ref <t_pool>
+t_pool: !new:model.pool.AttentiveTemporalPoolLite
+  input_dim: !ref <feature_dim>
 
-t_pool: !new:model.pool.AvgTPool
-probe: !new:model.probe.TemporalProbe
+l_pool: !new:model.pool.LayerWeightedAvgPool
+  num_layers: 9
+  layer_dim: 1
+
+probe: !new:model.probe.LayerTemporalProbe
   input_dim: !ref <feature_dim>
   num_labels: !ref <n_classes>
+  layer_pooler: !ref <l_pool>
   temp_pooler: !ref <t_pool>
+
+#t_pool: !new:model.pool.AvgTPool
+#probe: !new:model.probe.TemporalProbe
+#  input_dim: !ref <feature_dim>
+#  num_labels: !ref <n_classes>
+#  temp_pooler: !ref <t_pool>
 
 model: !new:model.probe.Model
   encoder: !ref <encoder>
@@ -92,13 +90,13 @@ modules:
   model: !ref <model>
 
 # Additional model-related parameters
-max_length: 320000 # max length in samples (20s)
+#max_length: 320000 # max length in samples (20s)
 
 # ----------------------------------
 # TRAINING AND METRICS
 # ----------------------------------
 number_of_epochs: 20
-batch_size: 16
+batch_size: 8
 lr: 0.001
 l2: 0.0001
 n_classes: 1
@@ -132,6 +130,9 @@ error_stats: !name:speechbrain.utils.metric_stats.BinaryMetricStats
 # Epoch management
 epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
   limit: !ref <number_of_epochs>
+#  limit_to_stop: 3
+#  limit_warmup: 2
+#  direction: !ref <optim_mode>
 
 # Optimizer
 opt_class: !name:torch.optim.AdamW
@@ -154,6 +155,7 @@ ray_tune_config:
   resources_per_trial:
     cpu: 12
     gpu: 0
+
 
 
 # Define hyperparameter search space

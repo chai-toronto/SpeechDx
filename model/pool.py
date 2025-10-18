@@ -27,7 +27,7 @@ class AttentiveTemporalPoolLite(nn.Module):
         lengths = (lengths * T_max).long()  # Convert into absolute lengths
         # Build mask: True for real tokens
 
-        t = torch.arange(T_max).unsqueeze(0)                   # (1, T_max)
+        t = torch.arange(T_max, device=x.device).unsqueeze(0)  # (1, T_max)
         mask = t < lengths.unsqueeze(1)                        # (B, T_max)
 
         # Handle any zero-length sequences explicitly to avoid softmax(all -inf)
@@ -76,7 +76,7 @@ class AttentiveTemporalPool(nn.Module):
         lengths = (lengths * T_max).long()  # Convert into absolute lengths
 
         # Build mask: True for real tokens
-        t = torch.arange(T_max).unsqueeze(0)                   # (1, T_max)
+        t = torch.arange(T_max, device=x.device).unsqueeze(0)                   # (1, T_max)
         mask = t < lengths.unsqueeze(1)                        # (B, T_max)
 
         # Handle any zero-length sequences explicitly to avoid softmax(all -inf)
