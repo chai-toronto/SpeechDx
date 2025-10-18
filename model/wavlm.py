@@ -23,7 +23,7 @@ class WavLM(nn.Module):
             lengths = (lengths * T).long()
 
             # Build mask: 1 for valid, 0 for padded
-            t = torch.arange(T).unsqueeze(0) # (1, T)
+            t = torch.arange(T, device=x.device).unsqueeze(0) # (1, T)
             mask = (t < lengths.unsqueeze(1)) * 1 # (B, T)
         input_values = self.processor(x, sampling_rate=self.sample_rate, return_tensors="pt").input_values[0]
         input_values = input_values.to(device=x.device, dtype=x.dtype)
