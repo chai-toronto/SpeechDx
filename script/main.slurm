@@ -18,6 +18,6 @@ conda activate speech-health-ai
 nvidia-smi -l 10 -q -d UTILIZATION,MEMORY > exps/slurm_logs/gpu_${SLURM_JOB_ID}.log &
 GPU_MONITOR_PID=$!
 
-python -m training.train training/config/sylber.yaml
+python -m training.train training/config/main.yaml
 
 kill $GPU_MONITOR_PID
