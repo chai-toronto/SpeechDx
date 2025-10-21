@@ -14,38 +14,38 @@ class AttentiveTemporalPoolLite(nn.Module):
         Returns:
           pooled:  (B, D)
         """
-        B, T_max, D = x.shape
         scores = torch.tanh(self.attn(x)).squeeze(-1)               # (B, T_max)
 
-        if lengths is None:
-            # No padding case
-            weights = F.softmax(scores, dim=1)                       # (B, T_max)
-            pooled  = torch.bmm(weights.unsqueeze(1), x).squeeze(1)  # (B, D)
-            return pooled
+        return attn_pool(lengths, scores, x)
 
-        lengths = (lengths * T_max).long()  # Convert into absolute lengths
-        # Build mask: True for real tokens
-
-        t = torch.arange(T_max, device=x.device).unsqueeze(0)  # (1, T_max)
-        mask = t < lengths.unsqueeze(1)                        # (B, T_max)
-
-        # Handle any zero-length sequences explicitly to avoid softmax(all -inf)
-        empty = lengths == 0
-        if empty.any():
-            scores = scores.clone()
-            scores[empty] = 0.0  # harmless placeholder
-
-        # Mask BEFORE softmax so pads get zero probability
-        masked_scores = scores.masked_fill(~mask, float('-inf'))
-        weights = F.softmax(masked_scores, dim=1)              # (B, T_max)
-        weights = torch.where(mask, weights, torch.zeros_like(weights))  # clean pads
-
-        # For truly empty rows, force weights=0 to avoid NaNs in grads
-        if empty.any():
-            weights[empty] = 0.0
-
-        pooled = torch.bmm(weights.unsqueeze(1), x).squeeze(1) # (B, D)
+def attn_pool(lengths, scores, x):
+    """
+    scores: (B, T_max) unnormalized attention scores
+    x: (B, T_max, D) input features
+    lengths: (B,) relative lengths (to T_max) per sequence. If None, we assume no padding.
+    Returns:
+        pooled:  (B, D)
+    """
+    T_max = scores.size(-1)
+    if lengths is None:
+        # No padding case
+        weights = F.softmax(scores, dim=1)  # (B, T_max)
+        pooled = torch.bmm(weights.unsqueeze(1), x).squeeze(1)  # (B, D)
         return pooled
+
+    lengths = (lengths * T_max).long()  # Convert into absolute lengths
+    lengths = lengths.clamp(min=1)      # avoid zero-lengths
+
+    # Build mask: True for real tokens
+    t = torch.arange(T_max, device=x.device).unsqueeze(0)  # (1, T_max)
+    mask = t < lengths.unsqueeze(1)  # (B, T_max)
+
+    # Mask BEFORE softmax so pads get zero probability
+    masked_scores = scores.masked_fill(~mask, float('-inf'))
+    weights = F.softmax(masked_scores, dim=1)  # (B, T_max)
+
+    pooled = torch.bmm(weights.unsqueeze(1), x).squeeze(1)  # (B, D)
+    return pooled
 
 
 class AttentiveTemporalPool(nn.Module):
@@ -61,39 +61,10 @@ class AttentiveTemporalPool(nn.Module):
         Returns:
           pooled:  (B, D)
         """
-        B, T_max, D = x.shape
         h = torch.tanh(self.attn(x))           # (B, T_max, H)
         scores = self.score(h).squeeze(-1)     # (B, T_max)
 
-        if lengths is None:
-            # No padding case
-            weights = F.softmax(scores, dim=1)                       # (B, T_max)
-            pooled  = torch.bmm(weights.unsqueeze(1), x).squeeze(1)  # (B, D)
-            return pooled
-
-        lengths = (lengths * T_max).long()  # Convert into absolute lengths
-
-        # Build mask: True for real tokens
-        t = torch.arange(T_max, device=x.device).unsqueeze(0)                   # (1, T_max)
-        mask = t < lengths.unsqueeze(1)                        # (B, T_max)
-
-        # Handle any zero-length sequences explicitly to avoid softmax(all -inf)
-        empty = lengths == 0
-        if empty.any():
-            scores = scores.clone()
-            scores[empty] = 0.0  # harmless placeholder
-
-        # Mask BEFORE softmax so pads get zero probability
-        masked_scores = scores.masked_fill(~mask, float('-inf'))
-        weights = F.softmax(masked_scores, dim=1)              # (B, T_max)
-        weights = torch.where(mask, weights, torch.zeros_like(weights))  # clean pads
-
-        # For truly empty rows, force weights=0 to avoid NaNs in grads
-        if empty.any():
-            weights[empty] = 0.0
-
-        pooled = torch.bmm(weights.unsqueeze(1), x).squeeze(1) # (B, D)
-        return pooled
+        return attn_pool(lengths, scores, x)
 
 class AvgTPool(nn.Module):
     def __init__(self):

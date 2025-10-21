@@ -11,6 +11,7 @@ To adapt to a new dataset, copy this file and modify:
 """
 import json
 import random
+import warnings
 from pathlib import Path
 
 import torchaudio
@@ -143,8 +144,12 @@ def dataio_prep(hparams):
             start = random.randint(0, duration - max_length)
             signal = signal[start:start + max_length]
             duration = max_length
-        return signal, duration
 
+        if duration == 0:  # handle empty audio
+            signal = torch.zeros(16000)
+            duration = 16000
+            warnings.warn("Empty audio file found: {}".format(file_path))
+        return signal, duration
 
     # Define label pipeline
     @sb.utils.data_pipeline.takes("label")
