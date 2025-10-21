@@ -3,7 +3,7 @@
 hpopt_mode: ray  # Set to 'ray' to enable, null to disable
 optim_metric: 'F1'
 optim_mode: 'max'  # 'min' or 'max' depending on the metric
-max_concurrent_trials: 2  # Number of concurrent trials to run
+max_concurrent_trials: 1  # Number of concurrent trials to run
 grace_period: 5  # Number of epochs to wait before considering early stopping
 reduction_factor: 2  # Factor by which to reduce trials at each rung
 
@@ -11,8 +11,8 @@ reduction_factor: 2  # Factor by which to reduce trials at each rung
 ray_tune_config:
   num_samples: 10  # Number of trial runs
   resources_per_trial:
-    cpu: 4
-    gpu: 1
+    cpu: 10
+    gpu: 0
 
 
 # Define hyperparameter search space

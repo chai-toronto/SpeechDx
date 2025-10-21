@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import torch
 import speechbrain as sb
 
@@ -9,14 +11,43 @@ class DiagnosticsBrain(sb.Brain):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.cache = None
 
     def compute_forward(self, batch, stage):
         """Runs all the computation that transforms the input into the
         output probabilities over the N classes.
+
         """
         batch = batch.to(self.device)
-        wavs, lens = self.augment_input(batch.signal, stage)
-        predictions = self.modules.model(wavs, lens)
+        wavs, lens = batch.signal
+
+        ids = batch.id
+        cache_encoder = getattr(self.hparams, "cache_encoder", False)
+        if cache_encoder: # TODO: vectorize this
+            cache_dir = Path(getattr(self.hparams, "cache_dir")).resolve()
+            cache_done = (cache_dir / "cache_done.txt").exists()
+            if not cache_done:
+                encoded = self.modules.model.encoder(wavs, lens) # (B, T, D)
+                t_dim = -2
+                abs_lengths = (lens * encoded.size(t_dim)).long()
+                # Save encoded features to disk
+                if self.cache is None: # i.e. we started caching
+                    self.cache = {}
+
+                encoded = encoded.sum(dim=t_dim) / abs_lengths.unsqueeze(-1)  # (B, D)
+                for i, utt_id in enumerate(ids):
+                    self.cache[utt_id] = encoded[i].cpu()
+            else:
+                if self.cache is None: # first epoch after caching
+                    self.cache = torch.load(cache_dir/'cache.pt')
+                    print("Cache loaded from disk.")
+                encoded = torch.stack([self.cache[utt_id] for utt_id in ids], dim=0).to(self.device)
+            wavs = encoded
+        else:
+            # Forward pass through the model
+            wavs = self.modules.model.encoder(wavs, lens)
+
+        predictions = self.modules.model.probe(wavs, lens)
         return predictions
 
     def augment_input(self, wavs, stage):
@@ -61,7 +92,6 @@ class DiagnosticsBrain(sb.Brain):
         # Concatenate labels (due to data augmentation)
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "env_corrupt"):
             lab = torch.cat([lab, lab], dim=0)
-
 
         # Compute the cost function: BCE is assumed for binary classification
         # but pos_weight is used for imbalance handling.
@@ -128,6 +158,20 @@ class DiagnosticsBrain(sb.Brain):
                 {"Epoch loaded": self.hparams.epoch_counter.current},
                 test_stats=stats,
             )
+
+        self.finalize_cache()
+
+    def finalize_cache(self):
+        # The cache is now available until the end of training
+        cache_encoder = getattr(self.hparams, "cache_encoder", False)
+        if cache_encoder:
+            cache_dir = Path(getattr(self.hparams, "cache_dir")).resolve()
+            torch.save(self.cache, cache_dir/'cache.pt')
+            cache_done = cache_dir / "cache_done.txt"
+            if not cache_done.exists():
+                with open(cache_done, "w") as f:
+                    f.write("done")
+                print("Encoder cache is ready.")
 
     def calc_epoch_metrics(self, stage_loss):
         """ Call this after the epoch only"""

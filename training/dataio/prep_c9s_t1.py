@@ -35,7 +35,7 @@ def prepare_data(
         raw_label_key,
         new_test,
         num_fold,
-        max_length=1e10
+        max_length=1e10,
 ):
     """
     This function is dataset-specific.
@@ -59,7 +59,6 @@ def prepare_data(
                 manifest_test_path.exists(),
             )
     ):
-
         df = pd.read_csv(metadata_path)
 
         # Resolve path to be absolute

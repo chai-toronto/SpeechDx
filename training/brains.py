@@ -1,3 +1,4 @@
+from pathlib import Path
 from statistics import mean
 from typing import Dict
 
@@ -122,5 +123,8 @@ class DiagnosticsCVBrain(DiagnosticsBrain):
                 {"Epoch loaded": self.hparams.epoch_counter.current},
                 test_stats=stats,
             )
+
+        # The cache is now available until the end of training
+        self.finalize_cache()
 
 

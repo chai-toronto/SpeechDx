@@ -28,7 +28,7 @@ class LinearProbe(nn.Module):
         super().__init__()
         self.classifier = nn.Linear(input_dim, num_labels, bias=bias)
 
-    def forward(self, x, **kwargs):
+    def forward(self, x, lengths=None, **kwargs):
         """
         x: (B, D) matrix of batch x features
         Returns:

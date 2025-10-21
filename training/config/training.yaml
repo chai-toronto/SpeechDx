@@ -1,5 +1,5 @@
-num_workers: 8
-batch_size: 16
+num_workers: 0
+batch_size: 8
 progressbar: True
 # Ray will override these during hyperparameter optimization
 number_of_epochs: 20
