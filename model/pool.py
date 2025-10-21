@@ -13,7 +13,6 @@ class AttentiveTemporalPoolLite(nn.Module):
         lengths: (B,) relative lengths (to T_max) per sequence. If None, we assume no padding.
         Returns:
           pooled:  (B, D)
-          weights: (B, T_max) softmax over real tokens only (zeros on pads)
         """
         B, T_max, D = x.shape
         scores = torch.tanh(self.attn(x)).squeeze(-1)               # (B, T_max)
@@ -22,7 +21,7 @@ class AttentiveTemporalPoolLite(nn.Module):
             # No padding case
             weights = F.softmax(scores, dim=1)                       # (B, T_max)
             pooled  = torch.bmm(weights.unsqueeze(1), x).squeeze(1)  # (B, D)
-            return pooled, weights
+            return pooled
 
         lengths = (lengths * T_max).long()  # Convert into absolute lengths
         # Build mask: True for real tokens
@@ -61,7 +60,6 @@ class AttentiveTemporalPool(nn.Module):
         lengths: (B,) relative lengths (to T_max) per sequence. If None, we assume no padding.
         Returns:
           pooled:  (B, D)
-          weights: (B, T_max) softmax over real tokens only (zeros on pads)
         """
         B, T_max, D = x.shape
         h = torch.tanh(self.attn(x))           # (B, T_max, H)
@@ -71,7 +69,7 @@ class AttentiveTemporalPool(nn.Module):
             # No padding case
             weights = F.softmax(scores, dim=1)                       # (B, T_max)
             pooled  = torch.bmm(weights.unsqueeze(1), x).squeeze(1)  # (B, D)
-            return pooled, weights
+            return pooled
 
         lengths = (lengths * T_max).long()  # Convert into absolute lengths
 

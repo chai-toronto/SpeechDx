@@ -22,6 +22,12 @@ class Wav2Vec2(nn.Module):
         self.sample_rate = sample_rate
 
     def forward(self, x, lengths=None):
+        x = self.processor(x.cpu().numpy().tolist(),
+                                return_tensors="pt",
+                                sampling_rate=self.sample_rate)
+
+        x = {k: v.to(x.device) for k, v in x.items() if k != 'attention_mask'}
+
         B, T = x.shape
         mask = None
         if lengths is not None:
@@ -34,14 +40,8 @@ class Wav2Vec2(nn.Module):
 
             mask = (t < lengths.unsqueeze(1)) * 1  # (B, T)
 
-        inputs = self.processor(x.cpu().numpy().tolist(),
-                                return_tensors="pt",
-                                sampling_rate=self.sample_rate)
-
-        inputs = {k: v.to(x.device) for k, v in inputs.items() if k != 'attention_mask'}
-
         with (torch.enable_grad() if not self.freeze_encoder else torch.no_grad()):
-            output = self.model(**inputs, attention_mask=mask)
+            output = self.model(**x, attention_mask=mask)
 
         if self.output_hidden_states:
             hidden_states = output.hidden_states[1:]  # tuple of (B, T, D), including input embeddings
