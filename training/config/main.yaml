@@ -87,6 +87,9 @@ max_length: !ref <encoder_params[encoder]> # max length in samples (20s)
 # ----------------------------------
 # TRAINING AND METRICS
 # ----------------------------------
+test_only: True  # Set to True to only run evaluation on test set
+precision: bf16
+eval_precision: bf16
 number_of_epochs: !ref <training_params[number_of_epochs]>
 batch_size: !ref <training_params[batch_size]>
 lr: !ref <training_params[lr]>

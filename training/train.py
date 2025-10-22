@@ -299,15 +299,15 @@ if __name__ == "__main__":
         checkpointer=hparams["checkpointer"]
     )
 
-    brain.fit(
-        epoch_counter=hparams["epoch_counter"],
-        train_set=datasets["test_train"],
-        train_loader_kwargs=hparams["train_dataloader_options"],
-    )
+    if not hparams.get("test_only", False):
+        brain.fit(
+            epoch_counter=hparams["epoch_counter"],
+            train_set=datasets["test_train"],
+            train_loader_kwargs=hparams["train_dataloader_options"],
+        )
 
     # Turn off caching after training. The scope of caching must end here.
     if cache_encoder:
-        brain.hparams.cache_encoder = False
         cache_dir = Path(hparams.get("cache_dir")).resolve()
         if cache_dir.exists():
             shutil.rmtree(cache_dir)

@@ -21,6 +21,7 @@ class DiagnosticsBrain(sb.Brain):
         batch = batch.to(self.device)
         wavs, lens = batch.signal
 
+        # Exclusive for [B, T]  inputs
         ids = batch.id
         cache_encoder = getattr(self.hparams, "cache_encoder", False)
         if cache_encoder: # TODO: vectorize this
@@ -83,7 +84,6 @@ class DiagnosticsBrain(sb.Brain):
         loss : torch.Tensor
             A one-element tensor used for backpropagating the gradient.
         """
-
         # Dynamically retrieve the label using the 'label_key' from hparams
         label_key = getattr(self.hparams, "label_key", "label_encoded")
         lab = getattr(batch, label_key)
