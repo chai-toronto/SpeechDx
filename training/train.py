@@ -39,7 +39,6 @@ from hyperpyyaml import load_hyperpyyaml
 from training.brain import DiagnosticsBrain
 from training.brains import Brains, DiagnosticsCVBrain
 
-
 def train_with_ray(config, hparams_file, run_opts, overrides):
     """Ray Tune trainable function that wraps the SpeechBrain training loop.
 
@@ -79,15 +78,16 @@ def train_with_ray(config, hparams_file, run_opts, overrides):
     dataio_prep_fn = getattr(data_io_module, hparams["dataio_prep_fn"])
     datasets = dataio_prep_fn(hparams)
 
-    # Initialize the Brains object with Ray Tune reporter
+    # ============== KEY CHANGE: New Brains API ==============
+    # Initialize the Brains object by passing hparams_file and overrides
+    # instead of the loaded hparams (which contains unpickleable modules)
     brains = Brains(
-        num_brains=hparams["num_fold"],
-        modules=hparams["modules"],
-        opt_class=hparams["opt_class"],
-        hparams=hparams,
-        run_opts=run_opts,
-        checkpointer=hparams["checkpointer"]
+        hparams_file=hparams_file,      # Pass file path
+        overrides=ray_overrides,         # Pass overrides dict
+        run_opts=run_opts,               # Pass run_opts
     )
+    # Each Ray actor will independently load hparams from the file
+    # ========================================================
 
     train_sets = [datasets[f"train_{i}"] for i in range(hparams["num_fold"])]
     valid_sets = [datasets[f"val_{i}"] for i in range(hparams["num_fold"])]
@@ -99,6 +99,7 @@ def train_with_ray(config, hparams_file, run_opts, overrides):
         valid_loader_kwargs=hparams["val_dataloader_options"],
         progressbar=hparams["progressbar"]
     )
+
 
 def parse_hp_search_space(hparams):
     """Parse hyperparameter search space from hparams dict.
@@ -268,14 +269,10 @@ if __name__ == "__main__":
 
     # Train final model
     if best_config is not None:
-        # Update overrides with Ray Tune config
+        # Update overrides with best config
         ray_overrides = overrides.copy() if overrides else {}
         for key, value in best_config.items():
             ray_overrides[key] = value
-
-        # Load hyperparameters with Ray Tune config overrides
-        with open(hparams_file) as fin:
-            hparams = load_hyperpyyaml(fin, ray_overrides)
         overrides = ray_overrides
 
     hparams["output_folder"] = os.path.join(hparams["output_folder"], 'final_model')
