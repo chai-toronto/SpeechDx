@@ -11,7 +11,7 @@ reduction_factor: 2  # Factor by which to reduce trials at each rung
 ray_tune_config:
   num_samples: 10  # Number of trial runs
   resources_per_trial:
-    cpu: 15
+    cpu: 20
     gpu: 2
 
 
