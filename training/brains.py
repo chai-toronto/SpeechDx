@@ -3,6 +3,7 @@ from statistics import mean
 from typing import Dict
 
 import numpy as np
+import ray
 from ray import tune
 from speechbrain.dataio.dataloader import LoopedLoader
 from speechbrain.utils import hpopt as hp
@@ -90,7 +91,7 @@ class Brains:
                 brain._fit_train(train_set=train_set, epoch=epoch, enable=enable)
                 brain._fit_valid(valid_set=valid_set, epoch=epoch, enable=enable)
 
-
+@ray.remote
 class DiagnosticsCVBrain(DiagnosticsBrain):
     def __init__(self, manager, **kwargs):
         super().__init__(**kwargs)
