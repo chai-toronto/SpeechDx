@@ -15,117 +15,426 @@ from training.brain import DiagnosticsBrain
 
 
 class Brains:
+    """
+    Manager for multiple diagnostic brains with support for both concurrent GPU
+    and sequential CPU training.
+
+    GPU Mode (concurrent):
+        - Each brain gets its own GPU via Ray remote actors
+        - All brains train/validate in parallel
+        - Requires num_fold GPUs available
+
+    CPU Mode (sequential):
+        - Falls back to sequential training when GPUs unavailable
+        - Avoids CPU contention from concurrent execution
+    """
+
     def __init__(self, **kwargs):
         self.num_brains = kwargs.pop("num_brains", 1)
-        self.brains = []
-        for _ in range(self.num_brains):
-            self.brains.append(DiagnosticsCVBrain(
-                manager=self,
-                **kwargs
-            ))
-        self.stats = []  # Contains one epoch stat of brains
+        self.hparams = kwargs.get("hparams")
 
+        # Determine execution mode based on GPU availability and configuration
+        self.use_gpu = self._check_gpu_availability()
+
+        if self.use_gpu:
+            self._init_concurrent_gpu_mode(**kwargs)
+        else:
+            self._init_sequential_cpu_mode(**kwargs)
+
+    def _check_gpu_availability(self):
+        """Check if GPU training is possible and advisable."""
+        # Check if user explicitly disabled GPU
+        if not self.hparams.get("use_gpu", True):
+            print("GPU training disabled in configuration (use_gpu=False)")
+            return False
+
+        # Check CUDA availability
+        if not torch.cuda.is_available():
+            print("WARNING: CUDA not available. Falling back to sequential CPU training.")
+            print("This will be significantly slower than GPU training.")
+            return False
+
+        # Check if enough GPUs available
+        available_gpus = torch.cuda.device_count()
+        if available_gpus < self.num_brains:
+            print(f"WARNING: Not enough GPUs for concurrent training!")
+            print(f"  Required: {self.num_brains} GPUs (num_fold={self.num_brains})")
+            print(f"  Available: {available_gpus} GPUs")
+            print(f"  Falling back to sequential CPU training.")
+            print(f"\nTo enable GPU training:")
+            print(f"  1. Reduce num_fold to {available_gpus} or less, OR")
+            print(f"  2. Add more GPUs to your system")
+            return False
+
+        print(f"✓ GPU training enabled with {self.num_brains} GPUs")
+        return True
+
+    def _init_concurrent_gpu_mode(self, **kwargs):
+        """Initialize brains as Ray remote actors for concurrent GPU training."""
+        self.concurrent = True
+        self.brains = []
+
+        for i in range(self.num_brains):
+            brain = DiagnosticsCVBrain.remote(
+                brain_id=i,
+                **kwargs
+            )
+            self.brains.append(brain)
+
+        print(f"Initialized {self.num_brains} brains as Ray actors (concurrent GPU mode)")
+
+    def _init_sequential_cpu_mode(self, **kwargs):
+        """Initialize brains as local objects for sequential CPU training."""
+        self.concurrent = False
+        self.brains = []
+
+        for i in range(self.num_brains):
+            # Create local DiagnosticsBrain instances (not remote)
+            brain = DiagnosticsSequentialBrain(
+                brain_id=i,
+                **kwargs
+            )
+            self.brains.append(brain)
+
+        print(f"Initialized {self.num_brains} brains for sequential CPU training")
 
     def __len__(self):
         return len(self.brains)
 
-    def report(self, stat: Dict):
-        """Report statistics to HP optimizer (Ray Tune or others)."""
-        self.stats.append(stat)
-        print(f"Received stats from {len(self.stats)}/{self.num_brains} brains.")
-        if len(self.stats) == self.num_brains:
-            print('All brains have reported stats for this epoch.')
-            # Gather and take average the stat of all brains
-            aggregated_stat = {}
-            for key in stat.keys():
-                aggregated_stat[key] = [stat[key] for stat in self.stats]
-                aggregated_stat[key] = np.mean(aggregated_stat[key])
-
-            print(f"Aggregated stats: {aggregated_stat}")
-            # Report results to HP tuner
-            # This will use Ray Tune's reporter when hpopt_mode='ray'
-            tune.report(aggregated_stat)
-
-            # Reset for next epoch
-            self.stats = []
-
     def fit(self, **kwargs):
+        """Train all brains, using either concurrent or sequential mode."""
+        if self.concurrent:
+            self._fit_concurrent(**kwargs)
+        else:
+            self._fit_sequential(**kwargs)
+
+    def _fit_concurrent(self, **kwargs):
+        """Concurrent training for GPU mode."""
         train_sets = kwargs.pop("train_sets")
         valid_sets = kwargs.pop("valid_sets")
+        train_loader_kwargs = kwargs.get("train_loader_kwargs", {})
+        valid_loader_kwargs = kwargs.get("valid_loader_kwargs", {})
+        progressbar = kwargs.pop("progressbar", None)
+
+        if progressbar is None:
+            # Get from first brain
+            progressbar_future = self.brains[0].get_progressbar_setting.remote()
+            progressbar = ray.get(progressbar_future)
+
+        # Only show progressbar if requested and main_process
+        enable = progressbar and sb.utils.distributed.if_main_process()
+
+        # Setup data loaders for all brains in parallel
+        print("Setting up data loaders for all brains...")
+        setup_futures = []
+        for i, brain in enumerate(self.brains):
+            future = brain.setup_dataloaders.remote(
+                train_set=train_sets[i],
+                valid_set=valid_sets[i],
+                train_loader_kwargs=train_loader_kwargs,
+                valid_loader_kwargs=valid_loader_kwargs
+            )
+            setup_futures.append(future)
+        ray.get(setup_futures)
+
+        # Initialize fit for all brains
+        print("Initializing fit for all brains...")
+        init_futures = [brain.on_fit_start.remote() for brain in self.brains]
+        ray.get(init_futures)
+
+        # Training loop - iterate through epochs
+        for epoch in self.hparams.epoch_counter:
+            print(f"\n{'=' * 60}")
+            print(f"Epoch {epoch} - Training all {self.num_brains} brains concurrently")
+            print(f"{'=' * 60}")
+
+            # Phase 1: Train all brains concurrently
+            print(f"\n[Training Phase] Launching {self.num_brains} concurrent training jobs...")
+            train_futures = []
+            for i, brain in enumerate(self.brains):
+                future = brain.train_epoch.remote(epoch=epoch, enable=enable)
+                train_futures.append(future)
+
+            # Wait for all training to complete
+            ray.get(train_futures)
+            print(f"[Training Phase] All brains completed training for epoch {epoch}")
+
+            # Phase 2: Validate all brains concurrently
+            print(f"\n[Validation Phase] Launching {self.num_brains} concurrent validation jobs...")
+            valid_futures = []
+            for i, brain in enumerate(self.brains):
+                future = brain.validate_epoch.remote(epoch=epoch, enable=enable)
+                valid_futures.append(future)
+
+            # Wait for all validation to complete and collect stats
+            all_stats = ray.get(valid_futures)
+            print(f"[Validation Phase] All brains completed validation for epoch {epoch}")
+
+            # Phase 3: Aggregate statistics across all brains
+            self._aggregate_and_report(all_stats, epoch)
+
+    def _fit_sequential(self, **kwargs):
+        """Sequential training for CPU mode."""
+        train_sets = kwargs.pop("train_sets")
+        valid_sets = kwargs.pop("valid_sets")
+        train_loader_kwargs = kwargs.get("train_loader_kwargs", {})
+        valid_loader_kwargs = kwargs.get("valid_loader_kwargs", {})
         progressbar = kwargs.pop("progressbar", None)
 
         if progressbar is None:
             progressbar = not self.brains[0].noprogressbar
 
-        # Only show progressbar if requested and main_process
         enable = progressbar and sb.utils.distributed.if_main_process()
 
+        # Setup data loaders for all brains
+        print("Setting up data loaders for all brains...")
+        for i, brain in enumerate(self.brains):
+            brain.setup_dataloaders(
+                train_set=train_sets[i],
+                valid_set=valid_sets[i],
+                train_loader_kwargs=train_loader_kwargs,
+                valid_loader_kwargs=valid_loader_kwargs
+            )
 
-        loaders = []
-        for brain, train_set, valid_set in zip(self.brains, train_sets, valid_sets):
-            if not (
-                    isinstance(train_set, DataLoader)
-                    or isinstance(train_set, LoopedLoader)
-            ):
-                train_set = brain.make_dataloader(
-                    train_set, stage=sb.Stage.TRAIN, **kwargs.get("train_loader_kwargs", {})
-                )
-            if valid_set is not None and not (
-                    isinstance(valid_set, DataLoader)
-                    or isinstance(valid_set, LoopedLoader)
-            ):
-                valid_set = brain.make_dataloader(
+        # Initialize fit for all brains
+        print("Initializing fit for all brains...")
+        for brain in self.brains:
+            brain.on_fit_start()
+
+        # Training loop - iterate through epochs
+        for epoch in self.hparams.epoch_counter:
+            print(f"\n{'=' * 60}")
+            print(f"Epoch {epoch} - Training {self.num_brains} brains sequentially (CPU)")
+            print(f"{'=' * 60}")
+
+            all_stats = []
+
+            # Train and validate each brain sequentially
+            for i, brain in enumerate(self.brains):
+                print(f"\n[Brain {i}/{self.num_brains}]")
+
+                # Training phase
+                brain.train_epoch(epoch=epoch, enable=enable)
+
+                # Validation phase
+                stats = brain.validate_epoch(epoch=epoch, enable=enable)
+                all_stats.append(stats)
+
+            # Aggregate statistics across all brains
+            self._aggregate_and_report(all_stats, epoch)
+
+    def _aggregate_and_report(self, all_stats, epoch):
+        """Aggregate statistics from all brains and report to Ray Tune."""
+        print(f"\n[Aggregation Phase] Collecting stats from {len(all_stats)} brains...")
+
+        # Filter out None values
+        valid_stats = [s for s in all_stats if s is not None]
+
+        if valid_stats:
+            # Aggregate all metrics
+            aggregated_stat = {}
+            for key in valid_stats[0].keys():
+                values = [stat[key] for stat in valid_stats]
+                aggregated_stat[key] = np.mean(values)
+                print(f"  {key}: {aggregated_stat[key]:.4f} (mean of {len(values)} brains)")
+
+            print(f"\n[Reporting Phase] Reporting aggregated stats to Ray Tune")
+            print(f"Aggregated stats: {aggregated_stat}")
+
+            # Report aggregated results to Ray Tune
+            tune.report(aggregated_stat)
+        else:
+            print("[Warning] No valid stats received from brains")
+
+        print(f"{'=' * 60}\n")
+
+
+@ray.remote(num_gpus=1)
+class DiagnosticsCVBrain(DiagnosticsBrain):
+    """
+    Remote Ray actor version of DiagnosticsBrain for concurrent GPU training.
+    Each instance gets its own GPU (num_gpus=1).
+    """
+
+    def __init__(self, brain_id, **kwargs):
+        super().__init__(**kwargs)
+        self.brain_id = brain_id
+        self.train_loader = None
+        self.valid_loader = None
+        self.last_valid_stats = None
+
+        # Set device to the GPU allocated by Ray
+        if torch.cuda.is_available():
+            gpu_ids = ray.get_gpu_ids()
+            if gpu_ids:
+                self.device = f"cuda:{gpu_ids[0]}"
+                print(f"Brain {brain_id} initialized on device {self.device}")
+            else:
+                self.device = "cpu"
+                print(f"Brain {brain_id} initialized on CPU (no GPU allocated)")
+        else:
+            self.device = "cpu"
+            print(f"Brain {brain_id} initialized on CPU (CUDA not available)")
+
+    def get_progressbar_setting(self):
+        """Return whether progressbar should be shown."""
+        return not self.noprogressbar
+
+    def setup_dataloaders(self, train_set, valid_set, train_loader_kwargs, valid_loader_kwargs):
+        """Setup data loaders for this brain."""
+        # Create train loader if needed
+        if not (isinstance(train_set, DataLoader) or isinstance(train_set, LoopedLoader)):
+            self.train_loader = self.make_dataloader(
+                train_set,
+                stage=sb.Stage.TRAIN,
+                **train_loader_kwargs
+            )
+        else:
+            self.train_loader = train_set
+
+        # Create validation loader if needed
+        if valid_set is not None:
+            if not (isinstance(valid_set, DataLoader) or isinstance(valid_set, LoopedLoader)):
+                self.valid_loader = self.make_dataloader(
                     valid_set,
                     stage=sb.Stage.VALID,
                     ckpt_prefix=None,
-                    **kwargs.get("valid_loader_kwargs", {}),
+                    **valid_loader_kwargs
                 )
-            brain.on_fit_start()
-            loaders.append((train_set, valid_set))
+            else:
+                self.valid_loader = valid_set
 
-        for epoch in self.brains[0].hparams.epoch_counter:
-            print(f"\nEpoch {epoch}\n-------")
-            for i, brain_info in enumerate(zip(self.brains, loaders)):
-                brain, (train_set, valid_set) = brain_info
-                print(f"\nBrain {i}\n-------")
-                brain._fit_train(train_set=train_set, epoch=epoch, enable=enable)
-                brain._fit_valid(valid_set=valid_set, epoch=epoch, enable=enable)
+        print(f"Brain {self.brain_id}: Data loaders setup complete")
 
-@ray.remote
-class DiagnosticsCVBrain(DiagnosticsBrain):
-    def __init__(self, manager, **kwargs):
-        super().__init__(**kwargs)
-        self.manager = manager
+    def train_epoch(self, epoch, enable):
+        """Train for one epoch."""
+        print(f"Brain {self.brain_id}: Starting training for epoch {epoch}")
+        self._fit_train(train_set=self.train_loader, epoch=epoch, enable=enable)
+        print(f"Brain {self.brain_id}: Completed training for epoch {epoch}")
+
+    def validate_epoch(self, epoch, enable):
+        """Validate for one epoch and return statistics."""
+        print(f"Brain {self.brain_id}: Starting validation for epoch {epoch}")
+        self._fit_valid(valid_set=self.valid_loader, epoch=epoch, enable=enable)
+        print(f"Brain {self.brain_id}: Completed validation for epoch {epoch}")
+        return self.last_valid_stats
 
     def on_stage_end(self, stage, stage_loss, epoch=None):
-        """Gets called at the end of each epoch. Reports result to manager."""
-        # Store the train loss until the validation stage.
+        """Gets called at the end of each epoch."""
+        # Store the train loss until the validation stage
         if stage == sb.Stage.TRAIN:
             self.train_loss = stage_loss
             return
 
+        # Calculate metrics
         stats = self.calc_epoch_metrics(stage_loss)
 
-        # At the end of validation...
+        # At the end of validation, store stats for retrieval
         if stage == sb.Stage.VALID:
-            # Log stats
+            # Log stats locally
             self.hparams.train_logger.log_stats(
-                {"Epoch": epoch},
+                {"Epoch": epoch, "Brain": self.brain_id},
                 train_stats={"loss": self.train_loss},
                 valid_stats=stats,
             )
 
-            # Report to manager (which handles Ray Tune reporting)
-            self.manager.report(stats)
+            # Store stats to be returned by validate_epoch
+            self.last_valid_stats = stats
+            print(f"Brain {self.brain_id}: Validation stats - {stats}")
 
-        # We also write statistics about test data to stdout and to the logfile.
+        # Handle test stage
         if stage == sb.Stage.TEST:
             self.hparams.train_logger.log_stats(
-                {"Epoch loaded": self.hparams.epoch_counter.current},
+                {"Epoch loaded": self.hparams.epoch_counter.current, "Brain": self.brain_id},
                 test_stats=stats,
             )
 
-        # The cache is now available until the end of training
+        # Finalize cache if enabled
         self.finalize_cache()
 
 
+class DiagnosticsSequentialBrain(DiagnosticsBrain):
+    """
+    Local (non-Ray) version of DiagnosticsBrain for sequential CPU training.
+    Used as fallback when GPUs are not available.
+    """
+
+    def __init__(self, brain_id, **kwargs):
+        super().__init__(**kwargs)
+        self.brain_id = brain_id
+        self.train_loader = None
+        self.valid_loader = None
+        self.last_valid_stats = None
+        print(f"Brain {brain_id} initialized for sequential CPU training")
+
+    def setup_dataloaders(self, train_set, valid_set, train_loader_kwargs, valid_loader_kwargs):
+        """Setup data loaders for this brain."""
+        # Create train loader if needed
+        if not (isinstance(train_set, DataLoader) or isinstance(train_set, LoopedLoader)):
+            self.train_loader = self.make_dataloader(
+                train_set,
+                stage=sb.Stage.TRAIN,
+                **train_loader_kwargs
+            )
+        else:
+            self.train_loader = train_set
+
+        # Create validation loader if needed
+        if valid_set is not None:
+            if not (isinstance(valid_set, DataLoader) or isinstance(valid_set, LoopedLoader)):
+                self.valid_loader = self.make_dataloader(
+                    valid_set,
+                    stage=sb.Stage.VALID,
+                    ckpt_prefix=None,
+                    **valid_loader_kwargs
+                )
+            else:
+                self.valid_loader = valid_set
+
+        print(f"Brain {self.brain_id}: Data loaders setup complete")
+
+    def train_epoch(self, epoch, enable):
+        """Train for one epoch."""
+        print(f"Brain {self.brain_id}: Starting training for epoch {epoch}")
+        self._fit_train(train_set=self.train_loader, epoch=epoch, enable=enable)
+        print(f"Brain {self.brain_id}: Completed training for epoch {epoch}")
+
+    def validate_epoch(self, epoch, enable):
+        """Validate for one epoch and return statistics."""
+        print(f"Brain {self.brain_id}: Starting validation for epoch {epoch}")
+        self._fit_valid(valid_set=self.valid_loader, epoch=epoch, enable=enable)
+        print(f"Brain {self.brain_id}: Completed validation for epoch {epoch}")
+        return self.last_valid_stats
+
+    def on_stage_end(self, stage, stage_loss, epoch=None):
+        """Gets called at the end of each epoch."""
+        # Store the train loss until the validation stage
+        if stage == sb.Stage.TRAIN:
+            self.train_loss = stage_loss
+            return
+
+        # Calculate metrics
+        stats = self.calc_epoch_metrics(stage_loss)
+
+        # At the end of validation, store stats for retrieval
+        if stage == sb.Stage.VALID:
+            # Log stats locally
+            self.hparams.train_logger.log_stats(
+                {"Epoch": epoch, "Brain": self.brain_id},
+                train_stats={"loss": self.train_loss},
+                valid_stats=stats,
+            )
+
+            # Store stats to be returned by validate_epoch
+            self.last_valid_stats = stats
+            print(f"Brain {self.brain_id}: Validation stats - {stats}")
+
+        # Handle test stage
+        if stage == sb.Stage.TEST:
+            self.hparams.train_logger.log_stats(
+                {"Epoch loaded": self.hparams.epoch_counter.current, "Brain": self.brain_id},
+                test_stats=stats,
+            )
+
+        # Finalize cache if enabled
+        self.finalize_cache()

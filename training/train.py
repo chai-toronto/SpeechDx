@@ -79,20 +79,6 @@ def train_with_ray(config, hparams_file, run_opts, overrides):
     dataio_prep_fn = getattr(data_io_module, hparams["dataio_prep_fn"])
     datasets = dataio_prep_fn(hparams)
 
-    brain_names = [f"brain_{i}" for i in range(hparams["num_fold"])]
-    gpus = ray.get_runtime_context().get_assigned_resources()["GPU"]
-    if gpus > 0 and hparams["num_fold"] % gpus == 0:
-        print("Paralell brains mode")
-        pg = ray.get_current_placement_group()
-        strat = PlacementGroupSchedulingStrategy(placement_group=pg, placement_group_capture_child_tasks=True)
-        brains = [DiagnosticsCVBrain
-                  .options(scheduling_strategy=strat)
-                    .remote(num_brains=hparams["num_fold"],
-                            modules=hparams["modules"],
-                            opt_class=hparams["opt_class"],
-                            hparams=hparams,
-                            run_opts=run_opts,
-                            checkpointer=hparams["checkpointer"]) for _ in brain_names]
     # Initialize the Brains object with Ray Tune reporter
     brains = Brains(
         num_brains=hparams["num_fold"],
@@ -113,7 +99,6 @@ def train_with_ray(config, hparams_file, run_opts, overrides):
         valid_loader_kwargs=hparams["val_dataloader_options"],
         progressbar=hparams["progressbar"]
     )
-
 
 def parse_hp_search_space(hparams):
     """Parse hyperparameter search space from hparams dict.
@@ -265,7 +250,7 @@ if __name__ == "__main__":
             name="hp_optimization",
             search_alg=search_alg,
             scheduler=scheduler,
-            resources_per_trial=tune_config.get("resources_per_trial", {"cpu": 1, "gpu": 1}),
+            resources_per_trial=tune_config.get("resources_per_trial", {"cpu": 1, "gpu": 0}),
         )
 
         # Print best hyperparameters
