@@ -1,5 +1,5 @@
 import torch
-from sklearn.metrics import roc_auc_score
+from torchmetrics.classification import BinaryAUROC
 from torch import Tensor
 
 
@@ -26,9 +26,8 @@ class Record:
 
 def roc_auc_score_rev(pred, tgt):
     """Flipping the signatures."""
-    pred = pred.cpu().numpy()
-    tgt = tgt.cpu().numpy()
-    return roc_auc_score(tgt, pred)
+    metric = BinaryAUROC()
+    return metric(pred, tgt).item()
 
 def accuracy(pred: Tensor, tgt: Tensor) -> float:
     pred_label = (pred >= 0.5).long()

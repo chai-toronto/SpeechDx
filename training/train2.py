@@ -39,6 +39,7 @@ from hyperpyyaml import load_hyperpyyaml
 from training.brain import DiagnosticsBrain
 from training.brains import Brains, DiagnosticsCVBrain
 
+
 def train_with_ray(config, hparams_file, run_opts, overrides):
     """Ray Tune trainable function that wraps the SpeechBrain training loop.
 
@@ -78,16 +79,29 @@ def train_with_ray(config, hparams_file, run_opts, overrides):
     dataio_prep_fn = getattr(data_io_module, hparams["dataio_prep_fn"])
     datasets = dataio_prep_fn(hparams)
 
-    # ============== KEY CHANGE: New Brains API ==============
-    # Initialize the Brains object by passing hparams_file and overrides
-    # instead of the loaded hparams (which contains unpickleable modules)
+    brain_names = [f"brain_{i}" for i in range(hparams["num_fold"])]
+    gpus = ray.get_runtime_context().get_assigned_resources()["GPU"]
+    if gpus > 0 and hparams["num_fold"] % gpus == 0:
+        print("Paralell brains mode")
+        pg = ray.get_current_placement_group()
+        strat = PlacementGroupSchedulingStrategy(placement_group=pg, placement_group_capture_child_tasks=True)
+        brains = [DiagnosticsCVBrain
+                  .options(scheduling_strategy=strat)
+                    .remote(num_brains=hparams["num_fold"],
+                            modules=hparams["modules"],
+                            opt_class=hparams["opt_class"],
+                            hparams=hparams,
+                            run_opts=run_opts,
+                            checkpointer=hparams["checkpointer"]) for _ in brain_names]
+    # Initialize the Brains object with Ray Tune reporter
     brains = Brains(
-        hparams_file=hparams_file,      # Pass file path
-        overrides=ray_overrides,         # Pass overrides dict
-        run_opts=run_opts,               # Pass run_opts
+        num_brains=hparams["num_fold"],
+        modules=hparams["modules"],
+        opt_class=hparams["opt_class"],
+        hparams=hparams,
+        run_opts=run_opts,
+        checkpointer=hparams["checkpointer"]
     )
-    # Each Ray actor will independently load hparams from the file
-    # ========================================================
 
     train_sets = [datasets[f"train_{i}"] for i in range(hparams["num_fold"])]
     valid_sets = [datasets[f"val_{i}"] for i in range(hparams["num_fold"])]
@@ -241,22 +255,6 @@ if __name__ == "__main__":
             reduction_factor=hparams.get("reduction_factor", 2),
         )
 
-        resources_per_trial = tune_config.get("resources_per_trial", {"cpu": 1, "gpu": 0})
-        num_workers = hparams.get("num_workers", 1)
-        num_folds = hparams.get("num_fold", 1)
-
-        resources_split = []
-        for _ in range(num_folds):
-            resources_split.append({
-                "cpu": num_workers,
-                "gpu": 1
-            })
-            resources_per_trial["cpu"] -= num_workers
-            resources_per_trial["gpu"] -= 1
-
-        resources_split.insert(0, resources_per_trial)
-        resources_per_trial = tune.PlacementGroupFactory(resources_split)
-
         # Run hyperparameter optimization
         analysis = tune.run(
             trainable,
@@ -267,7 +265,7 @@ if __name__ == "__main__":
             name="hp_optimization",
             search_alg=search_alg,
             scheduler=scheduler,
-            resources_per_trial=resources_per_trial
+            resources_per_trial=tune_config.get("resources_per_trial", {"cpu": 1, "gpu": 1}),
         )
 
         # Print best hyperparameters
@@ -285,10 +283,14 @@ if __name__ == "__main__":
 
     # Train final model
     if best_config is not None:
-        # Update overrides with best config
+        # Update overrides with Ray Tune config
         ray_overrides = overrides.copy() if overrides else {}
         for key, value in best_config.items():
             ray_overrides[key] = value
+
+        # Load hyperparameters with Ray Tune config overrides
+        with open(hparams_file) as fin:
+            hparams = load_hyperpyyaml(fin, ray_overrides)
         overrides = ray_overrides
 
     hparams["output_folder"] = os.path.join(hparams["output_folder"], 'final_model')
