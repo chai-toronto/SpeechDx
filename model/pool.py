@@ -34,7 +34,7 @@ def attn_pool(lengths, scores, x):
         return pooled
 
     lengths = (lengths * T_max).long()  # Convert into absolute lengths
-    lengths = lengths.clamp(min=1)      # avoid zero-lengths
+    lengths = lengths.clamp(min=1, max=T_max)      # avoid zero-lengths
 
     # Build mask: True for real tokens
     t = torch.arange(T_max, device=x.device).unsqueeze(0)  # (1, T_max)
