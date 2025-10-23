@@ -22,9 +22,10 @@ class Wav2Vec2(nn.Module):
         self.sample_rate = sample_rate
 
     def forward(self, x, lengths=None):
-        x = self.processor(x,
+        feature = self.processor(x,
                             return_tensors="pt",
                             sampling_rate=self.sample_rate).input_values[0]
+        x = feature.to(x.device, dtype=x.dtype)
 
         B, T = x.shape
         mask = None
