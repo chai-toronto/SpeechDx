@@ -162,7 +162,7 @@ class Brains:
         ray.get(init_futures)
 
         # Training loop - iterate through epochs
-        for epoch in range(self.hparams.get('epoch_counter', 1)):
+        for epoch in self.hparams.get('epoch_counter'):
             print(f"\n{'='*60}")
             print(f"Epoch {epoch} - Training all {self.num_brains} brains concurrently")
             print(f"{'='*60}")
@@ -221,7 +221,7 @@ class Brains:
             brain.on_fit_start()
 
         # Training loop - iterate through epochs
-        for epoch in range(self.hparams.get('epoch_counter', 1)):
+        for epoch in self.hparams.get('epoch_counter', 1):
             print(f"\n{'='*60}")
             print(f"Epoch {epoch} - Training {self.num_brains} brains sequentially (CPU)")
             print(f"{'='*60}")
