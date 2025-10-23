@@ -353,7 +353,7 @@ class DiagnosticsCVBrain(DiagnosticsBrain):
     def train_epoch(self, epoch, enable):
         """Train for one epoch."""
         print(f"Brain {self.brain_id}: Starting training for epoch {epoch}")
-        with torch.detect_anomaly():
+        with torch.autograd.detect_anomaly():
             self._fit_train(train_set=self.train_loader, epoch=epoch, enable=enable)
         print(f"Brain {self.brain_id}: Completed training for epoch {epoch}")
 
