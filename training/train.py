@@ -247,14 +247,14 @@ if __name__ == "__main__":
 
         resources_split = []
         for _ in range(num_folds):
-            resources_split.append([{
+            resources_split.append({
                 "cpu": num_workers,
                 "gpu": 1
-            }])
+            })
             resources_per_trial["cpu"] -= num_workers
             resources_per_trial["gpu"] -= 1
 
-        resources_split.insert(0, [resources_per_trial])
+        resources_split.insert(0, resources_per_trial)
         resources_per_trial = tune.PlacementGroupFactory(resources_split)
 
         # Run hyperparameter optimization

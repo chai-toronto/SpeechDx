@@ -93,7 +93,10 @@ class Brains:
 
         for i in range(self.num_brains):
             # Pass hparams_file and overrides instead of loaded hparams
-            brain = DiagnosticsCVBrain.remote(
+            brain = DiagnosticsCVBrain.options(
+                num_gpus=1,
+                num_cpus=self.hparams.get('num_workers', 4)
+            ).remote(
                 brain_id=i,
                 hparams_file=str(self.hparams_file),  # Ensure it's a string path
                 overrides=self.overrides,
@@ -270,7 +273,7 @@ class Brains:
         print(f"{'='*60}\n")
 
 
-@ray.remote(num_gpus=1)
+@ray.remote
 class DiagnosticsCVBrain(DiagnosticsBrain):
     """
     Remote Ray actor version of DiagnosticsBrain for concurrent GPU training.
