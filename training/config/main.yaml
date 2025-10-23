@@ -89,6 +89,7 @@ max_length: !ref <encoder_params[encoder]> # max length in samples (20s)
 # ----------------------------------
 test_only: True  # Set to True to only run evaluation on test set
 precision: bf16
+
 eval_precision: bf16
 number_of_epochs: !ref <training_params[number_of_epochs]>
 batch_size: !ref <training_params[batch_size]>
@@ -140,6 +141,7 @@ optim_mode: !ref <hpopt_params[optim_mode]>
 max_concurrent_trials: !ref <hpopt_params[max_concurrent_trials]>
 grace_period: !ref <hpopt_params[grace_period]>
 reduction_factor: !ref <hpopt_params[reduction_factor]>
+sequential: !ref <hpopt_params[sequential]>
 
 # Ray Tune specific configuration
 ray_tune_config: !ref <hpopt_params[ray_tune_config]>

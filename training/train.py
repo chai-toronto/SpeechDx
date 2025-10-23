@@ -242,20 +242,21 @@ if __name__ == "__main__":
         )
 
         resources_per_trial = tune_config.get("resources_per_trial", {"cpu": 1, "gpu": 0})
-        num_workers = hparams.get("num_workers", 1)
-        num_folds = hparams.get("num_fold", 1)
+        if not hparams.get('sequential', True):
+            num_workers = hparams.get("num_workers", 1)
+            num_folds = hparams.get("num_fold", 1)
 
-        resources_split = []
-        for _ in range(num_folds):
-            resources_split.append({
-                "CPU": num_workers,
-                "GPU": 1
-            })
-            resources_per_trial["cpu"] -= num_workers
-            resources_per_trial["gpu"] -= 1
+            resources_split = []
+            for _ in range(num_folds):
+                resources_split.append({
+                    "CPU": num_workers,
+                    "GPU": 1
+                })
+                resources_per_trial["cpu"] -= num_workers
+                resources_per_trial["gpu"] -= 1
 
-        resources_split.insert(0, {'CPU': resources_per_trial["cpu"]})
-        resources_per_trial = tune.PlacementGroupFactory(resources_split)
+            resources_split.insert(0, {'CPU': resources_per_trial["cpu"]})
+            resources_per_trial = tune.PlacementGroupFactory(resources_split)
 
         # Run hyperparameter optimization
         analysis = tune.run(

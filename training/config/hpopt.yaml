@@ -6,6 +6,7 @@ optim_mode: 'max'  # 'min' or 'max' depending on the metric
 max_concurrent_trials: 1  # Number of concurrent trials to run
 grace_period: 5  # Number of epochs to wait before considering early stopping
 reduction_factor: 2  # Factor by which to reduce trials at each rung
+sequential: False  # Set to True to run trials sequentially. Else, runs in parallel.
 
 # Ray Tune specific configuration
 ray_tune_config:

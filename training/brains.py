@@ -17,17 +17,16 @@ from training.brain import DiagnosticsBrain
 
 class Brains:
     """
-    Manager for multiple diagnostic brains with support for both concurrent GPU
-    and sequential CPU training.
+    Manager for multiple diagnostic brains with support for both concurrent
+    and sequential training.
 
-    GPU Mode (concurrent):
+     Concurrent Mode:
         - Each brain gets its own GPU via Ray remote actors
         - All brains train/validate in parallel
         - Requires num_fold GPUs available
 
-    CPU Mode (sequential):
+    Sequential Mode:
         - Falls back to sequential training when GPUs unavailable
-        - Avoids CPU contention from concurrent execution
     """
 
     def __init__(self, hparams_file, overrides, run_opts, **kwargs):
@@ -51,12 +50,12 @@ class Brains:
         self.run_opts = run_opts
 
         # Determine execution mode based on GPU availability and configuration
-        self.use_gpu = self._check_gpu_availability()
+        self.sequential = hparams.get('sequential', True)
 
-        if self.use_gpu:
+        if not self.sequential:
             self._init_concurrent_gpu_mode()
         else:
-            self._init_sequential_cpu_mode()
+            self._init_sequential_mode()
 
     def _check_gpu_availability(self):
         """Check if GPU training is possible and advisable."""
@@ -67,7 +66,7 @@ class Brains:
 
         # Check CUDA availability
         if not torch.cuda.is_available():
-            print("WARNING: CUDA not available. Falling back to sequential CPU training.")
+            print("WARNING: CUDA not available. Falling back to CPU training.")
             print("This will be significantly slower than GPU training.")
             return False
 
@@ -106,8 +105,8 @@ class Brains:
 
         print(f"Initialized {self.num_brains} brains as Ray actors (concurrent GPU mode)")
 
-    def _init_sequential_cpu_mode(self):
-        """Initialize brains as local objects for sequential CPU training."""
+    def _init_sequential_mode(self):
+        """Initialize brains as local objects for sequential training."""
         self.concurrent = False
         self.brains = []
 
@@ -120,7 +119,7 @@ class Brains:
             )
             self.brains.append(brain)
 
-        print(f"Initialized {self.num_brains} brains for sequential CPU training")
+        print(f"Initialized {self.num_brains} brains for sequential training")
 
     def __len__(self):
         return len(self.brains)
@@ -428,7 +427,7 @@ class DiagnosticsSequentialBrain(DiagnosticsBrain):
         self.train_loader = None
         self.valid_loader = None
         self.last_valid_stats = None
-        print(f"Brain {brain_id} initialized for sequential CPU training")
+        print(f"Brain {brain_id} initialized for sequential training")
 
     def setup_dataloaders(self, train_set, valid_set, train_loader_kwargs, valid_loader_kwargs):
         """Setup data loaders for this brain."""
