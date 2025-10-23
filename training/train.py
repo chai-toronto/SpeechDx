@@ -27,6 +27,7 @@ from pathlib import Path
 from ray.tune.schedulers import ASHAScheduler
 from ray.tune.search.optuna import OptunaSearch
 from ray.tune.search.searcher import ConcurrencyLimiter
+from ray.tune.stopper import TrialPlateauStopper
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 os.environ["RAY_CHDIR_TO_TRIAL_DIR"] = "0"
@@ -241,6 +242,14 @@ if __name__ == "__main__":
             reduction_factor=hparams.get("reduction_factor", 2),
         )
 
+        plateau_stopper = TrialPlateauStopper(
+            metric=optim_metric,
+            mode=optim_mode,  # "max" for F1/ROC, "min" for loss
+            std=hparams.get("plateau_std", 1e-4),
+            num_results=hparams.get("plateau_window", 9),  # like "patience window"
+            grace_period=hparams.get("patience_grace", 10),  # minimum epochs before checking
+        )
+
         resources_per_trial = tune_config.get("resources_per_trial", {"cpu": 1, "gpu": 0})
         if not hparams.get('sequential', True):
             num_workers = hparams.get("num_workers", 1)
@@ -268,7 +277,8 @@ if __name__ == "__main__":
             name="hp_optimization",
             search_alg=search_alg,
             scheduler=scheduler,
-            resources_per_trial=resources_per_trial
+            resources_per_trial=resources_per_trial,
+            stop=plateau_stopper
         )
 
         # Print best hyperparameters

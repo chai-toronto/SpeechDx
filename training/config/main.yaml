@@ -95,7 +95,9 @@ batch_size: !ref <training_params[batch_size]>
 lr: !ref <training_params[lr]>
 l2: !ref <training_params[l2]>
 sample_rate: !ref <encoder_params[sample_rate]>
+
 skip_nonfinite_grads: True
+nonfinite_patience: 10
 
 # Data loader
 num_workers: !ref <training_params[num_workers]>
