@@ -310,7 +310,8 @@ class DiagnosticsCVBrain(DiagnosticsBrain):
         if torch.cuda.is_available():
             gpu_ids = ray.get_gpu_ids()
             if gpu_ids:
-                self.device = f"cuda:{gpu_ids[0]}"
+                # self.device = f"cuda:{gpu_ids[0]}"
+                self.device = torch.device(f"cuda:0")
                 print(f"Brain {brain_id} initialized on device {self.device}")
             else:
                 self.device = "cpu"
