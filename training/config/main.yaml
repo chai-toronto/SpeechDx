@@ -97,21 +97,22 @@ l2: !ref <training_params[l2]>
 sample_rate: !ref <encoder_params[sample_rate]>
 
 # Data loader
+num_workers: !ref <training_params[num_workers]>
 train_dataloader_options:
   batch_size: !ref <batch_size>
   drop_last: False
-  num_workers: !ref <training_params[num_workers]>
+  num_workers: !ref <num_workers>
   shuffle: True
 
 val_dataloader_options:
   batch_size: !ref <batch_size>
   drop_last: False
-  num_workers: !ref <training_params[num_workers]>
+  num_workers: !ref <num_workers>
 
 test_dataloader_options:
   batch_size: !ref <batch_size>
   drop_last: False
-  num_workers: !ref <training_params[num_workers]>
+  num_workers: !ref <num_workers>
 
 # Logger
 train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
