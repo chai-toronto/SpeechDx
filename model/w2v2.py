@@ -22,6 +22,12 @@ class Wav2Vec2(nn.Module):
         self.sample_rate = sample_rate
 
     def forward(self, x, lengths=None):
+        """
+        If output_hidden_states is True, returns a tuple of hidden state tensors from all transformer layers.
+        Else, returns the last hidden state as a tensor.
+
+        Note: processor already normalizes the input waveform.
+        """
         feature = self.processor(x,
                             return_tensors="pt",
                             sampling_rate=self.sample_rate).input_values[0]
@@ -39,14 +45,11 @@ class Wav2Vec2(nn.Module):
 
             mask = (t < lengths.unsqueeze(1)) * 1  # (B, T)
 
-        with (torch.enable_grad() if not self.freeze_encoder else torch.no_grad()):
-            output = self.model(x, attention_mask=mask)
+        with (torch.no_grad() if self.freeze_encoder else torch.enable_grad()):
+            if self.output_hidden_states:
+                return self.model(x, attention_mask=mask).hidden_states[1:] # tuple of 24 (B, T, D)
+            else:
+                return self.model(x, attention_mask=mask).last_hidden_state # (B, T, D) matrix
 
-        if self.output_hidden_states:
-            hidden_states = output.hidden_states[1:]  # tuple of (B, T, D), including input embeddings
-            output = torch.stack(hidden_states, dim=1)  # (B, L, T, D)
-        else:
-            output = output.last_hidden_state  # (B, T, D)
 
-        return output
 

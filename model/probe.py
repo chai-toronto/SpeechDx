@@ -66,7 +66,7 @@ class LayerTemporalProbe(TemporalProbe):
 
     def forward(self, x, lengths=None):
         """
-        x: (B, L, T_max, D) matrix of batch x layers x time x features.
+        x: Tuples of each layer (B, T_max, D) tensor of batch x time x features.
         Note: L can be at any position (e.g., B, T_max, L, D), specifiable in layer_pooler.
         lengths: (B,) relative lengths (to T_max) per sequence. If None, we assume no padding.
         Returns:

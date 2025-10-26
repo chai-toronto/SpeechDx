@@ -161,6 +161,12 @@ def dataio_prep(hparams):
         label_encoded = label
         yield label_encoded
 
+    @sb.utils.data_pipeline.takes("id")
+    @sb.utils.data_pipeline.provides("emb")
+    def cache_emb(id):
+        """Fe"""
+        return None
+
     # Retrieve the data
     with open(hparams["train_annotation"], "r") as f:
         train_folds = json.load(f)

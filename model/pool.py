@@ -1,6 +1,10 @@
+from typing import Tuple
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch import Tensor
+
 
 class AttentiveTemporalPoolLite(nn.Module):
     def __init__(self, input_dim):
@@ -99,8 +103,7 @@ class LayerWeightedAvgPool(nn.Module):
         learnable (bool): if False, keeps uniform fixed weights.
 
     Forward:
-        x: tensor with a layer dimension (e.g., (B, L, T, D) or (L, B, T, D))
-        layer_dim: which dimension is the layer axis (default: 1)
+        x: Tuples of each layer (B, T_max, D) tensor of batch x time x features.
         layer_mask: optional boolean mask of shape (L,) where False drops a layer
         return_weights: if True, also returns the normalized weights (L,)
 
@@ -120,31 +123,27 @@ class LayerWeightedAvgPool(nn.Module):
             logits = torch.linspace(-1.0, 1.0, steps=num_layers)
 
         self.logits = nn.Parameter(logits, requires_grad=learnable)
-        self.layer_dim = layer_dim
 
-    def forward(self, x, layer_mask=None, return_weights=False):
+    def forward(self, x: Tuple[Tensor], layer_mask=None, return_weights=False):
         # Get the number of layers present in x along the chosen dimension
-        L = x.size(self.layer_dim)
-        assert L == self.num_layers, f"Expected L={self.num_layers}, got L={L}"
+        num_layer = len(x)
+        assert num_layer == self.num_layers, f"Expected L={self.num_layers}, got L={num_layer}"
 
         logits = self.logits / self.temperature
 
         if layer_mask is not None:
             # layer_mask: bool or {0,1} of shape (L,)
             mask = layer_mask.to(dtype=torch.bool)
-            if mask.shape != (L,):
+            if mask.shape != (num_layer,):
                 raise ValueError(f"layer_mask must have shape (L,), got {mask.shape}")
             # Exclude masked layers by setting their logit to -inf before softmax
             logits = torch.where(mask, logits, torch.full_like(logits, float("-inf")))
 
         w = F.softmax(logits, dim=0)  # (L,)
 
-        # Weighted sum over the layer dimension
-        # torch.tensordot removes the specified axes:
-        pooled = torch.tensordot(x, w, dims=([self.layer_dim], [0]))
-        # tensordot moves dimensions; keep original order except the removed axis
-        # (PyTorch keeps remaining x-dims in order)
-        # print(f'pooled shape: {pooled.shape}')
+        pooled = torch.zeros_like(x[0])  # (B, T_max, D)
+        for wi, xi in zip(w, x):
+            pooled.add_(xi, alpha=wi.item())
 
         return (pooled, w) if return_weights else pooled
 
