@@ -6,8 +6,8 @@ ray
 scikit_learn==1.7.2
 speechbrain==1.0.3
 sylber==0.1.4
-torch==2.8.0
-torchaudio==2.8.0
+torch<=2.8.0
+torchaudio<=2.8.0
 transformers
 torchmetrics
 optuna
