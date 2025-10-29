@@ -12,8 +12,8 @@ sequential: False  # Set to True to run trials sequentially. Else, runs in paral
 ray_tune_config:
   num_samples: 10  # Number of trial runs
   resources_per_trial:
-    cpu: 20
-    gpu: 2
+    cpu: 92
+    gpu: 4
 
 
 # Define hyperparameter search space

@@ -1,6 +1,11 @@
 num_workers: 8 # Change when on HPC
-batch_size: 8
+batch_size: 36
 progressbar: True
+test_only: False
+precision: fp32
+eval_precision: bf16
+skip_nonfinite_grads: True
+nonfinite_patience: 10
 # Ray will override these during hyperparameter optimization
 number_of_epochs: 32
 lr: 0.0001344454306700234

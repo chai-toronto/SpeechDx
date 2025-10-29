@@ -306,6 +306,7 @@ class DiagnosticsCVBrain(DiagnosticsBrain):
         self.valid_loader = None
         self.last_valid_stats = None
 
+
         # Set device to the GPU allocated by Ray
         if torch.cuda.is_available():
             gpu_ids = ray.get_gpu_ids()

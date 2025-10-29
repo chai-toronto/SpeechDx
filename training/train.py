@@ -28,7 +28,6 @@ from ray.tune.schedulers import ASHAScheduler
 from ray.tune.search.optuna import OptunaSearch
 from ray.tune.search.searcher import ConcurrencyLimiter
 from ray.tune.stopper import TrialPlateauStopper
-from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 os.environ["RAY_CHDIR_TO_TRIAL_DIR"] = "0"
 import ray
