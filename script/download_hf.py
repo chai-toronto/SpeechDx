@@ -11,7 +11,7 @@ if __name__ == "__main__":
         repo_id=repo_id,
         cache_dir=None,
         local_dir=None,
-        local_dir_use_symlinks=True,
+        local_dir_use_symlinks=False,
     )
 
     print("Success!")
