@@ -3,6 +3,7 @@ HyperPyYAML==1.2.2
 numpy
 pandas==2.3.3
 ray
+ray[tune]
 scikit_learn==1.7.2
 speechbrain==1.0.3
 sylber==0.1.4
