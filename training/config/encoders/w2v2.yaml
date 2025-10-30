@@ -5,7 +5,7 @@ num_layers: 24
 layer_dim: 1
 
 encoder: !new:model.w2v2.Wav2Vec2
-  ssl_encoder_source: "facebook/wav2vec2-large-960h-lv60-self"
+  ssl_encoder_source: "$HF_HUB_CACHE/models/facebook/wav2vec2-large-960h-lv60-self"
   freeze_encoder: True
   output_hidden_states: False
   sample_rate: !ref <sample_rate>
