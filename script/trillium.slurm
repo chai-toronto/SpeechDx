@@ -1,6 +1,6 @@
 #!/bin/bash -l
 #SBATCH --job-name=speech-health-ai
-#SBATCH --chdir=$SCRATCH/kieu/speech-health-ai  # Set the working directory
+#SBATCH --chdir=$SCRATCH/speech-health-ai  # Set the working directory
 #SBATCH --output=exps/slurm_logs/%x_%j.out     # Output file (%x=job-name, %j=job-id)
 #SBATCH --error=exps/slurm_logs/%x_%j.err      # Error file
 #SBATCH --time=7:00:00             # Time limit (hh:mm:ss)
