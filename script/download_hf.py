@@ -1,0 +1,20 @@
+import sys
+
+from huggingface_hub import snapshot_download
+
+if __name__ == "__main__":
+    repo_id = sys.argv[1]  # e.g., "username/repo_name"
+
+    print(f"Downloading and caching model: {repo_id}")
+    # Download fully into HF default cache (~/.cache/huggingface/hub)
+    path = snapshot_download(
+        repo_id=repo_id,
+        cache_dir=None,
+        local_dir=None,
+        local_dir_use_symlinks=True,
+    )
+
+    print("Success!")
+    print(f"Model cached at: {path}")
+    print("You can now load it anywhere (even offline) using:")
+    print(f'  from transformers import AutoModel\n  AutoModel.from_pretrained("{repo_id}")')
