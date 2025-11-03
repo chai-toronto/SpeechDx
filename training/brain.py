@@ -2,7 +2,6 @@ from pathlib import Path
 
 import torch
 import speechbrain as sb
-
 from training.metric import Record, roc_auc_score_rev, accuracy
 
 
@@ -18,6 +17,7 @@ class DiagnosticsBrain(sb.Brain):
         output probabilities over the N classes.
 
         """
+
         batch = batch.to(self.device)
         wavs, lens = batch.signal
 
