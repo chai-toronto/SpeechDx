@@ -3,6 +3,7 @@ from typing import Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from speechbrain.lobes.models.ECAPA_TDNN import AttentiveStatisticsPooling
 from torch import Tensor
 
 
@@ -90,6 +91,23 @@ class AvgTPool(nn.Module):
             sum_x = x.sum(dim=-2)         # (B, D)
             pooled = sum_x / lengths.unsqueeze(1)  # (B, D)
             return pooled
+
+class ASP(nn.Module):
+    def __init__(self, input_dim):
+        super().__init__()
+        self.pool = AttentiveStatisticsPooling(input_dim, attention_channels = input_dim, global_context=True)
+
+    def forward(self, x, lengths=None):
+        """
+        x: (B, T_max, D) padded with zeros in the tail
+        lengths: (B,) relative lengths (to T_max) per sequence. If None, we assume no padding.
+        Returns:
+          pooled:  (B, 2*D)
+        """
+        x = x.transpose(1,2)  # (B, D, T_max)
+        x = self.pool(x, lengths).transpose(1, 2)  # (B, 1, 2*D)
+        x = x.squeeze(1)  # (B, 2*D)
+        return x
 
 
 class LayerWeightedAvgPool(nn.Module):
