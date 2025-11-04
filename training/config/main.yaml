@@ -136,7 +136,7 @@ epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
 # Optimizer
 opt_class: !name:torch.optim.AdamW
   lr: !ref <lr>
-#  weight_decay: !apply:operator.mul [!ref <lr>, !ref <l2_ratio>]
+  weight_decay: !apply:operator.mul [!ref <lr>, !ref <l2_ratio>]
 
 
 # HP Optimizer

@@ -1,6 +1,6 @@
 # HP Optimizer
 # Enable Ray Tune hyperparameter optimization
-hpopt_mode: null  # Set to 'ray' to enable, null to disable
+hpopt_mode: ray  # Set to 'ray' to enable, null to disable
 optim_metric: 'F1'
 optim_mode: 'max'  # 'min' or 'max' depending on the metric
 max_concurrent_trials: 1  # Number of concurrent trials to run
@@ -27,6 +27,6 @@ hpopt_config:
     type: "!tune.randint"
     values: [30, 100]
 
-#  l2_ratio:
-#    type: "!tune.uniform"
-#    values: [0.01, 0.5]
+  l2_ratio:
+    type: "!tune.uniform"
+    values: [0.01, 0.5]
