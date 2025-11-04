@@ -3,6 +3,7 @@ from typing import Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from speechbrain.dataio.dataio import length_to_mask
 from speechbrain.lobes.models.ECAPA_TDNN import AttentiveStatisticsPooling
 from torch import Tensor
 
@@ -205,7 +206,7 @@ class LayerWeightedAvgPool(nn.Module):
 
         self.logits = nn.Parameter(logits, requires_grad=learnable)
 
-    def forward(self, x: Tuple[Tensor], layer_mask=None, return_weights=False):
+    def forward(self, x: Tuple[Tensor], lengths, layer_mask=None, return_weights=False):
         # Get the number of layers present in x
         num_layer = len(x)
         assert num_layer == self.num_layers, f"Expected L={self.num_layers}, got L={num_layer}"
@@ -237,8 +238,11 @@ class LayerWeightedAvgPool(nn.Module):
         # Initialize pooled tensor
         pooled = torch.zeros_like(x[0])  # (B, T_max, D)
 
+        mask = length_to_mask(lengths) if lengths is not None else None # (B, T_max)
+
         # Weighted sum with numerical checks
         for wi, xi in zip(w, x):
+            xi = xi * mask.unsqueeze(-1) if mask is not None else xi
             if not torch.isnan(xi).any() and not torch.isinf(xi).any():
                 pooled = pooled + xi * wi.item()
             else:

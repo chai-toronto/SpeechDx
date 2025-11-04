@@ -82,6 +82,6 @@ class LayerTemporalProbe(nn.Module):
         Returns:
           logits: (B, num_labels)
         """
-        layer_pooled = self.layer_pooler(x)  # (B, T_max, D)
+        layer_pooled = self.layer_pooler(x, lengths)  # (B, T_max, D)
         pooled = self.pooler(layer_pooled, lengths)  # (B, D)
         return self.classifier(pooled)
