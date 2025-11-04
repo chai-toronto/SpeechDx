@@ -2,7 +2,7 @@ File: config/main.yaml
 random_seed: 2025
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
-model_name: w2v2_P
+model_name: w2v2_TP
 data_folder: ./data/
 #----------------------------------
 # Most of the knobs you should change
@@ -12,7 +12,7 @@ encoder_params: !include:encoders/w2v2.yaml
 # where to store the cached encoder outputs. Will be overwritten every run.
 # Turn this on for B x D only, o.w. too big files!
 # Also havent thought about multi-GPU  here.
-cache_encoder: True
+cache_encoder: False
 cache_dir: !ref ./.cache/
 
 probe_params: !include:probes/TProbe.yaml
