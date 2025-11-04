@@ -21,7 +21,7 @@ ray_tune_config:
 hpopt_config:
   lr:
     type: "!tune.loguniform"
-    values: [1e-4, 1e-3]
+    values: [1e-5, 2e-4]
 
   number_of_epochs:
     type: "!tune.randint"
@@ -29,7 +29,7 @@ hpopt_config:
 
   l2:
     type: "!tune.loguniform"
-    values: [0.01, 0.1]
+    values: [5e-4, 2e-2]
 
 #  l2_ratio:
 #    type: "!tune.uniform"
