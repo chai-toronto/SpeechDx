@@ -97,7 +97,6 @@ def prepare_data(
         import json
         ensure_dir(manifest_train_path)
         with open(manifest_train_path, 'w') as f:
-            print("First non-JSONable:", locate_bad(train_dicts))
             json.dump(train_dicts, f, indent=5, cls=PathEncoder)
         ensure_dir(manifest_val_path)
         with open(manifest_val_path, 'w') as f:
