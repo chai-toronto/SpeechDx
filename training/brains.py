@@ -5,7 +5,6 @@ from speechbrain.dataio.dataloader import LoopedLoader
 from speechbrain.utils import hpopt as hp
 import speechbrain as sb
 import torch
-torch.autograd.set_detect_anomaly(True)
 from torch.utils.data import DataLoader
 from hyperpyyaml import load_hyperpyyaml
 
