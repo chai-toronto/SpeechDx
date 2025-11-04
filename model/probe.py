@@ -31,7 +31,7 @@ class LinearProbe(nn.Module):
     def forward(self, x, lengths=None):
         """
         x: (B, D) matrix of batch x features
-        Returns:h
+        Returns:
           logits: (B, num_labels)
         """
         return self.classifier(x)
