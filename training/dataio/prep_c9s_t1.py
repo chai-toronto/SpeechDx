@@ -64,7 +64,7 @@ def prepare_data(
 
         # Resolve path to be absolute
         df["path"] = Path(wav_folder) / df["path"].astype(str)
-        df["max_length"] = max_length
+        df["max_length"] = int(max_length)
 
         # split into test and non-test
         if new_test:
