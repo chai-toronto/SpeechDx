@@ -73,7 +73,8 @@ class DiagnosticsBrain(sb.Brain):
         Arguments
         ---------
         predictions : tensor
-            The output tensor from `compute_forward`.
+            The output tensor from `compute_forward`. Usually [B, 1] for binary
+            classification.
         batch : PaddedBatch
             This batch object contains all the relevant tensors for computation.
         stage : sb.Stage
@@ -87,7 +88,10 @@ class DiagnosticsBrain(sb.Brain):
         # Dynamically retrieve the label using the 'label_key' from hparams
         label_key = getattr(self.hparams, "label_key", "label_encoded")
         lab = getattr(batch, label_key)
-        lab = lab.to(self.device)
+        lab = lab.to(self.device) # [B]
+        if lab.dim() == 1:
+            lab = lab.unsqueeze(-1)  # [B, 1]
+        lab = lab.to(predictions)
 
         # Concatenate labels (due to data augmentation)
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "env_corrupt"):
