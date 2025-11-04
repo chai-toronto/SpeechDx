@@ -10,7 +10,7 @@ class Record:
 
     def add(self, pred, tgt):
         """pred and tgt must be homogeneous tensors"""
-        if pred.shape[-1] == 1: pred = pred.squeeze(-1) # [B]
+        assert pred.shape == tgt.shape
         self.preds.append(pred)
         self.tgts.append(tgt)
 
@@ -21,7 +21,6 @@ class Record:
     def get_all(self):
         preds = torch.cat(self.preds, dim=0)
         tgts = torch.cat(self.tgts, dim=0)
-        assert preds.shape == tgts.shape
         return preds, tgts
 
 def roc_auc_score_rev(pred, tgt):
