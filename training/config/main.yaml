@@ -106,19 +106,19 @@ train_dataloader_options:
   batch_size: !ref <batch_size>
   drop_last: False
   num_workers: !ref <num_workers>
-  peristent_workers: !ref <persistent_workers>
+  persistent_workers: !ref <persistent_workers>
   shuffle: True
 
 val_dataloader_options:
   batch_size: !ref <batch_size>
   drop_last: False
-  peristent_workers: !ref <persistent_workers>
+  persistent_workers: !ref <persistent_workers>
   num_workers: !ref <num_workers>
 
 test_dataloader_options:
   batch_size: !ref <batch_size>
   drop_last: False
-  peristent_workers: !ref <persistent_workers>
+  persistent_workers: !ref <persistent_workers>
   num_workers: !ref <num_workers>
 
 # Logger
