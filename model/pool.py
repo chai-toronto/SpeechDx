@@ -117,7 +117,7 @@ class LayerWeightedAvgPool(nn.Module):
         self.temperature = float(temperature)
 
         # logits -> softmax -> weights
-        logits = torch.zeros(num_layers)
+        logits = torch.randn(num_layers)
         if init == "last":
             # bias toward deeper layers (monotonic increasing logits)
             logits = torch.linspace(-1.0, 1.0, steps=num_layers)
