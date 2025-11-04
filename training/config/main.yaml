@@ -2,7 +2,7 @@ File: config/main.yaml
 random_seed: 2025
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
-model_name: w2v2_LTP
+model_name: w2v2_TP
 data_folder: ./data/
 #----------------------------------
 # Most of the knobs you should change
