@@ -243,7 +243,9 @@ class LayerWeightedAvgPool(nn.Module):
         # Weighted sum with numerical checks
         for wi, xi in zip(w, x):
             xi = xi * mask.unsqueeze(-1) if mask is not None else xi
-            # Normalize each [1, D] vector to unit norm to prevent large values7
+            # Turn all nan/inf into zeros before pooling
+            xi = torch.nan_to_num(xi, nan=0.0, posinf=0.0, neginf=0.0)
+            # Normalize each [1, D] vector to unit norm to prevent large values
             xi = xi / torch.linalg.vector_norm(xi, dim=-1, keepdim=True).clamp(min=self.eps)
             if not torch.isnan(xi).any() and not torch.isinf(xi).any():
                 pooled = pooled + xi * wi.item()
