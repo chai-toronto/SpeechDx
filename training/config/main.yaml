@@ -2,7 +2,7 @@ File: config/main.yaml
 random_seed: 2025
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
-model_name: w2v2_TP
+model_name: w2v2_P
 data_folder: ./data/
 #----------------------------------
 # Most of the knobs you should change
@@ -12,7 +12,7 @@ encoder_params: !include:encoders/w2v2.yaml
 # where to store the cached encoder outputs. Will be overwritten every run.
 # Turn this on for B x D only, o.w. too big files!
 # Also havent thought about multi-GPU  here.
-cache_encoder: False
+cache_encoder: True
 cache_dir: !ref ./.cache/
 
 probe_params: !include:probes/TProbe.yaml
@@ -101,20 +101,24 @@ nonfinite_patience: !ref <training_params[nonfinite_patience]>
 
 # Data loader
 num_workers: !ref <training_params[num_workers]>
+persistent_workers: !ref <training_params[persistent_workers]>
 train_dataloader_options:
   batch_size: !ref <batch_size>
   drop_last: False
   num_workers: !ref <num_workers>
+  peristent_workers: !ref <persistent_workers>
   shuffle: True
 
 val_dataloader_options:
   batch_size: !ref <batch_size>
   drop_last: False
+  peristent_workers: !ref <persistent_workers>
   num_workers: !ref <num_workers>
 
 test_dataloader_options:
   batch_size: !ref <batch_size>
   drop_last: False
+  peristent_workers: !ref <persistent_workers>
   num_workers: !ref <num_workers>
 
 # Logger
