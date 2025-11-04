@@ -110,15 +110,73 @@ class ASP(nn.Module):
         return x
 
 
+# class LayerWeightedAvgPool(nn.Module):
+#     """
+#     Learnable softmax weights over layers to pool across the layer dimension.
+#
+#     Args:
+#         num_layers (int): number of layers (L).
+#         init (str): 'uniform' (default) or 'last' to bias toward higher layers.
+#         temperature (float): softmax temperature; <1.0 makes weights peakier.
+#         learnable (bool): if False, keeps uniform fixed weights.
+#
+#     Forward:
+#         x: Tuples of each layer (B, T_max, D) tensor of batch x time x features.
+#         layer_mask: optional boolean mask of shape (L,) where False drops a layer
+#         return_weights: if True, also returns the normalized weights (L,)
+#
+#     Returns:
+#         pooled: x with the layer dimension removed (weighted average over L)
+#         (optionally) weights: the softmax weights over layers (L,)
+#     """
+#     def __init__(self, num_layers, layer_dim = 1, init="uniform", temperature=1.0, learnable=True):
+#         super().__init__()
+#         self.num_layers = num_layers
+#         self.temperature = float(temperature)
+#
+#         # logits -> softmax -> weights
+#         logits = torch.ones(num_layers)
+#         if init == "last":
+#             # bias toward deeper layers (monotonic increasing logits)
+#             logits = torch.linspace(-1.0, 1.0, steps=num_layers)
+#
+#         self.logits = nn.Parameter(logits, requires_grad=learnable)
+#
+#     def forward(self, x: Tuple[Tensor], layer_mask=None, return_weights=False):
+#         # Get the number of layers present in x along the chosen dimension
+#         num_layer = len(x)
+#         assert num_layer == self.num_layers, f"Expected L={self.num_layers}, got L={num_layer}"
+#
+#         logits = self.logits / self.temperature
+#
+#         if layer_mask is not None:
+#             # layer_mask: bool or {0,1} of shape (L,)
+#             mask = layer_mask.to(dtype=torch.bool)
+#             if mask.shape != (num_layer,):
+#                 raise ValueError(f"layer_mask must have shape (L,), got {mask.shape}")
+#             # Exclude masked layers by setting their logit to -inf before softmax
+#             logits = torch.where(mask, logits, torch.full_like(logits, float("-inf")))
+#
+#         w = F.softmax(logits, dim=0)  # (L,)
+#
+#         pooled = torch.zeros_like(x[0])  # (B, T_max, D)
+#         for wi, xi in zip(w, x):
+#             pooled.add_(xi, alpha=wi.item())
+#
+#         return (pooled, w) if return_weights else pooled
+
+
 class LayerWeightedAvgPool(nn.Module):
     """
     Learnable softmax weights over layers to pool across the layer dimension.
+    Now with numerical stability improvements.
 
     Args:
         num_layers (int): number of layers (L).
         init (str): 'uniform' (default) or 'last' to bias toward higher layers.
         temperature (float): softmax temperature; <1.0 makes weights peakier.
         learnable (bool): if False, keeps uniform fixed weights.
+        eps (float): small constant for numerical stability
 
     Forward:
         x: Tuples of each layer (B, T_max, D) tensor of batch x time x features.
@@ -129,40 +187,64 @@ class LayerWeightedAvgPool(nn.Module):
         pooled: x with the layer dimension removed (weighted average over L)
         (optionally) weights: the softmax weights over layers (L,)
     """
-    def __init__(self, num_layers, layer_dim = 1, init="uniform", temperature=1.0, learnable=True):
+
+    def __init__(self, num_layers, layer_dim=1, init="uniform", temperature=1.0, learnable=True, eps=1e-8):
         super().__init__()
         self.num_layers = num_layers
         self.temperature = float(temperature)
+        self.eps = eps
 
-        # logits -> softmax -> weights
-        logits = torch.ones(num_layers)
-        if init == "last":
-            # bias toward deeper layers (monotonic increasing logits)
-            logits = torch.linspace(-1.0, 1.0, steps=num_layers)
+        # Initialize logits with proper scaling
+        if init == "uniform":
+            logits = torch.zeros(num_layers)  # Start with zeros for uniform after softmax
+        elif init == "last":
+            # Bias toward deeper layers with reasonable range
+            logits = torch.linspace(-0.5, 0.5, steps=num_layers)
+        else:
+            logits = torch.zeros(num_layers)
 
         self.logits = nn.Parameter(logits, requires_grad=learnable)
 
     def forward(self, x: Tuple[Tensor], layer_mask=None, return_weights=False):
-        # Get the number of layers present in x along the chosen dimension
+        # Get the number of layers present in x
         num_layer = len(x)
         assert num_layer == self.num_layers, f"Expected L={self.num_layers}, got L={num_layer}"
 
-        logits = self.logits / self.temperature
+        # Apply temperature scaling
+        logits = self.logits / max(self.temperature, self.eps)
+
+        # Clip logits to prevent extreme values
+        logits = torch.clamp(logits, min=-10, max=10)
 
         if layer_mask is not None:
             # layer_mask: bool or {0,1} of shape (L,)
             mask = layer_mask.to(dtype=torch.bool)
             if mask.shape != (num_layer,):
                 raise ValueError(f"layer_mask must have shape (L,), got {mask.shape}")
-            # Exclude masked layers by setting their logit to -inf before softmax
-            logits = torch.where(mask, logits, torch.full_like(logits, float("-inf")))
+            # Use large negative value instead of -inf for stability
+            logits = torch.where(mask, logits, torch.full_like(logits, -1e9))
 
-        w = F.softmax(logits, dim=0)  # (L,)
+        # Stable softmax computation
+        logits_max = logits.max()
+        logits_stable = logits - logits_max
+        w = F.softmax(logits_stable, dim=0)  # (L,)
 
+        # Additional safety check
+        if torch.isnan(w).any() or torch.isinf(w).any():
+            print(f"Warning: NaN or Inf in layer weights. Using uniform weights.")
+            w = torch.ones(num_layer, device=logits.device) / num_layer
+
+        # Initialize pooled tensor
         pooled = torch.zeros_like(x[0])  # (B, T_max, D)
+
+        # Weighted sum with numerical checks
         for wi, xi in zip(w, x):
-            pooled.add_(xi, alpha=wi.item())
+            if not torch.isnan(xi).any() and not torch.isinf(xi).any():
+                pooled = pooled + xi * wi.item()
+            else:
+                print(f"Warning: Skipping layer due to NaN/Inf values")
+
+        # Final safety check
+        pooled = torch.nan_to_num(pooled, nan=0.0, posinf=0.0, neginf=0.0)
 
         return (pooled, w) if return_weights else pooled
-
-
