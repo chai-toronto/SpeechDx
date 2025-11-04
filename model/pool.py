@@ -212,10 +212,7 @@ class LayerWeightedAvgPool(nn.Module):
         assert num_layer == self.num_layers, f"Expected L={self.num_layers}, got L={num_layer}"
 
         # Apply temperature scaling
-        logits = self.logits / max(self.temperature, self.eps)
-
-        # Clip logits to prevent extreme values
-        logits = torch.clamp(logits, min=-10, max=10)
+        logits = self.logits / self.temperature
 
         if layer_mask is not None:
             # layer_mask: bool or {0,1} of shape (L,)
@@ -225,15 +222,7 @@ class LayerWeightedAvgPool(nn.Module):
             # Use large negative value instead of -inf for stability
             logits = torch.where(mask, logits, torch.full_like(logits, -1e9))
 
-        # Stable softmax computation
-        logits_max = logits.max()
-        logits_stable = logits - logits_max
-        w = F.softmax(logits_stable, dim=0)  # (L,)
-
-        # Additional safety check
-        if torch.isnan(w).any() or torch.isinf(w).any():
-            print(f"Warning: NaN or Inf in layer weights. Using uniform weights.")
-            w = torch.ones(num_layer, device=logits.device) / num_layer
+        w = F.softmax(logits, dim=0)  # (L,)
 
         # Initialize pooled tensor
         pooled = torch.zeros_like(x[0])  # (B, T_max, D)
@@ -246,13 +235,13 @@ class LayerWeightedAvgPool(nn.Module):
             # Turn all nan/inf into zeros before pooling
             xi = torch.nan_to_num(xi, nan=0.0, posinf=0.0, neginf=0.0)
             # Normalize each [1, D] vector to unit norm to prevent large values
-            xi = xi / torch.linalg.vector_norm(xi, dim=-1, keepdim=True).clamp(min=self.eps)
+            # xi = xi / torch.linalg.vector_norm(xi, dim=-1, keepdim=True).clamp(min=self.eps)
             if not torch.isnan(xi).any() and not torch.isinf(xi).any():
                 pooled = pooled + xi * wi.item()
             else:
                 print(f"Warning: Skipping layer due to NaN/Inf values")
 
         # Final safety check
-        pooled = torch.nan_to_num(pooled, nan=0.0, posinf=0.0, neginf=0.0)
+        # pooled = torch.nan_to_num(pooled, nan=0.0, posinf=0.0, neginf=0.0)
 
         return (pooled, w) if return_weights else pooled
