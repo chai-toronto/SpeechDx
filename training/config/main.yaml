@@ -82,7 +82,7 @@ modules:
   model: !ref <model>
 
 # Additional model-related parameters
-max_length: !ref <encoder_params[encoder]> # max length in samples (20s)
+max_length: !ref <encoder_params[max_length]> # max length in samples (20s)
 
 # ----------------------------------
 # TRAINING AND METRICS
