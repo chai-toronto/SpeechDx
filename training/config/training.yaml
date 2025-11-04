@@ -9,5 +9,5 @@ skip_nonfinite_grads: True
 nonfinite_patience: 10
 # Ray will override these during hyperparameter optimization
 number_of_epochs: 32
-lr: 0.000345493
-l2: 0.000145958
+lr: 0.0001
+l2: 0.00001
