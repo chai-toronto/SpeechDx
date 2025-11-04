@@ -23,6 +23,7 @@ import sys
 import os
 from functools import partial
 from pathlib import Path
+import torch
 
 from ray.tune.schedulers import ASHAScheduler
 from ray.tune.search.optuna import OptunaSearch
@@ -91,14 +92,14 @@ def train_with_ray(config, hparams_file, run_opts, overrides):
 
     train_sets = [datasets[f"train_{i}"] for i in range(hparams["num_fold"])]
     valid_sets = [datasets[f"val_{i}"] for i in range(hparams["num_fold"])]
-
-    brains.fit(
-        train_sets=train_sets,
-        valid_sets=valid_sets,
-        train_loader_kwargs=hparams["train_dataloader_options"],
-        valid_loader_kwargs=hparams["val_dataloader_options"],
-        progressbar=hparams["progressbar"]
-    )
+    with torch.autograd.detect_anomaly():
+        brains.fit(
+            train_sets=train_sets,
+            valid_sets=valid_sets,
+            train_loader_kwargs=hparams["train_dataloader_options"],
+            valid_loader_kwargs=hparams["val_dataloader_options"],
+            progressbar=hparams["progressbar"]
+        )
 
 
 def parse_hp_search_space(hparams):
