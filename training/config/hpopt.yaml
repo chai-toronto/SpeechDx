@@ -27,6 +27,6 @@ hpopt_config:
     type: "!tune.randint"
     values: [30, 100]
 
-  l2_ratio:
-    type: "!tune.uniform"
-    values: [0.01, 0.5]
+#  l2_ratio:
+#    type: "!tune.uniform"
+#    values: [0.01, 0.5]
