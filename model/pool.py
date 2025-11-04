@@ -242,6 +242,6 @@ class LayerWeightedAvgPool(nn.Module):
                 print(f"Warning: Skipping layer due to NaN/Inf values")
 
         # Final safety check
-        # pooled = torch.nan_to_num(pooled, nan=0.0, posinf=0.0, neginf=0.0)
+        pooled = torch.nan_to_num(pooled, nan=0.0, posinf=0.0, neginf=0.0)
 
         return (pooled, w) if return_weights else pooled
