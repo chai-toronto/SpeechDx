@@ -138,7 +138,7 @@ epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
 opt_class: !name:torch.optim.AdamW
   lr: !ref <lr>
 #  weight_decay: !apply:operator.mul [!ref <lr>, !ref <l2_ratio>]
-  l2: !ref <l2>
+  weight_decay: !ref <l2>
 
 # HP Optimizer
 # Enable Ray Tune hyperparameter optimization
