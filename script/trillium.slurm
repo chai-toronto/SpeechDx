@@ -30,9 +30,10 @@ module load StdEnv/2023 gcc arrow python/3.12 ffmpeg rust
 source ~/shai/bin/activate
 
 
-nvidia-smi -l 10 -q -d UTILIZATION,MEMORY > exps/slurm_logs/gpu_${SLURM_JOB_ID}.log &
-GPU_MONITOR_PID=$!
+nvidia-smi --query-gpu=timestamp,index,power.draw,memory.used \
+           --format=csv,noheader -l 1 > "$SLURM_JOB_ID.gpu.csv" &
+LOGGER_PID=$!
 
 python -m training.train training/config/main.yaml
 
-kill $GPU_MONITOR_PID
+kill $LOGGER_PID
