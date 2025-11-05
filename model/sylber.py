@@ -53,13 +53,13 @@ class Sylber(nn.Module):
         self.output_hidden_states = output_hidden_states
         self.output_segment = output_segment # Mean of segments instead of frames
 
-    def forward(self, x, lengths, in_second=True):
+    def forward(self, x, lengths):
         """
         x: (B, T) matrix of batch x time (raw waveform)
         lengths: (B,) relative lengths (to T_max) per sequence. If None, we assume no padding.
         Must be sampled at 16kHz. Either z-scored or not normalized.
         Returns:
-          output: (B, T, D) or (B, L, T, D)
+          output: (B, T, D) or L's (B, T, D)
         """
         B, T = x.shape
 
@@ -81,7 +81,9 @@ class Sylber(nn.Module):
             layer_hidden_states = (self.speech_model(x, attention_mask=mask, output_hidden_states=False).last_hidden_state,)
 
         if not self.output_segment:
-            return torch.stack(layer_hidden_states, dim = 1) # (B, L, T, D)
+            if not self.output_hidden_states:
+                return layer_hidden_states[0]
+            return layer_hidden_states # tuple of L (B, T, D)'s
 
         # Compute segment-level features per layer
         layer_batch_features = []  # will hold tensors of shape [B, S_l, D] per layer
@@ -126,8 +128,10 @@ class Sylber(nn.Module):
                 pad = torch.zeros((B, S_global - t.shape[1], t.shape[2]), device=x.device, dtype=x.dtype)
                 layer_batch_features[i] = torch.cat([t, pad], dim=1)  # (B, S_global, D)
 
-        # Final shape: (B, L, S_global, D)
-        return torch.stack(layer_batch_features, dim=1)
+        # Final shape: L (B, S_global, D)'s
+        if not self.output_hidden_states:
+            return layer_batch_features[0]
+        return tuple(layer_batch_features)
 
 
 

@@ -34,18 +34,9 @@ class Wav2Vec2(nn.Module):
                             sampling_rate=self.sample_rate).input_values[0]
         x = feature.to(x.device, dtype=x.dtype)
 
-        B, T = x.shape
         mask = None
         if lengths is not None:
-            # assert x.size(0) == lengths.size(0)
-            # # Convert lengths to absolute
-            # lengths = (lengths * T).long()
-            #
-            # # Build mask: 1 for valid, 0 for padded
-            # t = torch.arange(T, device=x.device).unsqueeze(0)  # (1, T)
-            #
-            # mask = (t < lengths.unsqueeze(1)) * 1  # (B, T)
-            mask = length_to_mask(lengths)
+            mask = length_to_mask(lengths) # (B, T)
 
         with (torch.no_grad() if self.freeze_encoder else torch.enable_grad()):
             if self.output_hidden_states:
