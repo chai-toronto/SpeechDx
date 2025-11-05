@@ -3,7 +3,7 @@
 #SBATCH --chdir=./  # Set the working directory
 #SBATCH --output=exps/slurm_logs/%x_%j.out     # Output file (%x=job-name, %j=job-id)
 #SBATCH --error=exps/slurm_logs/%x_%j.err      # Error file
-#SBATCH --time=8:00:00             # Time limit (hh:mm:ss)
+#SBATCH --time=2:00:00             # Time limit (hh:mm:ss)
 #SBATCH --cpus-per-task=96          # Number of CPU cores per task
 #SBATCH --nodes=1                   # Number of nodes
 #SBATCH --ntasks=1                  # Number of tasks
@@ -25,6 +25,8 @@ chmod 755 ~/.config
 export MPLCONFIGDIR=/tmp/matplotlib-$USER
 export FONTCONFIG_PATH=/tmp/fontconfig-$USER
 mkdir -p $MPLCONFIGDIR $FONTCONFIG_PATH
+export RAY_TMPDIR=/scratch/kieu/ray_tmp
+mkdir -p $RAY_TMPDIR
 
 module load StdEnv/2023 gcc arrow python/3.12 ffmpeg rust
 source ~/shai/bin/activate
