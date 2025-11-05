@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from huggingface_hub import hf_hub_download
 from sylber.utils.segment_utils import get_segment
-from torch.onnx.ops import attention
+
 from transformers import HubertModel, HubertConfig, BertModel, BertConfig
 import torch.nn as nn
 
