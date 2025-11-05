@@ -21,7 +21,7 @@ import torch
 import pandas as pd
 
 from training.dataio.stratified_group_k_fold import stratified_group_kfold_df
-from training.dataio.utils import ensure_dir, PathEncoder
+from training.dataio.utils import ensure_dir, PathEncoder, locate_bad
 
 
 def prepare_data(
@@ -64,7 +64,7 @@ def prepare_data(
 
         # Resolve path to be absolute
         df["path"] = Path(wav_folder) / df["path"].astype(str)
-        df["max_length"] = max_length
+        df["max_length"] = int(max_length)
 
         # split into test and non-test
         if new_test:

@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from speechbrain.dataio.dataio import length_to_mask
 from transformers import Wav2Vec2Processor, Wav2Vec2Model
 
 class Wav2Vec2(nn.Module):
@@ -36,14 +37,15 @@ class Wav2Vec2(nn.Module):
         B, T = x.shape
         mask = None
         if lengths is not None:
-            assert x.size(0) == lengths.size(0)
-            # Convert lengths to absolute
-            lengths = (lengths * T).long()
-
-            # Build mask: 1 for valid, 0 for padded
-            t = torch.arange(T, device=x.device).unsqueeze(0)  # (1, T)
-
-            mask = (t < lengths.unsqueeze(1)) * 1  # (B, T)
+            # assert x.size(0) == lengths.size(0)
+            # # Convert lengths to absolute
+            # lengths = (lengths * T).long()
+            #
+            # # Build mask: 1 for valid, 0 for padded
+            # t = torch.arange(T, device=x.device).unsqueeze(0)  # (1, T)
+            #
+            # mask = (t < lengths.unsqueeze(1)) * 1  # (B, T)
+            mask = length_to_mask(lengths)
 
         with (torch.no_grad() if self.freeze_encoder else torch.enable_grad()):
             if self.output_hidden_states:

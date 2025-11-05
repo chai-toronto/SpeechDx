@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
 
+from model.pool import ASP
+
+
 class Model(nn.Module):
     """
     A wrapper class for various probes.
@@ -37,13 +40,16 @@ class LinearProbe(nn.Module):
         return self.classifier(x)
 
 
-class TemporalProbe(LinearProbe):
+class TemporalProbe(nn.Module):
     """
     A probe with a temporal pooling layer followed by a linear layer.
     """
     def __init__(self, input_dim, num_labels, temp_pooler, bias=True):
-        super().__init__(input_dim, num_labels, bias=bias)
+        super().__init__()
         self.pooler = temp_pooler
+        if isinstance(self.pooler, ASP):
+            input_dim = input_dim * 2  # ASP doubles the dimension
+        self.classifier = nn.Linear(input_dim, num_labels, bias=bias)
 
     def forward(self, x, lengths=None):
         """
@@ -55,13 +61,17 @@ class TemporalProbe(LinearProbe):
         pooled = self.pooler(x, lengths)
         return self.classifier(pooled)
 
-class LayerTemporalProbe(TemporalProbe):
+class LayerTemporalProbe(nn.Module):
     """
     A probe that performs layer pool -> temporal pool -> linear layer.
     """
 
     def __init__(self, input_dim, num_labels, layer_pooler, temp_pooler, bias=True):
-        super().__init__(input_dim, num_labels, temp_pooler, bias=bias)
+        super().__init__()
+        self.pooler = temp_pooler
+        if isinstance(self.pooler, ASP):
+            input_dim = input_dim * 2  # ASP doubles the dimension
+        self.classifier = nn.Linear(input_dim, num_labels, bias=bias)
         self.layer_pooler = layer_pooler
 
     def forward(self, x, lengths=None):
@@ -72,6 +82,6 @@ class LayerTemporalProbe(TemporalProbe):
         Returns:
           logits: (B, num_labels)
         """
-        layer_pooled = self.layer_pooler(x)  # (B, T_max, D)
+        layer_pooled = self.layer_pooler(x, lengths)  # (B, T_max, D)
         pooled = self.pooler(layer_pooled, lengths)  # (B, D)
         return self.classifier(pooled)

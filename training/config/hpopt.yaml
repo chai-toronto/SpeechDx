@@ -1,6 +1,7 @@
 # HP Optimizer
 # Enable Ray Tune hyperparameter optimization
 hpopt_mode: ray  # Set to 'ray' to enable, null to disable
+continue_exp: True  # Continue previous experiment if available (i.e., environment is the same)
 optim_metric: 'F1'
 optim_mode: 'max'  # 'min' or 'max' depending on the metric
 max_concurrent_trials: 1  # Number of concurrent trials to run
@@ -10,7 +11,7 @@ sequential: False  # Set to True to run trials sequentially. Else, runs in paral
 
 # Ray Tune specific configuration
 ray_tune_config:
-  num_samples: 10  # Number of trial runs
+  num_samples: 5  # Number of trial runs
   resources_per_trial:
     cpu: 92
     gpu: 4
@@ -21,7 +22,7 @@ ray_tune_config:
 hpopt_config:
   lr:
     type: "!tune.loguniform"
-    values: [1e-5, 1e-3]
+    values: [1e-4, 1e-3]
 
   number_of_epochs:
     type: "!tune.randint"
@@ -29,4 +30,8 @@ hpopt_config:
 
   l2:
     type: "!tune.loguniform"
-    values: [1e-5, 1e-3]
+    values: [0.01, 0.1]
+
+#  l2_ratio:
+#    type: "!tune.uniform"
+#    values: [0.01, 0.5]

@@ -2,25 +2,25 @@ File: config/main.yaml
 random_seed: 2025
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
-model_name: w2v2_LTP
+model_name: w2v2_LTP_ASP
 data_folder: ./data/
 #----------------------------------
 # Most of the knobs you should change
 data_params: !include:tasks/c9s_t1.yaml
+
 encoder_params: !include:encoders/w2v2.yaml
 # where to store the cached encoder outputs. Will be overwritten every run.
 # Turn this on for B x D only, o.w. too big files!
 # Also havent thought about multi-GPU  here.
 cache_encoder: False
 cache_dir: !ref ./.cache/
-#probe_params: !include:probes/Probe.yaml
-#  feature_dim: !ref <encoder_params[feature_dim]>
-#  num_labels: 1
+
 probe_params: !include:probes/LTProbe.yaml
   feature_dim: !ref <encoder_params[feature_dim]>
   num_labels: 1
   num_layers: !ref <encoder_params[num_layers]>
   layer_dim: !ref <encoder_params[layer_dim]>
+
 hpopt_params: !include:hpopt.yaml
 training_params: !include:training.yaml
 #----------------------------------
@@ -82,7 +82,7 @@ modules:
   model: !ref <model>
 
 # Additional model-related parameters
-max_length: !ref <encoder_params[encoder]> # max length in samples (20s)
+max_length: !ref <encoder_params[max_length]> # max length in samples (20s)
 
 # ----------------------------------
 # TRAINING AND METRICS
@@ -93,6 +93,7 @@ eval_precision: !ref <training_params[eval_precision]>
 number_of_epochs: !ref <training_params[number_of_epochs]>
 batch_size: !ref <training_params[batch_size]>
 lr: !ref <training_params[lr]>
+#l2_ratio: !ref <training_params[l2_ratio]>
 l2: !ref <training_params[l2]>
 sample_rate: !ref <encoder_params[sample_rate]>
 
@@ -101,20 +102,24 @@ nonfinite_patience: !ref <training_params[nonfinite_patience]>
 
 # Data loader
 num_workers: !ref <training_params[num_workers]>
+persistent_workers: !ref <training_params[persistent_workers]>
 train_dataloader_options:
   batch_size: !ref <batch_size>
   drop_last: False
   num_workers: !ref <num_workers>
+  persistent_workers: !ref <persistent_workers>
   shuffle: True
 
 val_dataloader_options:
   batch_size: !ref <batch_size>
   drop_last: False
+  persistent_workers: !ref <persistent_workers>
   num_workers: !ref <num_workers>
 
 test_dataloader_options:
   batch_size: !ref <batch_size>
   drop_last: False
+  persistent_workers: !ref <persistent_workers>
   num_workers: !ref <num_workers>
 
 # Logger
@@ -132,11 +137,12 @@ epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
 # Optimizer
 opt_class: !name:torch.optim.AdamW
   lr: !ref <lr>
+#  weight_decay: !apply:operator.mul [!ref <lr>, !ref <l2_ratio>]
   weight_decay: !ref <l2>
-
 
 # HP Optimizer
 # Enable Ray Tune hyperparameter optimization
+continue_exp: !ref <hpopt_params[continue_exp]>
 hpopt_mode: !ref <hpopt_params[hpopt_mode]>
 optim_metric: !ref <hpopt_params[optim_metric]>
 optim_mode: !ref <hpopt_params[optim_mode]>
