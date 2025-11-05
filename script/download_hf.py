@@ -1,13 +1,13 @@
 import sys
 
-from huggingface_hub import snapshot_download
+from huggingface_hub import hf_hub_download
 
 if __name__ == "__main__":
     repo_id = sys.argv[1]  # e.g., "username/repo_name"
 
     print(f"Downloading and caching model: {repo_id}")
     # Download fully into HF default cache (~/.cache/huggingface/hub)
-    path = snapshot_download(
+    path = hf_hub_download(
         repo_id=repo_id,
         cache_dir=None,
         local_dir=None,

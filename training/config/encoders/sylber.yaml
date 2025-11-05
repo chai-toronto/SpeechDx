@@ -5,6 +5,7 @@ num_layers: 9
 layer_dim: 1
 
 encoder: !new:model.sylber.Sylber
+  model_ckpt
   freeze_encoder: True
   output_hidden_states: True
   output_segment: True
