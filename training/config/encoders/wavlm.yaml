@@ -1,5 +1,5 @@
 sample_rate: 16000
-feature_dim: 1024
+feature_dim: 768
 num_layers: 12
 layer_dim: 1
 max_length: 1e10
