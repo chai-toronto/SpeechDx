@@ -11,7 +11,7 @@ sequential: False  # Set to True to run trials sequentially. Else, runs in paral
 
 # Ray Tune specific configuration
 ray_tune_config:
-  num_samples: 10  # Number of trial runs
+  num_samples: 5  # Number of trial runs
   resources_per_trial:
     cpu: 92
     gpu: 4
