@@ -26,7 +26,12 @@ class WavLM(nn.Module):
             mask = length_to_mask(lengths)
 
         if self.output_hidden_states:
-            features = self.feature_extractor(input_values, output_hidden_states=True, attention_mask=mask)[1:]
+            features = self.feature_extractor(input_values,
+                                              output_hidden_states=True,
+                                              attention_mask=mask
+                                              ).hidden_states[1:]
         else:
-            features = self.feature_extractor(input_values, attention_mask=mask).last_hidden_state # (B, T, D)
+            features = self.feature_extractor(input_values,
+                                              attention_mask=mask
+                                              ).last_hidden_state # (B, T, D)
         return features
