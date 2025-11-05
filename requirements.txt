@@ -13,3 +13,4 @@ transformers
 torchmetrics
 optuna
 tensorboardx
+pydantic

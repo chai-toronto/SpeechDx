@@ -4,7 +4,7 @@ max_length: 1e10
 num_layers: 9
 layer_dim: 1
 
-encoder: !new:model.Sylber.Sylber
+encoder: !new:model.sylber.Sylber
   freeze_encoder: True
   output_hidden_states: True
   output_segment: True
