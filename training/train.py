@@ -267,14 +267,20 @@ if __name__ == "__main__":
             resources_per_trial = tune.PlacementGroupFactory(resources_split)
 
         storage_path = (Path(hparams["output_folder"]) / "ray_results").resolve()
-        if storage_path.exists():
-            shutil.rmtree(storage_path)
+        if hparams["continue_exp"]:
+            print(f"Continuing hyperparameter optimization from {storage_path}")
+            resume="AUTO"
+        else:
+            resume=False
+            if storage_path.exists():
+                shutil.rmtree(storage_path)
 
         # Run hyperparameter optimization
         analysis = tune.run(
             trainable,
             config=search_space,
             num_samples=tune_config.get("num_samples", 10),
+            resume=resume,
             progress_reporter=reporter,
             storage_path=storage_path.as_posix(),
             name="hp_optimization",

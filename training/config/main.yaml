@@ -142,7 +142,7 @@ opt_class: !name:torch.optim.AdamW
 
 # HP Optimizer
 # Enable Ray Tune hyperparameter optimization
-resume: !ref <hpopt_params[continue]>
+continue_exp: !ref <hpopt_params[continue_exp]>
 hpopt_mode: !ref <hpopt_params[hpopt_mode]>
 optim_metric: !ref <hpopt_params[optim_metric]>
 optim_mode: !ref <hpopt_params[optim_mode]>
