@@ -9,6 +9,7 @@ if __name__ == "__main__":
     # Download fully into HF default cache (~/.cache/huggingface/hub)
     path = hf_hub_download(
         repo_id=repo_id,
+        filename=repo_id.split("/")[-1],
         cache_dir=None,
         local_dir=None,
         local_dir_use_symlinks=False,
