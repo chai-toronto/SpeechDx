@@ -1,0 +1,10 @@
+sample_rate: 16000
+feature_dim: 1024
+max_length: 1e10
+num_layers: 2
+layer_dim: 1
+
+encoder: !new:model.test.Encoder
+  freeze_encoder: True
+  output_hidden_states: False
+  feature_dim: !ref <feature_dim>
