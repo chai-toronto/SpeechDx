@@ -166,5 +166,4 @@ checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
   checkpoints_dir: !ref <save_folder>
   recoverables:
     model: !ref <model>
-    optim: !ref <opt_class>
     counter: !ref <epoch_counter>
