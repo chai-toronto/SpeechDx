@@ -116,6 +116,7 @@ class DiagnosticsBrain(sb.Brain):
 
     def on_stage_start(self, stage, epoch=None):
         """Gets called at the beginning of each epoch."""
+        self.checkpointer.recover_if_possible()
         self.loss_metric = sb.utils.metric_stats.MetricStats(
             metric=sb.nnet.losses.bce_loss
         )
