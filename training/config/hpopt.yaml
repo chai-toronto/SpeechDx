@@ -1,6 +1,6 @@
 # HP Optimizer
 # Enable Ray Tune hyperparameter optimization
-hpopt_mode: null  # Set to 'ray' to enable, null to disable
+hpopt_mode: ray  # Set to 'ray' to enable, null to disable
 continue_exp: True  # Continue previous experiment if available (i.e., environment is the same)
 optim_metric: 'F1'
 optim_mode: 'max'  # 'min' or 'max' depending on the metric
