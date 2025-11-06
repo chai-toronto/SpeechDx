@@ -11,6 +11,7 @@ class DiagnosticsBrain(sb.Brain):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.cache = None
+        self.checkpointer.recover_if_possible()
 
     def compute_forward(self, batch, stage):
         """Runs all the computation that transforms the input into the
@@ -116,7 +117,6 @@ class DiagnosticsBrain(sb.Brain):
 
     def on_stage_start(self, stage, epoch=None):
         """Gets called at the beginning of each epoch."""
-        self.checkpointer.recover_if_possible()
         self.loss_metric = sb.utils.metric_stats.MetricStats(
             metric=sb.nnet.losses.bce_loss
         )

@@ -164,6 +164,7 @@ hpopt_config: !ref <hpopt_params[hpopt_config]>
 ckpt_interval_minutes: 15 # save checkpoint every N min
 checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
   checkpoints_dir: !ref <save_folder>
-recoverables:
-  model: !ref <model>
-  counter: !ref <epoch_counter>
+  recoverables:
+    model: !ref <model>
+    optim: !ref <opt_class>
+    counter: !ref <epoch_counter>
