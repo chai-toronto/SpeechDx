@@ -58,7 +58,9 @@ class TemporalProbe(nn.Module):
         Returns:
           logits: (B, num_labels)
         """
+        x = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
         pooled = self.pooler(x, lengths)
+        pooled = torch.nan_to_num(pooled, nan=0.0, posinf=0.0, neginf=0.0)
         return self.classifier(pooled)
 
 class LayerTemporalProbe(nn.Module):
@@ -84,4 +86,5 @@ class LayerTemporalProbe(nn.Module):
         """
         layer_pooled = self.layer_pooler(x, lengths)  # (B, T_max, D)
         pooled = self.pooler(layer_pooled, lengths)  # (B, D)
+        pooled = torch.nan_to_num(pooled, nan=0.0, posinf=0.0, neginf=0.0)
         return self.classifier(pooled)
