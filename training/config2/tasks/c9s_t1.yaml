@@ -1,0 +1,25 @@
+task: c9s_t1
+
+dataset: c9s_t1
+
+# ----------------------------------
+# DYNAMIC SCRIPT CONFIGURATION (Generic)
+# ----------------------------------
+# Path to the file containing the dataset-specific preparation and IO functions
+data_io_script: training.dataio.prep_c9s_t1
+
+# Name of the function to call for manifest generation
+prepare_data_fn: prepare_data
+
+# Name of the function to call for defining the data pipelines
+dataio_prep_fn: dataio_prep
+
+# Key used in the SpeechBrain batch object for the label
+label_key: label_encoded
+
+raw_label_key: label
+# Data preparation
+skip_prep: False
+new_test: False # Set False to use metadata's test split.
+# Cross Validation
+num_fold: 4 # works from 2 to num. subjects. To be implemented: 0 -> normal split no CV, -1 -> LOSO
