@@ -7,5 +7,5 @@ max_length: 1e10
 encoder: !new:model.wavlm.WavLM
   ssl_encoder_source: "microsoft/wavlm-base-plus"
   freeze_encoder: True
-  output_hidden_states: True
+  output_hidden_states: False
   sample_rate: !ref <sample_rate>

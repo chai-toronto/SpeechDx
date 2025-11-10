@@ -4,5 +4,5 @@ num_labels: !PLACEHOLDER
 probe: !new:model.probe.TemporalProbe
   input_dim: !ref <feature_dim>
   num_labels: !ref <num_labels>
-  temp_pooler: !new:model.pool.ASP
+  temp_pooler: !new:model.pool.AvgTPool
     input_dim: !ref <feature_dim>
