@@ -41,7 +41,7 @@ class DiagnosticsBrain(sb.Brain):
                     self.cache[utt_id] = encoded[i].cpu()
             else:
                 if self.cache is None: # first epoch after caching
-                    self.cache = torch.load(cache_dir/'cache.pt')
+                    self.cache = torch.load(cache_dir/'cache.pt', weights_only=False)
                     print("Cache loaded from disk.")
                 encoded = torch.stack([self.cache[utt_id] for utt_id in ids], dim=0).to(self.device)
             wavs = encoded
