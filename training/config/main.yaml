@@ -12,10 +12,10 @@ encoder_params: !include:encoders/wavlm.yaml
 # where to store the cached encoder outputs. Will be overwritten every run.
 # Turn this on for B x D only, o.w. too big files!
 # Also havent thought about multi-GPU  here.
-cache_encoder: True
+cache_encoder: False
 cache_dir: !ref ./.cache/
 
-probe_params: !include:probes/Probe.yaml
+probe_params: !include:probes/AvgTProbe.yaml
   feature_dim: !ref <encoder_params[feature_dim]>
   num_labels: 1
   num_layers: !ref <encoder_params[num_layers]>
