@@ -1,8 +1,8 @@
 #!/bin/bash -l
 #SBATCH --job-name=speech-health-ai
 #SBATCH --chdir=./  # Set the working directory
-#SBATCH --output=exps/slurm_logs/%x_%j.out     # Output file (%x=job-name, %j=job-id)
-#SBATCH --error=exps/slurm_logs/%x_%j.err      # Error file
+#SBATCH --output=exps/slurm_logs/%x_%j_out.txt     # Output file (%x=job-name, %j=job-id)
+#SBATCH --error=exps/slurm_logs/%x_%j_err.txt      # Error file
 #SBATCH --time=3:00:00             # Time limit (hh:mm:ss)
 #SBATCH --cpus-per-task=96          # Number of CPU cores per task
 #SBATCH --nodes=1                   # Number of nodes
@@ -33,7 +33,7 @@ source ~/shai/bin/activate
 
 
 nvidia-smi --query-gpu=timestamp,index,power.draw,memory.used \
-           --format=csv,noheader -l 1 > "$SLURM_JOB_ID.gpu.csv" &
+           --format=csv,noheader -l 1 > "exps/slurm_logs/$SLURM_JOB_ID.gpu.csv" &
 LOGGER_PID=$!
 
 python -m training.train training/config/main.yaml

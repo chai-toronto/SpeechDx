@@ -498,4 +498,4 @@ class DiagnosticsSequentialBrain(DiagnosticsBrain):
             )
 
         # Finalize cache if enabled
-        self.finalize_cache()
+        # self.finalize_cache()

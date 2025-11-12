@@ -17,6 +17,7 @@ from pathlib import Path
 import torchaudio
 import torchaudio.functional as F
 import speechbrain as sb
+from speechbrain.utils.data_pipeline import CachedDynamicItem
 import torch
 import pandas as pd
 
@@ -116,6 +117,9 @@ def dataio_prep(hparams):
     For a new task, modify the label_pipeline and the output_keys.
     """
 
+    dynamic_items = []
+    output_keys = ["id", "path"]
+
     # Initialization of the label encoder.
     label_encoder = sb.dataio.encoder.CategoricalEncoder()
 
@@ -128,7 +132,7 @@ def dataio_prep(hparams):
         signal, sr_og = torchaudio.load(file_path)
         # handle multi-channel
         if signal.shape[0] > 1:
-            signal = signal.mean(dim=0, keepdim=True)
+            signal = signal.mean(dim=0, keepdim=False)
 
         if sr_og != 16000:
             signal = F.resample(signal, sr_og, new_freq=16000,
@@ -151,6 +155,9 @@ def dataio_prep(hparams):
             warnings.warn("Empty audio file found: {}".format(file_path))
         return signal, duration
 
+    dynamic_items.append(audio_pipeline)
+    output_keys.extend(["signal", "duration"])
+
     # Define label pipeline
     @sb.utils.data_pipeline.takes("label")
     @sb.utils.data_pipeline.provides("label_encoded")
@@ -160,12 +167,35 @@ def dataio_prep(hparams):
         # the 'label_key' used in train.py and the YAML.
         label_encoded = label
         yield label_encoded
+    dynamic_items.append(label_pipeline)
+    output_keys.append("label_encoded")
 
-    @sb.utils.data_pipeline.takes("id")
-    @sb.utils.data_pipeline.provides("emb")
-    def cache_emb(id):
-        """Fe"""
-        return None
+
+    if hparams["cache_encoder"]:
+        speech_encoder = hparams["encoder"]
+        # Do this to take advantage of auto padding
+        num_layers = hparams["num_layers"]
+        num_outputs = num_layers if speech_encoder.output_hidden_states else 1
+        output_vars = ["emb_{}".format(i) for i in range(num_outputs)]
+
+        @CachedDynamicItem.cache(hparams["cache_dir"])
+        @sb.utils.data_pipeline.takes("id", "signal")
+        @sb.utils.data_pipeline.provides(*output_vars)
+        def cache_emb(id, signal):
+            # signal is 1D tensor
+            device = next(speech_encoder.parameters()).device
+            with torch.no_grad():
+                signal = signal.to(device=device)
+                emb = speech_encoder(signal.unsqueeze(0))
+            if speech_encoder.output_hidden_states:
+                emb = tuple(x.squeeze(0) for x in emb)
+            else:
+                emb = emb.squeeze(0)
+            return emb
+
+        dynamic_items.append(cache_emb)
+        output_keys += output_vars
+
 
     # Retrieve the data
     with open(hparams["train_annotation"], "r") as f:
@@ -190,8 +220,8 @@ def dataio_prep(hparams):
     for dataset in data_dict:
         datasets[dataset] = sb.dataio.dataset.DynamicItemDataset(
             data=data_dict[dataset],
-            dynamic_items=[audio_pipeline, label_pipeline],
-            output_keys=["id", "signal", "duration", "path", "label_encoded"],
+            dynamic_items=dynamic_items,
+            output_keys=output_keys,
         )
     return datasets
 

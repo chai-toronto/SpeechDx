@@ -189,13 +189,13 @@ if __name__ == "__main__":
             },
         )
 
-    cache_encoder = hparams.get("cache_encoder", False)
-    # Clear cache directory before adding new features. This ensures no stale/duplicate cached features.
-    if cache_encoder:
-        cache_dir = Path(hparams.get("cache_dir")).resolve()
-        if cache_dir.exists():
-            shutil.rmtree(cache_dir)
-        cache_dir.mkdir(parents=True, exist_ok=True)
+    # cache_encoder = hparams.get("cache_encoder", False)
+    # # Clear cache directory before adding new features. This ensures no stale/duplicate cached features.
+    # if cache_encoder:
+    #     cache_dir = Path(hparams.get("cache_dir")).resolve()
+    #     if cache_dir.exists():
+    #         shutil.rmtree(cache_dir)
+    #     cache_dir.mkdir(parents=True, exist_ok=True)
 
     optim_metric = hparams.get("optim_metric", "F1")
     optim_mode = hparams.get("optim_mode", "max")
@@ -340,11 +340,11 @@ if __name__ == "__main__":
             train_loader_kwargs=hparams["train_dataloader_options"],
         )
 
-    # Turn off caching after training. The scope of caching must end here.
-    if cache_encoder:
-        cache_dir = Path(hparams.get("cache_dir")).resolve()
-        if cache_dir.exists():
-            shutil.rmtree(cache_dir)
+    # # Turn off caching after training. The scope of caching must end here.
+    # if cache_encoder:
+    #     cache_dir = Path(hparams.get("cache_dir")).resolve()
+    #     if cache_dir.exists():
+    #         shutil.rmtree(cache_dir)
 
     brain.evaluate(
         test_set=datasets["test_val"],
