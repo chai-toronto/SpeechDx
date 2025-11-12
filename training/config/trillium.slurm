@@ -22,10 +22,10 @@ mkdir -p ~/.config/matplotlib
 chmod 755 ~/.config
 
 # 3. Set environment variables to avoid permission issues
-export MPLCONFIGDIR=/tmp/matplotlib-$USER
-export FONTCONFIG_PATH=/tmp/fontconfig-$USER
+export MPLCONFIGDIR=$SLURM_TMPDIR/tmp/matplotlib-$USER
+export FONTCONFIG_PATH=$SLURM_TMPDIR/tmp/fontconfig-$USER
 mkdir -p $MPLCONFIGDIR $FONTCONFIG_PATH
-export RAY_TMPDIR=/scratch/kieu/ray_tmp
+export RAY_TMPDIR=$SLURM_TMPDIR/ray_tmp
 mkdir -p $RAY_TMPDIR
 
 module load StdEnv/2023 gcc arrow python/3.12 ffmpeg rust
