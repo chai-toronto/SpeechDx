@@ -5,10 +5,11 @@ pandas==2.3.3
 ray
 ray[tune]
 scikit_learn==1.7.2
-speechbrain==1.0.3
+git+https://github.com/speechbrain/speechbrain.git@develop
 sylber==0.1.4
-torch<=2.8.0
-torchaudio<=2.8.0
+torch<=2.7.0
+torchaudio<=2.7.0
+torchcodec<=0.6.0
 transformers
 torchmetrics
 optuna
