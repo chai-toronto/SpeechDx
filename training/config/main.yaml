@@ -3,7 +3,7 @@ random_seed: 2025
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
 model_name: wavlm-large-last
-probe_name: tprobe
+probe_name: chunkTprobe
 data_folder: ./data/
 #slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
 slurm_tmpdir: ./tmp/

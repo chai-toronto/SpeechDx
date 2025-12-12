@@ -97,6 +97,7 @@ class ChunkTProbe(nn.Module):
         if isinstance(self.pooler, ASP):
             input_dim = input_dim * 2  # ASP doubles the dimension
         self.classifier = nn.Linear(input_dim, num_labels, bias=bias)
+        self.stat = []
 
     def forward(self, x, lengths=None):
         """
@@ -106,9 +107,23 @@ class ChunkTProbe(nn.Module):
           logits: (B, num_labels)
         """
         x = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
-        x, mask, _, _ = self.chunker(x, lengths)
+        x_chunk, mask, _, _ = self.chunker(x, lengths)
+        # self.chunk_stat(x, x_chunk, lengths, mask)
         # reconstruct lengths from mask
         lengths = (~mask).sum(dim=1).float() / mask.size(1)
-        pooled = self.pooler(x, lengths)
+        pooled = self.pooler(x_chunk, lengths)
         pooled = torch.nan_to_num(pooled, nan=0.0, posinf=0.0, neginf=0.0)
         return self.classifier(pooled)
+
+    def chunk_stat(self, x, x_chunk, lengths, chunk_mask):
+        B, T_max, D = x.size()
+        _, T_chunk, _ = x_chunk.size()
+
+        orig_lens = (lengths * T_max).long()
+        chunk_lens = (~chunk_mask).sum(dim=1).long()
+        reduction = (orig_lens - chunk_lens).float() / orig_lens.float()
+        print("Average batch reduction: {:.2f}%".format(reduction.mean().item() * 100))
+        self.stat.append(reduction.mean().item())
+        print("Overall average reduction: {:.2f}%".format(sum(self.stat) / len(self.stat) * 100))
+
+

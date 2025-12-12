@@ -293,7 +293,7 @@ class ChunkPool(nn.Module):
 
         # Handle padding: force padded positions to NOT be boundaries
         if mask is not None:
-            boundary_mask = boundary_mask & mask
+            boundary_mask = boundary_mask or mask
 
         selected_probs = boundary_prob.gather(
             dim=-1, index=selected_idx.unsqueeze(-1)
