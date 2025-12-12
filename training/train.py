@@ -339,7 +339,6 @@ if __name__ == "__main__":
             train_set=datasets["test_train"],
             train_loader_kwargs=hparams["train_dataloader_options"],
         )
-
     brain.evaluate(
         test_set=datasets["test_val"],
         test_loader_kwargs=hparams["test_dataloader_options"]

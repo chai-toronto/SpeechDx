@@ -2,6 +2,7 @@ from pathlib import Path
 
 import torch
 import speechbrain as sb
+from speechbrain.dataio.dataloader import SaveableDataLoader, LoopedLoader
 from tensorboard.plugins.hparams.summary_v2 import hparams
 
 from training.metric import Record, roc_auc_score_rev, accuracy
@@ -154,7 +155,7 @@ class DiagnosticsBrain(sb.Brain):
                 test_stats=stats,
             )
 
-        # self.finalize_cache()
+
 
     def calc_epoch_metrics(self, stage_loss):
         """ Call this after the epoch only"""
@@ -175,6 +176,7 @@ class DiagnosticsBrain(sb.Brain):
         }
         self.record.clear()
         return stats
+
 
 
 

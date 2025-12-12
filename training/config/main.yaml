@@ -2,7 +2,8 @@ File: config/main.yaml
 random_seed: 2025
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
-model_name: wavlm-large-last-tprobe
+model_name: wavlm-large-last
+probe_name: tprobe
 data_folder: ./data/
 slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
 #slurm_tmpdir: ./tmp/
@@ -53,7 +54,7 @@ metadata_path: !ref <data_folder>/<dataset>/processed/<dataset>.csv
 raw_label_key: !ref <data_params[raw_label_key]>
 
 # Output folder structure
-output_folder: !ref ./exps/<task>/<model_name>/brain-logs/
+output_folder: !ref ./exps/<task>/<model_name>-<probe_name>/brain-logs/
 save_folder: !ref <output_folder>/save
 train_log: !ref <output_folder>/train_log.txt
 
@@ -120,8 +121,8 @@ val_dataloader_options:
 test_dataloader_options:
   batch_size: !ref <batch_size>
   drop_last: False
-  persistent_workers: !ref <persistent_workers>
-  num_workers: !ref <num_workers>
+  persistent_workers: False
+  num_workers: 0
 
 # Logger
 train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
