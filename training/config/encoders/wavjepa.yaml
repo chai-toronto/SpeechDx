@@ -1,0 +1,12 @@
+sample_rate: 16000
+feature_dim: 768
+max_length: 160000
+# i dont know these two under, not supported yet anyways
+num_layers: 9
+layer_dim: 1
+
+encoder: !new:model.wavjepa.WavJEPA
+  ssl_encoder_source: "labhamlet/wavjepa-nat-base"
+  freeze_encoder: True
+  output_hidden_states: False
+  sample_rate: !ref <sample_rate>

@@ -1,6 +1,6 @@
 # HP Optimizer
 # Enable Ray Tune hyperparameter optimization
-hpopt_mode: ray  # Set to 'ray' to enable, null to disable
+hpopt_mode: null  # Set to 'ray' to enable, null to disable
 continue_exp: True  # Continue previous experiment if available (i.e., environment is the same)
 optim_metric: 'F1'
 optim_mode: 'max'  # 'min' or 'max' depending on the metric
@@ -13,8 +13,8 @@ sequential: True  # Set to True to run trials sequentially. Else, runs in parall
 ray_tune_config:
   num_samples: 5  # Number of trial runs
   resources_per_trial:
-    cpu: 92
-    gpu: 4
+    cpu: 15
+    gpu: 0
 
 
 # Define hyperparameter search space

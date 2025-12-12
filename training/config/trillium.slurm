@@ -4,10 +4,10 @@
 #SBATCH --output=exps/slurm_logs/%x_%j_out.txt     # Output file (%x=job-name, %j=job-id)
 #SBATCH --error=exps/slurm_logs/%x_%j_err.txt      # Error file
 #SBATCH --time=3:00:00             # Time limit (hh:mm:ss)
-#SBATCH --cpus-per-task=96          # Number of CPU cores per task
+#SBATCH --cpus-per-task=24          # Number of CPU cores per task
 #SBATCH --nodes=1                   # Number of nodes
 #SBATCH --ntasks=1                  # Number of tasks
-#SBATCH --gpus-per-node=4         # Number of GPUs per node
+#SBATCH --gpus-per-node=1         # Number of GPUs per node
 #SBATCH --mail-type=BEGIN,END,FAIL        # Optional: email on job end/failure
 #SBATCH --mail-user=dat.kieu@mail.utoronto.ca  # Your email address
 
@@ -25,12 +25,9 @@ chmod 755 ~/.config
 export MPLCONFIGDIR=$SLURM_TMPDIR/tmp/matplotlib-$USER
 export FONTCONFIG_PATH=$SLURM_TMPDIR/tmp/fontconfig-$USER
 mkdir -p $MPLCONFIGDIR $FONTCONFIG_PATH
-export RAY_TMPDIR=$SLURM_TMPDIR/ray_tmp
-mkdir -p $RAY_TMPDIR
 
 module load StdEnv/2023 gcc arrow python/3.12 ffmpeg rust
 source ~/shai/bin/activate
-
 
 nvidia-smi --query-gpu=timestamp,index,power.draw,memory.used \
            --format=csv,noheader -l 1 > "exps/slurm_logs/$SLURM_JOB_ID.gpu.csv" &

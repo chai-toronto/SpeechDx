@@ -251,17 +251,25 @@ class Brains:
 
         if valid_stats:
             # Aggregate all metrics
-            aggregated_stat = {}
+            mean_stats = {}
+            std_stats = {}
             for key in valid_stats[0].keys():
                 values = [stat[key] for stat in valid_stats]
-                aggregated_stat[key] = np.mean(values)
-                print(f"  {key}: {aggregated_stat[key]:.4f} (mean of {len(values)} brains)")
+                avg = np.mean(values)
+                std = np.std(values)
+                mean_stats[key] = avg
+                std_stats[f"std_{key}"] = std
+                print(f"  {key}: {avg:.4f}, {std:.4f} (mean, std of {len(values)} brains)")
 
             print(f"\n[Reporting Phase] Reporting aggregated stats to Ray Tune")
-            print(f"Aggregated stats: {aggregated_stat}")
+            print(f"Aggregated mean stats: {mean_stats}")
+            print(f"Aggregated std stats: {std_stats}")
+
+            # Concat
+            stats = {**mean_stats, **std_stats}
 
             # Report aggregated results to Ray Tune
-            tune.report(aggregated_stat)
+            tune.report(stats)
         else:
             print("[Warning] No valid stats received from brains")
 
@@ -318,7 +326,7 @@ class DiagnosticsCVBrain(DiagnosticsBrain):
                 self.device = "cpu"
                 print(f"Brain {brain_id} initialized on CPU (no GPU allocated)")
         else:
-            self.device = "cpu"
+            self.device = "mps" if torch.backends.mps.is_available() else "cpu"
             print(f"Brain {brain_id} initialized on CPU (CUDA not available)")
 
     def get_progressbar_setting(self):
@@ -395,8 +403,6 @@ class DiagnosticsCVBrain(DiagnosticsBrain):
                 test_stats=stats,
             )
 
-        # Finalize cache if enabled
-        self.finalize_cache()
 
 
 class DiagnosticsSequentialBrain(DiagnosticsBrain):
@@ -496,6 +502,3 @@ class DiagnosticsSequentialBrain(DiagnosticsBrain):
                 {"Epoch loaded": self.hparams.epoch_counter.current, "Brain": self.brain_id},
                 test_stats=stats,
             )
-
-        # Finalize cache if enabled
-        # self.finalize_cache()

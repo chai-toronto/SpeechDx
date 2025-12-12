@@ -1,8 +1,8 @@
 feature_dim: !PLACEHOLDER
 num_labels: !PLACEHOLDER
 
-probe: !new:model.probe.TemporalProbe
+probe: !new:model.probe.ChunkTProbe
   input_dim: !ref <feature_dim>
   num_labels: !ref <num_labels>
-  temp_pooler: !new:model.pool.AvgTPool
+  temp_pooler: !new:model.pool.ASP
     input_dim: !ref <feature_dim>

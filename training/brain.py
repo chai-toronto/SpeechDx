@@ -24,10 +24,14 @@ class DiagnosticsBrain(sb.Brain):
 
         cache_encoder = getattr(self.hparams, "cache_encoder", False)
         if cache_encoder:
-            num_layers = self.hparams.num_layers
-            emb_vars = ["emb_{}".format(i) for i in range(num_layers)]
-            wavs = tuple(getattr(batch, var).data for var in emb_vars)
-            lens = getattr(batch, emb_vars[0]).lengths
+            if self.modules.model.encoder.output_hidden_states:
+                num_layers = self.hparams.num_layers
+                emb_vars = ["emb_{}".format(i) for i in range(num_layers)]
+                wavs = tuple(getattr(batch, var).data for var in emb_vars)
+                lens = getattr(batch, emb_vars[0]).lengths
+            else:
+                wavs = getattr(batch, "emb_0").data
+                lens = getattr(batch, "emb_0").lengths
         else:
             wavs, lens = batch.signal
             # Forward pass through the model
@@ -150,31 +154,22 @@ class DiagnosticsBrain(sb.Brain):
 
         # self.finalize_cache()
 
-    # def finalize_cache(self):
-    #     # The cache is now available until the end of training
-    #     cache_encoder = getattr(self.hparams, "cache_encoder", False)
-    #     if cache_encoder:
-    #         cache_dir = Path(getattr(self.hparams, "cache_dir")).resolve()
-    #         torch.save(self.cache, cache_dir/'cache.pt')
-    #         cache_done = cache_dir / "cache_done.txt"
-    #         if not cache_done.exists():
-    #             with open(cache_done, "w") as f:
-    #                 f.write("done")
-    #             print("Encoder cache is ready.")
-
     def calc_epoch_metrics(self, stage_loss):
         """ Call this after the epoch only"""
         # Summarize the statistics from the stage for record-keeping.
         metrics = self.error_metrics.summarize()
         preds, tgts = self.record.get_all()
+        # This will dictate presentation order in logs
         stats = {
             "roc": roc_auc_score_rev(preds, tgts),
+            "F1": metrics["F-score"],
+            "loss": stage_loss,
+            "recall": metrics["recall"],
+            "precision": metrics["precision"],
             "sens": metrics['TP'] / (metrics['TP'] + metrics['FN']),
             "accuracy": accuracy(preds, tgts),
-            "loss": stage_loss,
-            "precision": metrics["precision"],
-            "recall": metrics["recall"],
-            "F1": metrics["F-score"],
+
+
         }
         self.record.clear()
         return stats

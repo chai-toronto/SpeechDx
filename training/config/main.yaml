@@ -2,21 +2,20 @@ File: config/main.yaml
 random_seed: 2025
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
-model_name: wavlm
+model_name: wavlm-large-last
 data_folder: ./data/
-slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
+#slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
+slurm_tmpdir: ./tmp/
 #----------------------------------
 # Most of the knobs you should change
 data_params: !include:tasks/c9s_t1.yaml
+dataset_size: 7542 # total number of samples in the dataset in val + train
 encoder_params: !include:encoders/wavlm.yaml
-# where to store the cached encoder outputs. Will be overwritten every run.
-# Turn this on for B x D only, o.w. too big files!
-# Also havent thought about multi-GPU  here.
 cache_encoder: True
 cache_dir: !ref <slurm_tmpdir>/.cache/<model_name>/
 
 num_layers: !ref <encoder_params[num_layers]>
-probe_params: !include:probes/AvgTProbe.yaml # Change encover params accordingly
+probe_params: !include:probes/TProbe.yaml # Change encover params accordingly
   feature_dim: !ref <encoder_params[feature_dim]>
   num_labels: 1
   num_layers: !ref <num_layers>

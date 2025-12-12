@@ -23,6 +23,8 @@ class WavLM(nn.Module):
 
         mask = None
         if lengths is not None:
+            T = input_values.shape[1]
+            lengths = (lengths * T).long() # Convert to absolute lengths
             mask = length_to_mask(lengths)
 
         if self.output_hidden_states:

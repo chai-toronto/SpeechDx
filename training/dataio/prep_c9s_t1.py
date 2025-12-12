@@ -21,6 +21,7 @@ from speechbrain.utils.data_pipeline import CachedDynamicItem
 import torch
 import pandas as pd
 
+from training.dataio.cache_dynamic_item import CachedHDF5DynamicItem, CachedPersistDynamicItem
 from training.dataio.stratified_group_k_fold import stratified_group_kfold_df
 from training.dataio.utils import ensure_dir, PathEncoder, locate_bad
 
@@ -178,7 +179,7 @@ def dataio_prep(hparams):
         num_outputs = num_layers if speech_encoder.output_hidden_states else 1
         output_vars = ["emb_{}".format(i) for i in range(num_outputs)]
 
-        @CachedDynamicItem.cache(hparams["cache_dir"])
+        @CachedPersistDynamicItem.cache(hparams["cache_dir"], hparams["dataset_size"])
         @sb.utils.data_pipeline.takes("id", "signal")
         @sb.utils.data_pipeline.provides(*output_vars)
         def cache_emb(id, signal):

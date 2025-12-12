@@ -340,12 +340,6 @@ if __name__ == "__main__":
             train_loader_kwargs=hparams["train_dataloader_options"],
         )
 
-    # # Turn off caching after training. The scope of caching must end here.
-    # if cache_encoder:
-    #     cache_dir = Path(hparams.get("cache_dir")).resolve()
-    #     if cache_dir.exists():
-    #         shutil.rmtree(cache_dir)
-
     brain.evaluate(
         test_set=datasets["test_val"],
         test_loader_kwargs=hparams["test_dataloader_options"]

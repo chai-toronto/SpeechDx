@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from model.pool import ASP
+from model.pool import ASP, ChunkPool
 
 
 class Model(nn.Module):
@@ -86,5 +86,29 @@ class LayerTemporalProbe(nn.Module):
         """
         layer_pooled = self.layer_pooler(x, lengths)  # (B, T_max, D)
         pooled = self.pooler(layer_pooled, lengths)  # (B, D)
+        pooled = torch.nan_to_num(pooled, nan=0.0, posinf=0.0, neginf=0.0)
+        return self.classifier(pooled)
+
+class ChunkTProbe(nn.Module):
+    def __init__(self, input_dim, num_labels, temp_pooler, bias=True):
+        super().__init__()
+        self.chunker = ChunkPool(input_dim)
+        self.pooler = temp_pooler
+        if isinstance(self.pooler, ASP):
+            input_dim = input_dim * 2  # ASP doubles the dimension
+        self.classifier = nn.Linear(input_dim, num_labels, bias=bias)
+
+    def forward(self, x, lengths=None):
+        """
+        x: (B, T_max, D) matrix of batch x time x features
+        lengths: (B,) relative lengths (to T_max) per sequence. If None, we assume no padding.
+        Returns:
+          logits: (B, num_labels)
+        """
+        x = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+        x, mask, _, _ = self.chunker(x, lengths)
+        # reconstruct lengths from mask
+        lengths = (~mask).sum(dim=1).float() / mask.size(1)
+        pooled = self.pooler(x, lengths)
         pooled = torch.nan_to_num(pooled, nan=0.0, posinf=0.0, neginf=0.0)
         return self.classifier(pooled)

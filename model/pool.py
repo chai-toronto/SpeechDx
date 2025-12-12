@@ -227,6 +227,8 @@ class LayerWeightedAvgPool(nn.Module):
         # Initialize pooled tensor
         pooled = torch.zeros_like(x[0])  # (B, T_max, D)
 
+        T = pooled.shape[1]
+        lengths = (lengths * T).long()  # Convert to absolute lengths
         mask = length_to_mask(lengths) if lengths is not None else None # (B, T_max)
 
         # Weighted sum with numerical checks
@@ -245,3 +247,104 @@ class LayerWeightedAvgPool(nn.Module):
         pooled = torch.nan_to_num(pooled, nan=0.0, posinf=0.0, neginf=0.0)
 
         return (pooled, w) if return_weights else pooled
+
+
+class ChunkPool(nn.Module):
+    def __init__(self, d_model):
+        super().__init__()
+        self.q_proj = nn.Linear(d_model, d_model, bias=False)
+        self.k_proj = nn.Linear(d_model, d_model, bias=False)
+        with torch.no_grad():
+            self.q_proj.weight.copy_(torch.eye(d_model))
+            self.k_proj.weight.copy_(torch.eye(d_model))
+        self.q_proj.weight._no_reinit = True
+        self.k_proj.weight._no_reinit = True
+
+    def forward(self, x, lengths = None):
+        """
+        x: (B, T_max, D) padded with zeros in the tail
+        lengths: (B,) relative lengths (to T_max) per sequence. If None, we assume no padding.
+
+        Returns:
+            boundary_mask: (B, T_max) boolean mask where True indicates non-boundary tokens
+            boundary_prob: (B, T_max, 2) probabilities for non-boundary and boundary classes, respectively
+        """
+        B, T, D = x.shape
+        mask = None
+        if lengths is not None:
+            T = x.shape[1]
+            lengths = (lengths * T).long()  # Convert to absolute lengths
+            mask = ~length_to_mask(lengths).bool() # (B, T), True for pads
+
+        # Cosine similarity between consecutive tokens
+        q = F.normalize(self.q_proj(x[:, :-1]), dim=-1)  # (B, L-1, D)
+        k = F.normalize(self.k_proj(x[:, 1:]), dim=-1)  # (B, L-1, D)
+        cos_sim = (q * k).sum(dim=-1)  # (B, L-1)
+
+        # Convert to boundary score: high cosine sim � low boundary prob
+        boundary_score = (1 - cos_sim) / 2  # (B, L-1), range [0, 1]
+        boundary_score = F.pad(boundary_score, (1, 0), value=1.0)  # First token always boundary
+
+        boundary_prob = torch.stack(((1 - boundary_score), boundary_score), dim=-1)
+
+        selected_idx = torch.argmax(boundary_prob, dim=-1)
+
+        boundary_mask = selected_idx != 1  # (shape hidden_states.shape[:-1])
+
+        # Handle padding: force padded positions to NOT be boundaries
+        if mask is not None:
+            boundary_mask = boundary_mask & mask
+
+        selected_probs = boundary_prob.gather(
+            dim=-1, index=selected_idx.unsqueeze(-1)
+        )  # (shape hidden_states.shape[:-1], 1)
+
+        # Reorder so boundaries come first
+        # Strategy: assign large indices to non-boundaries, small to boundaries
+        token_idx = torch.arange(T, device=x.device)[None, :]  # (1, L)
+        token_idx = token_idx + boundary_mask.long() * T  # Non-boundaries get +L
+        sorted_idx = torch.argsort(token_idx, dim=1)  # (B, L)
+
+        # Count boundaries per batch
+        num_boundaries = (~boundary_mask).sum(dim=1)  # (B,)
+        max_boundaries = num_boundaries.max().item()
+
+        if max_boundaries == 0:
+            raise ValueError("No boundaries detected in any sequence.")
+
+        # Gather reordered tokens (only first max_boundaries)
+        sorted_hidden = torch.gather(
+            x, dim=1,
+            index=sorted_idx[:, :max_boundaries].unsqueeze(-1).expand(-1, -1, D)
+        )
+        # True = Non-boundary tokens (to be masked out)
+        chunk_mask = torch.arange(max_boundaries, device=x.device)[None, :] >= num_boundaries[:, None]
+
+        return sorted_hidden, chunk_mask, boundary_mask, boundary_prob
+
+
+if __name__ == "__main__":
+    # Simple test
+    # B, T, D = 2, 10, 4
+    # x = torch.randn(B, T, D)
+    x = torch.Tensor([[1, 0],
+                      [-1, 0]])
+    x = x.unsqueeze(0) # (1, 2, 2)
+
+    # lengths = torch.tensor([1.0, 0.8])
+    lengths = None
+
+    chunk_pool = ChunkPool(d_model=2)
+    sorted_hidden, chunk_mask, boundary_mask, boundary_prob = chunk_pool(x, lengths)
+
+    print("Input shape:", x.shape)
+    print("Sorted hidden shape:", sorted_hidden.shape)
+    print("Chunk mask shape:", chunk_mask.shape)
+    print("Boundary mask shape:", boundary_mask.shape)
+    print("Boundary prob shape:", boundary_prob.shape)
+
+
+
+
+
+

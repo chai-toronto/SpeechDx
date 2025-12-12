@@ -36,6 +36,8 @@ class Wav2Vec2(nn.Module):
 
         mask = None
         if lengths is not None:
+            T = x.shape[1]
+            lengths = (lengths * T).long()  # Convert to absolute lengths
             mask = length_to_mask(lengths) # (B, T)
 
         with (torch.no_grad() if self.freeze_encoder else torch.enable_grad()):
