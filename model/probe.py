@@ -108,7 +108,7 @@ class ChunkTProbe(nn.Module):
         """
         x = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
         x_chunk, mask, _, _ = self.chunker(x, lengths)
-        # self.chunk_stat(x, x_chunk, lengths, mask)
+        self.chunk_stat(x, x_chunk, lengths, mask)
         # reconstruct lengths from mask
         lengths = (~mask).sum(dim=1).float() / mask.size(1)
         pooled = self.pooler(x_chunk, lengths)
