@@ -3,7 +3,7 @@
 #SBATCH --chdir=./  # Set the working directory
 #SBATCH --output=exps/slurm_logs/%x_%j_out.txt     # Output file (%x=job-name, %j=job-id)
 #SBATCH --error=exps/slurm_logs/%x_%j_err.txt      # Error file
-#SBATCH --time=1:30:00             # Time limit (hh:mm:ss)
+#SBATCH --time=10:00             # Time limit (hh:mm:ss)
 #SBATCH --cpus-per-task=24          # Number of CPU cores per task
 #SBATCH --nodes=1                   # Number of nodes
 #SBATCH --ntasks=1                  # Number of tasks
