@@ -32,6 +32,8 @@ class DiagnosticsBrain(sb.Brain):
             else:
                 wavs = getattr(batch, "emb_0").data
                 lens = getattr(batch, "emb_0").lengths
+            wavs = wavs.to(self.device)
+            lens = lens.to(self.device)
         else:
             wavs, lens = batch.signal
             # Forward pass through the model
