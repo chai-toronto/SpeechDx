@@ -2,10 +2,10 @@ File: config/main.yaml
 random_seed: 2025
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
-model_name: wavlm-large-last
+model_name: wavlm-large-last-tprobe
 data_folder: ./data/
-#slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
-slurm_tmpdir: ./tmp/
+slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
+#slurm_tmpdir: ./tmp/
 #----------------------------------
 # Most of the knobs you should change
 data_params: !include:tasks/c9s_t1.yaml
