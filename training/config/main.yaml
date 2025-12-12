@@ -5,8 +5,8 @@ __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 model_name: wavlm-large-last
 probe_name: tprobe
 data_folder: ./data/
-slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
-#slurm_tmpdir: ./tmp/
+#slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
+slurm_tmpdir: ./tmp/
 #----------------------------------
 # Most of the knobs you should change
 data_params: !include:tasks/c9s_t1.yaml
