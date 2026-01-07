@@ -107,13 +107,13 @@ class ChunkTProbe(nn.Module):
           logits: (B, num_labels)
         """
         x = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
-        x_chunk, mask, _, _ = self.chunker(x, lengths)
+        x_chunk, mask, boundary_mask, boundary_prob = self.chunker(x, lengths)
         self.chunk_stat(x, x_chunk, lengths, mask)
         # reconstruct lengths from mask
         lengths = (~mask).sum(dim=1).float() / mask.size(1)
         pooled = self.pooler(x_chunk, lengths)
         pooled = torch.nan_to_num(pooled, nan=0.0, posinf=0.0, neginf=0.0)
-        return self.classifier(pooled)
+        return self.classifier(pooled), boundary_mask.clone().detach(), boundary_prob.clone().detach()
 
     def chunk_stat(self, x, x_chunk, lengths, chunk_mask):
         B, T_max, D = x.size()

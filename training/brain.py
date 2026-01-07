@@ -77,6 +77,7 @@ class DiagnosticsBrain(sb.Brain):
         loss : torch.Tensor
             A one-element tensor used for backpropagating the gradient.
         """
+        predictions, boundary_mask, boundary_prob = predictions
         # Dynamically retrieve the label using the 'label_key' from hparams
         label_key = getattr(self.hparams, "label_key", "label_encoded")
         lab = getattr(batch, label_key)
@@ -94,6 +95,10 @@ class DiagnosticsBrain(sb.Brain):
         weight = torch.tensor([getattr(self.hparams, "positive_class_weight", 1.0)]).to(self.device)
         loss = sb.nnet.losses.bce_loss(predictions, lab, pos_weight=weight)
 
+        # Add load balancing loss if specified
+        lb_loss = self.get_load_balancing_loss(boundary_prob, boundary_mask)
+        loss = loss + lb_loss * 0.03
+
         # Append this batch of losses to the loss metric
         self.loss_metric.append(
             batch.id, predictions, lab, reduction="batch"
@@ -105,6 +110,35 @@ class DiagnosticsBrain(sb.Brain):
             self.record.add(predictions, lab)
 
         return loss
+
+    def get_load_balancing_loss(self, boundary_prob, boundary_mask, N: float = 5.0) -> torch.Tensor:
+        """
+        Compute load balancing loss from last forward pass.
+
+        Encourages the model to create meaningful chunks (not too many, not too few).
+        From H-Net hnet/utils/train.py lines 13-40.
+
+        Args:
+            N: Target downsampling factor (higher = more compression)
+
+        Returns:
+            loss: scalar tensor
+        """
+        # Extract probability of boundary class
+        tokenized_prob = boundary_prob[..., 1]  # (B, L)
+
+        # Empirical vs predicted boundary ratios
+        true_ratio = boundary_mask.float().mean()  # Actual fraction of boundaries
+        avg_prob = tokenized_prob.float().mean()  # Predicted fraction
+
+        # Load balancing loss
+        # Penalizes mismatch between predicted and actual boundary frequency
+        lb_loss = (
+            (1 - true_ratio) * (1 - avg_prob) +
+            (true_ratio) * (avg_prob) * (N - 1)
+        ) * N / (N - 1)
+
+        return lb_loss
 
     def on_stage_start(self, stage, epoch=None):
         """Gets called at the beginning of each epoch."""

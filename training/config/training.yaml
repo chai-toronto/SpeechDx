@@ -2,7 +2,7 @@ num_workers: 22 # 22 Change when on HPC, this is for DataLoader
 batch_size: 32
 persistent_workers: True
 progressbar: True
-test_only: True
+test_only: False
 precision: fp32
 eval_precision: bf16
 skip_nonfinite_grads: True
