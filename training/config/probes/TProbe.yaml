@@ -5,4 +5,5 @@ probe: !new:model.probe.ChunkTProbe
   input_dim: !ref <feature_dim>
   num_labels: !ref <num_labels>
   temp_pooler: !new:model.pool.ASP
-    input_dim: !ref <feature_dim>
+    input_dim: 1536
+#    input_dim: !ref <feature_dim>

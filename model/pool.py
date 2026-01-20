@@ -250,7 +250,7 @@ class LayerWeightedAvgPool(nn.Module):
 
 
 class ChunkPool(nn.Module):
-    def __init__(self, d_model):
+    def __init__(self, d_model, d_out):
         super().__init__()
         self.q_proj = nn.Linear(d_model, d_model, bias=False)
         self.k_proj = nn.Linear(d_model, d_model, bias=False)
@@ -260,12 +260,16 @@ class ChunkPool(nn.Module):
         self.q_proj.weight._no_reinit = True
         self.k_proj.weight._no_reinit = True
 
+        self.up_proj = nn.Linear(d_model, d_out)
+
     def forward(self, x, lengths = None):
         """
         x: (B, T_max, D) padded with zeros in the tail
         lengths: (B,) relative lengths (to T_max) per sequence. If None, we assume no padding.
 
         Returns:
+            sorted_hidden: (B, T_chunk, D) reordered hidden states with boundaries first
+            chunk_mask: (B, T_chunk) boolean mask where True indicates non-boundary tokens
             boundary_mask: (B, T_max) boolean mask where True indicates non-boundary tokens
             boundary_prob: (B, T_max, 2) probabilities for non-boundary and boundary classes, respectively
         """
@@ -283,21 +287,26 @@ class ChunkPool(nn.Module):
 
         # Convert to boundary score: high cosine sim � low boundary prob
         boundary_score = (1 - cos_sim) / 2  # (B, L-1), range [0, 1]
+
+        # Using Sigmoid instead
+        # q = self.q_proj(x[:, :-1])  # (B, L-1, D)
+        # k = self.k_proj(x[:, 1:])  # (B, L-1, D)
+        # sim = (q * k).sum(dim=-1)  # (B, L-1)
+        # sim = F.sigmoid(sim)
+        #
+        # boundary_score = 1 - sim  # (B, L-1), range [0, 1]
+
         boundary_score = F.pad(boundary_score, (1, 0), value=1.0)  # First token always boundary
 
         boundary_prob = torch.stack(((1 - boundary_score), boundary_score), dim=-1)
 
-        selected_idx = torch.argmax(boundary_prob, dim=-1)
+        selected_idx = boundary_prob[:, :, 1] > 0.1  # (B, L)
 
         boundary_mask = selected_idx != 1  # (shape hidden_states.shape[:-1])
 
         # Handle padding: force padded positions to NOT be boundaries
         if mask is not None:
             boundary_mask = boundary_mask | mask
-
-        selected_probs = boundary_prob.gather(
-            dim=-1, index=selected_idx.unsqueeze(-1)
-        )  # (shape hidden_states.shape[:-1], 1)
 
         # Reorder so boundaries come first
         # Strategy: assign large indices to non-boundaries, small to boundaries
@@ -317,8 +326,11 @@ class ChunkPool(nn.Module):
             x, dim=1,
             index=sorted_idx[:, :max_boundaries].unsqueeze(-1).expand(-1, -1, D)
         )
+
         # True = Non-boundary tokens (to be masked out)
         chunk_mask = torch.arange(max_boundaries, device=x.device)[None, :] >= num_boundaries[:, None]
+
+        sorted_hidden = self.up_proj(sorted_hidden * (~chunk_mask).unsqueeze(-1).float())
 
         return sorted_hidden, chunk_mask, boundary_mask, boundary_prob
 

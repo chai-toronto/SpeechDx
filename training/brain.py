@@ -21,6 +21,14 @@ class DiagnosticsBrain(sb.Brain):
         output probabilities over the N classes.
 
         """
+
+        # For debugging
+        # label_key = getattr(self.hparams, "label_key", "label_encoded")
+        # lab = getattr(batch, label_key)
+        # if lab.sum() > 0:
+        #     breakpoint()
+        # else:
+        #     return lab.unsqueeze(-1).float(), None, None
         batch = batch.to(self.device)
 
         cache_encoder = getattr(self.hparams, "cache_encoder", False)
@@ -96,8 +104,10 @@ class DiagnosticsBrain(sb.Brain):
         loss = sb.nnet.losses.bce_loss(predictions, lab, pos_weight=weight)
 
         # Add load balancing loss if specified
-        lb_loss = self.get_load_balancing_loss(boundary_prob, boundary_mask)
-        loss = loss + lb_loss * 0.03
+        if boundary_mask is not None or boundary_prob is not None:
+            lb_loss = self.get_load_balancing_loss(boundary_prob, boundary_mask)
+            print("Load balancing loss: {:.4f}".format(lb_loss.item()))
+            loss = loss + lb_loss * 0.03
 
         # Append this batch of losses to the loss metric
         self.loss_metric.append(

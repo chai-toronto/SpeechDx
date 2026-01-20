@@ -92,7 +92,8 @@ class LayerTemporalProbe(nn.Module):
 class ChunkTProbe(nn.Module):
     def __init__(self, input_dim, num_labels, temp_pooler, bias=True):
         super().__init__()
-        self.chunker = ChunkPool(input_dim)
+        self.chunker = ChunkPool(input_dim, d_out = 1536) # For the upsampler
+        input_dim = 1536
         self.pooler = temp_pooler
         if isinstance(self.pooler, ASP):
             input_dim = input_dim * 2  # ASP doubles the dimension
