@@ -262,6 +262,9 @@ class ChunkPool(nn.Module):
 
         self.up_proj = nn.Linear(d_model, d_out)
 
+        self.dir = "/Users/lkieu/PycharmProjects/Audio-Health-Benchmark/exps/c9s_t1/wavlm-large-last-chunkTprobe-upsampler-0.1"
+        self.chunk_scores = []
+
     def forward(self, x, lengths = None):
         """
         x: (B, T_max, D) padded with zeros in the tail
@@ -298,6 +301,8 @@ class ChunkPool(nn.Module):
 
         boundary_score = F.pad(boundary_score, (1, 0), value=1.0)  # First token always boundary
 
+        self.chunk_scores += boundary_score.split(1, dim=0)  # Store for analysis
+
         boundary_prob = torch.stack(((1 - boundary_score), boundary_score), dim=-1)
 
         selected_idx = boundary_prob[:, :, 1] > 0.1  # (B, L)
@@ -333,6 +338,12 @@ class ChunkPool(nn.Module):
         sorted_hidden = self.up_proj(sorted_hidden * (~chunk_mask).unsqueeze(-1).float())
 
         return sorted_hidden, chunk_mask, boundary_mask, boundary_prob
+
+    def save_chunk_scores(self, filepath=None):
+        if filepath is None:
+            filepath = f"{self.dir}/chunk_scores.pt"
+        torch.save(self.chunk_scores, filepath)
+        print(f"Saved chunk scores to {filepath}")
 
 
 if __name__ == "__main__":
