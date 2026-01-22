@@ -185,7 +185,7 @@ class DiagnosticsBrain(sb.Brain):
             # Log stats and save checkpoint
             self.hparams.train_logger.log_stats(
                 {"Epoch": epoch},
-                train_stats={"loss": self.train_loss},
+                train_stats={"val_loss": self.train_loss},
                 valid_stats=stats,
             )
 

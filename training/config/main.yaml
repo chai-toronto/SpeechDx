@@ -56,7 +56,7 @@ raw_label_key: !ref <data_params[raw_label_key]>
 # Output folder structure
 output_folder: !ref ./exps/<task>/<model_name>-<probe_name>/brain-logs/
 save_folder: !ref <output_folder>/save
-train_log: !ref <output_folder>/train_log.txt
+train_log_dir: !ref <output_folder>/
 
 # Manifest files created by prepare_data_fn
 train_annotation: !ref ./exps/<task>/manifest/train.json
@@ -125,8 +125,8 @@ test_dataloader_options:
   num_workers: 0
 
 # Logger
-train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
-  save_file: !ref <train_log>
+train_logger: !new:speechbrain.utils.train_logger.TensorboardLogger
+  save_dir: !ref <train_log_dir>
 
 # Error/Metric calculation
 progressbar: !ref <training_params[progressbar]>
