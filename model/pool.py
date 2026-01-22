@@ -301,7 +301,7 @@ class ChunkPool(nn.Module):
 
         boundary_score = F.pad(boundary_score, (1, 0), value=1.0)  # First token always boundary
 
-        self.chunk_scores += boundary_score.split(1, dim=0)  # Store for analysis
+        # self.chunk_scores += boundary_score.split(1, dim=0)  # Store for analysis
 
         boundary_prob = torch.stack(((1 - boundary_score), boundary_score), dim=-1)
 
