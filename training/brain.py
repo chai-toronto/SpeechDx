@@ -182,6 +182,15 @@ class DiagnosticsBrain(sb.Brain):
 
         # At the end of validation...
         if stage == sb.Stage.VALID:
+            old_lr, new_lr = self.hparams.lr_annealing(epoch)
+            sb.nnet.schedulers.update_learning_rate(
+                self.hparams.optimizer, new_lr
+            )
+
+            # For Early Stopping
+            epoch_counter = self.hparams.epoch_counter
+            epoch_counter.update_metric(stats[optim_metric])
+
             # Log stats and save checkpoint
             self.hparams.train_logger.log_stats(
                 {"Epoch": epoch},
@@ -198,12 +207,6 @@ class DiagnosticsBrain(sb.Brain):
                 {"Epoch loaded": self.hparams.epoch_counter.current},
                 test_stats=stats,
             )
-            # self.modules.model.probe.chunker.save_chunk_scores()
-            times = self.modules.model.probe.times
-            avg_time = sum(times) / len(times)
-            std = (sum((x - avg_time) ** 2 for x in times) / len(times)) ** 0.5
-            print(f"Average inference time per batch: {avg_time:.4f} seconds ± {std:.4f} seconds")
-            print(f"Total inference time: {sum(times):.4f} seconds for {len(times)} batches")
 
     def calc_epoch_metrics(self, stage_loss):
         """ Call this after the epoch only"""

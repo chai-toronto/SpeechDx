@@ -94,8 +94,9 @@ precision: !ref <training_params[precision]>
 eval_precision: !ref <training_params[eval_precision]>
 number_of_epochs: !ref <training_params[number_of_epochs]>
 batch_size: !ref <training_params[batch_size]>
-lr: !ref <training_params[lr]>
-#l2_ratio: !ref <training_params[l2_ratio]>
+lr_s: !ref <training_params[lr_s]>
+lr_e: !ref <training_params[lr_e]>
+
 l2: !ref <training_params[l2]>
 sample_rate: !ref <encoder_params[sample_rate]>
 
@@ -133,14 +134,15 @@ progressbar: !ref <training_params[progressbar]>
 error_stats: !name:speechbrain.utils.metric_stats.BinaryMetricStats
 
 # Epoch management
-epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
+epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounterWithStopper
   limit: !ref <number_of_epochs>
+  limit_to_stop: 3
+  limit_warmup: 2
+  direction: !ref <hpopt_params[optim_mode]>
 
 # Optimizer
 opt_class: !name:torch.optim.AdamW
-  lr: !ref <lr>
-#  weight_decay: !apply:operator.mul [!ref <lr>, !ref <l2_ratio>]
-  weight_decay: !ref <l2>
+  lr: !ref <lr_s>
 
 # HP Optimizer
 # Enable Ray Tune hyperparameter optimization
@@ -156,11 +158,14 @@ sequential: !ref <hpopt_params[sequential]>
 # Ray Tune specific configuration
 ray_tune_config: !ref <hpopt_params[ray_tune_config]>
 
-
 # Define hyperparameter search space
 # This is optional - if not provided, defaults will be used
 hpopt_config: !ref <hpopt_params[hpopt_config]>
 
+lr_annealing: !new:speechbrain.nnet.schedulers.LinearScheduler
+  initial_value: !ref <lr_s>
+  final_value: !ref <lr_f>
+  epoch_count: !ref <number_of_epochs>
 
 # Checkpointing
 ckpt_interval_minutes: 15 # save checkpoint every N min

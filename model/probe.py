@@ -52,7 +52,6 @@ class TemporalProbe(nn.Module):
         if isinstance(self.pooler, ASP):
             input_dim = input_dim * 2  # ASP doubles the dimension
         self.classifier = nn.Linear(input_dim, num_labels, bias=bias)
-        self.times = []
 
     def forward(self, x, lengths=None):
         """
@@ -61,15 +60,10 @@ class TemporalProbe(nn.Module):
         Returns:
           logits: (B, num_labels)
         """
-        start = time.perf_counter()
-
         x = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
         pooled = self.pooler(x, lengths)
         pooled = torch.nan_to_num(pooled, nan=0.0, posinf=0.0, neginf=0.0)
         output = self.classifier(pooled)
-
-        elaspe = time.perf_counter() - start
-        self.times.append(elaspe)
 
         return output
 
@@ -109,7 +103,6 @@ class ChunkTProbe(nn.Module):
             input_dim = input_dim * 2  # ASP doubles the dimension
         self.classifier = nn.Linear(input_dim, num_labels, bias=bias)
         self.stat = []
-        self.times = []
 
     def forward(self, x, lengths=None):
         """
@@ -123,14 +116,10 @@ class ChunkTProbe(nn.Module):
         self.chunk_stat(x, x_chunk, lengths, mask)
         # reconstruct lengths from mask
         lengths = (~mask).sum(dim=1).float() / mask.size(1)
-        start = time.perf_counter()
 
         pooled = self.pooler(x_chunk, lengths)
         pooled = torch.nan_to_num(pooled, nan=0.0, posinf=0.0, neginf=0.0)
         output = self.classifier(pooled)
-
-        elaspe = time.perf_counter() - start
-        self.times.append(elaspe)
 
         return output, boundary_mask.clone().detach(), boundary_prob.clone().detach()
 

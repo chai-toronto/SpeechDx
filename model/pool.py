@@ -259,7 +259,6 @@ class ChunkPool(nn.Module):
             self.k_proj.weight.copy_(torch.eye(d_model))
         self.q_proj.weight._no_reinit = True
         self.k_proj.weight._no_reinit = True
-
         self.up_proj = nn.Linear(d_model, d_out)
 
         self.dir = "/Users/lkieu/PycharmProjects/Audio-Health-Benchmark/exps/c9s_t1/wavlm-large-last-chunkTprobe-upsampler-0.1"
