@@ -189,14 +189,6 @@ if __name__ == "__main__":
             },
         )
 
-    # cache_encoder = hparams.get("cache_encoder", False)
-    # # Clear cache directory before adding new features. This ensures no stale/duplicate cached features.
-    # if cache_encoder:
-    #     cache_dir = Path(hparams.get("cache_dir")).resolve()
-    #     if cache_dir.exists():
-    #         shutil.rmtree(cache_dir)
-    #     cache_dir.mkdir(parents=True, exist_ok=True)
-
     optim_metric = hparams.get("optim_metric", "F1")
     optim_mode = hparams.get("optim_mode", "max")
     best_config = None
@@ -334,10 +326,11 @@ if __name__ == "__main__":
     )
 
     if not hparams.get("test_only", False):
+        # Not the usual CV case anymore as train and val are merged
         brain.fit(
             epoch_counter=hparams["epoch_counter"],
-            train_set=datasets["test_train"],
-
+            train_set=datasets["train_og"],
+            valid_set=datasets["val_og"],
             train_loader_kwargs=hparams["train_dataloader_options"],
         )
     brain.evaluate(

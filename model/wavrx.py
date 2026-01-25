@@ -168,7 +168,7 @@ class WavRx(nn.Module):
         elif self.p2 == 'atn':
             self.pooling_layer_x = AttentiveStatisticsPooling(self.num_ssl_feat,attention_channels=self.num_ssl_feat,global_context=True)
 
-    def forward(self, x):
+    def forward(self, x, lengths=None):
         # Upstream encoder processing
         input_values = self.processor(x, sampling_rate=16000, return_tensors="pt").input_values[0]
         input_values = input_values.to(device=x.device, dtype=x.dtype)

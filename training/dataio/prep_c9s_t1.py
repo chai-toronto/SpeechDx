@@ -55,58 +55,60 @@ def prepare_data(
     manifest_train_path = Path(manifest_train_path)
     manifest_val_path = Path(manifest_val_path)
     manifest_test_path = Path(manifest_test_path)
-    if not all(
-            (
-                manifest_train_path.exists(),
-                manifest_val_path.exists(),
-                manifest_test_path.exists(),
-            )
-    ):
-        df = pd.read_csv(metadata_path)
 
-        # Resolve path to be absolute
-        df["path"] = Path(wav_folder) / df["path"].astype(str)
-        df["max_length"] = int(max_length)
+    df = pd.read_csv(metadata_path)
 
-        # split into test and non-test
-        if new_test:
-            raise NotImplementedError
-        else:
-            df_test = df[df['split'] == 2]
-            df_nontest = df[df['split'] != 2]
+    # Resolve path to be absolute
+    df["path"] = Path(wav_folder).resolve() / df["path"]
+    df["max_length"] = int(max_length)
 
-        # split train data into folds, each goes by manifest id
-        folds = stratified_group_kfold_df(df_nontest,
-                                          'uid',
-                                          raw_label_key,
-                                          "Participant_ID",
-                                          random_seed=random_seed,
-                                          n_splits=num_fold)
+    # split into test and non-test
+    if new_test:
+        raise NotImplementedError
+    else:
+        df_test = df[df['split'] == 2]
+        df_nontest = df[df['split'] != 2]
+        df_train_og = df[df['split'] == 0]
+        df_val_og = df[df['split'] == 1]
 
-        train_dicts = []
-        valid_dicts = [] # list of folds
-        for train_df, val_df in folds:
-            train_dicts.append(train_df.set_index('uid').to_dict(orient='index'))
-            valid_dicts.append(val_df.set_index('uid').to_dict(orient='index'))
+    # split train data into folds, each goes by manifest id
+    folds = stratified_group_kfold_df(df_nontest,
+                                      'uid',
+                                      raw_label_key,
+                                      "Participant_ID",
+                                      random_seed=random_seed,
+                                      n_splits=num_fold)
 
-        test_val = df_test.set_index("uid").to_dict(orient='index')
-        test_train = df_nontest.set_index("uid").to_dict(orient='index')
-        test_data = {
-            "train": test_train,
-            "val": test_val
-        }
+    train_dicts = []
+    valid_dicts = [] # list of folds
+    for train_df, val_df in folds:
+        train_dicts.append(train_df.set_index('uid').to_dict(orient='index'))
+        valid_dicts.append(val_df.set_index('uid').to_dict(orient='index'))
 
-        import json
-        ensure_dir(manifest_train_path)
-        with open(manifest_train_path, 'w') as f:
-            json.dump(train_dicts, f, indent=5, cls=PathEncoder)
-        ensure_dir(manifest_val_path)
-        with open(manifest_val_path, 'w') as f:
-            json.dump(valid_dicts, f, indent=5, cls=PathEncoder)
-        ensure_dir(manifest_test_path)
-        with open(manifest_test_path, 'w') as f:
-            json.dump(test_data, f, indent=4, cls=PathEncoder)
-        print("Manifests created.")
+    test_val = df_test.set_index("uid").to_dict(orient='index')
+    test_train = df_nontest.set_index("uid").to_dict(orient='index')
+    test_data = {
+        "train": test_train,
+        "val": test_val
+    }
+
+    train_dicts.append(df_train_og.set_index('uid').to_dict(orient='index'))
+    valid_dicts.append(df_val_og.set_index('uid').to_dict(orient='index'))
+    print("Train og size:", len(df_train_og))
+    print("Val og size:", len(df_val_og))
+    print("Test size:", len(test_val))
+
+    import json
+    ensure_dir(manifest_train_path)
+    with open(manifest_train_path, 'w') as f:
+        json.dump(train_dicts, f, indent=5, cls=PathEncoder)
+    ensure_dir(manifest_val_path)
+    with open(manifest_val_path, 'w') as f:
+        json.dump(valid_dicts, f, indent=5, cls=PathEncoder)
+    ensure_dir(manifest_test_path)
+    with open(manifest_test_path, 'w') as f:
+        json.dump(test_data, f, indent=4, cls=PathEncoder)
+    print("Manifests created.")
     print("--- prepare_data finished ---")
 
 
@@ -150,7 +152,7 @@ def dataio_prep(hparams):
             signal = signal[start:start + max_length]
             duration = max_length
 
-        if duration == 0:  # handle empty audio
+        if duration < 16000:  # handle empty audio
             signal = torch.zeros(16000)
             duration = 16000
             warnings.warn("Empty audio file found: {}".format(file_path))
@@ -215,6 +217,9 @@ def dataio_prep(hparams):
 
     data_dict['test_train'] = test_data['train']
     data_dict['test_val'] = test_data['val']
+
+    data_dict['train_og'] = train_folds[-1]
+    data_dict['val_og'] = val_folds[-1]
 
     # Define datasets.
     datasets = {}

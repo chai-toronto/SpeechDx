@@ -48,7 +48,7 @@ def attn_pool(lengths, scores, x):
 
     # Mask BEFORE softmax so pads get zero probability
     masked_scores = scores.masked_fill(~mask, float('-inf'))
-    weights = F.softmax(masked_scores, dim=1)  # (B, T_max)
+    weights = F.sigmoid(masked_scores)  # (B, T_max)
 
     pooled = torch.bmm(weights.unsqueeze(1), x).squeeze(1)  # (B, D)
     return pooled

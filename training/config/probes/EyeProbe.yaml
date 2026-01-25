@@ -1,0 +1,2 @@
+probe: !new:model.probe.EyeProbe
+
