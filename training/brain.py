@@ -16,12 +16,13 @@ class DiagnosticsBrain(sb.Brain):
         self.cache = None
         self.checkpointer.recover_if_possible()
 
+        self.stat = {}
+
     def compute_forward(self, batch, stage):
         """Runs all the computation that transforms the input into the
         output probabilities over the N classes.
 
         """
-
         # For debugging
         # label_key = getattr(self.hparams, "label_key", "label_encoded")
         # lab = getattr(batch, label_key)
@@ -47,7 +48,6 @@ class DiagnosticsBrain(sb.Brain):
             wavs, lens = batch.signal
             # Forward pass through the model
             wavs = self.modules.model.encoder(wavs, lens)
-
         predictions = self.modules.model.probe(wavs, lens)
         return predictions
 
@@ -85,7 +85,7 @@ class DiagnosticsBrain(sb.Brain):
         loss : torch.Tensor
             A one-element tensor used for backpropagating the gradient.
         """
-        predictions, boundary_mask, boundary_prob = predictions
+        predictions, boundary_mask, boundary_prob, scores = predictions
         # Dynamically retrieve the label using the 'label_key' from hparams
         label_key = getattr(self.hparams, "label_key", "label_encoded")
         lab = getattr(batch, label_key)
@@ -119,6 +119,13 @@ class DiagnosticsBrain(sb.Brain):
             self.error_metrics.append(batch.id, predictions, lab)
             self.record.add(predictions, lab)
 
+        if stage == sb.Stage.TEST:
+            ids = batch.id
+            for i in range(len(ids)):
+                self.stat[ids[i]] = {
+                    "boundary_prob": boundary_prob[i].cpu(),
+                    "scores": scores[i].cpu()
+                }
         return loss
 
     def get_load_balancing_loss(self, boundary_prob, boundary_mask, N: float = 5.0) -> torch.Tensor:
@@ -184,7 +191,7 @@ class DiagnosticsBrain(sb.Brain):
         if stage == sb.Stage.VALID:
             old_lr, new_lr = self.hparams.lr_annealing(epoch)
             sb.nnet.schedulers.update_learning_rate(
-                self.hparams.optimizer, new_lr
+                self.optimizer, new_lr
             )
 
             # For Early Stopping
@@ -207,6 +214,7 @@ class DiagnosticsBrain(sb.Brain):
                 {"Epoch loaded": self.hparams.epoch_counter.current},
                 test_stats=stats,
             )
+            torch.save(self.stat, Path(self.hparams.output_folder) / "test_diagnostics.pt")
 
     def calc_epoch_metrics(self, stage_loss):
         """ Call this after the epoch only"""

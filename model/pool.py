@@ -22,7 +22,7 @@ class AttentiveTemporalPoolLite(nn.Module):
         """
         scores = torch.tanh(self.attn(x)).squeeze(-1)               # (B, T_max)
 
-        return attn_pool(lengths, scores, x)
+        return attn_pool(lengths, scores, x), scores
 
 def attn_pool(lengths, scores, x):
     """
@@ -67,10 +67,10 @@ class AttentiveTemporalPool(nn.Module):
         Returns:
           pooled:  (B, D)
         """
-        h = torch.tanh(self.attn(x))           # (B, T_max, H)
+        h = F.gelu(self.attn(x))           # (B, T_max, H)
         scores = self.score(h).squeeze(-1)     # (B, T_max)
 
-        return attn_pool(lengths, scores, x)
+        return attn_pool(lengths, scores, x), scores
 
 class AvgTPool(nn.Module):
     def __init__(self):
@@ -91,7 +91,7 @@ class AvgTPool(nn.Module):
             lengths = lengths.clamp(min=1)      # avoid div by zero
             sum_x = x.sum(dim=-2)         # (B, D)
             pooled = sum_x / lengths.unsqueeze(1)  # (B, D)
-            return pooled
+            return pooled, None
 
 class ASP(nn.Module):
     def __init__(self, input_dim):
@@ -108,7 +108,7 @@ class ASP(nn.Module):
         x = x.transpose(1,2)  # (B, D, T_max)
         x = self.pool(x, lengths).transpose(1, 2)  # (B, 1, 2*D)
         x = x.squeeze(1)  # (B, 2*D)
-        return x
+        return x, None
 
 
 # class LayerWeightedAvgPool(nn.Module):
@@ -261,8 +261,6 @@ class ChunkPool(nn.Module):
         self.k_proj.weight._no_reinit = True
         self.up_proj = nn.Linear(d_model, d_out)
 
-        self.dir = "/Users/lkieu/PycharmProjects/Audio-Health-Benchmark/exps/c9s_t1/wavlm-large-last-chunkTprobe-upsampler-0.1"
-        self.chunk_scores = []
 
     def forward(self, x, lengths = None):
         """
@@ -300,8 +298,6 @@ class ChunkPool(nn.Module):
 
         boundary_score = F.pad(boundary_score, (1, 0), value=1.0)  # First token always boundary
 
-        # self.chunk_scores += boundary_score.split(1, dim=0)  # Store for analysis
-
         boundary_prob = torch.stack(((1 - boundary_score), boundary_score), dim=-1)
 
         selected_idx = boundary_prob[:, :, 1] > 0.1  # (B, L)
@@ -338,11 +334,6 @@ class ChunkPool(nn.Module):
 
         return sorted_hidden, chunk_mask, boundary_mask, boundary_prob
 
-    def save_chunk_scores(self, filepath=None):
-        if filepath is None:
-            filepath = f"{self.dir}/chunk_scores.pt"
-        torch.save(self.chunk_scores, filepath)
-        print(f"Saved chunk scores to {filepath}")
 
 
 if __name__ == "__main__":

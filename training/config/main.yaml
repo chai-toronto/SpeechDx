@@ -3,7 +3,7 @@ random_seed: 2025
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
 model_name: wavlm-large-last
-probe_name: chunkTprobe-upsampler-0.1
+probe_name: chunkAttTprobe-upsampler-0.1
 data_folder: ./data/
 #slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
 slurm_tmpdir: ./tmp/
@@ -96,8 +96,6 @@ number_of_epochs: !ref <training_params[number_of_epochs]>
 batch_size: !ref <training_params[batch_size]>
 lr_s: !ref <training_params[lr_s]>
 lr_e: !ref <training_params[lr_e]>
-
-l2: !ref <training_params[l2]>
 sample_rate: !ref <encoder_params[sample_rate]>
 
 skip_nonfinite_grads: !ref <training_params[skip_nonfinite_grads]>
@@ -164,7 +162,7 @@ hpopt_config: !ref <hpopt_params[hpopt_config]>
 
 lr_annealing: !new:speechbrain.nnet.schedulers.LinearScheduler
   initial_value: !ref <lr_s>
-  final_value: !ref <lr_f>
+  final_value: !ref <lr_e>
   epoch_count: !ref <number_of_epochs>
 
 # Checkpointing
