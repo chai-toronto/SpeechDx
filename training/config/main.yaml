@@ -10,7 +10,6 @@ slurm_tmpdir: ./tmp/
 #----------------------------------
 # Most of the knobs you should change
 data_params: !include:tasks/c9s_t1.yaml
-dataset_size: 7542 # total number of samples in the dataset in val + train
 encoder_params: !include:encoders/wavlm.yaml
 cache_encoder: True
 cache_dir: !ref <slurm_tmpdir>/.cache/<model_name>/

@@ -31,6 +31,7 @@ class CachedPersistDynamicItem(CachedDynamicItem):
         self.num_cached = len(self.cache)
         self.dataset_size = dataset_size
 
+
         self.read_only = False
         if self.num_cached == self.dataset_size:
             print(f"Loaded full cache from {self.cache_location}")

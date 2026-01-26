@@ -126,10 +126,12 @@ def dataio_prep(hparams):
     # Initialization of the label encoder.
     label_encoder = sb.dataio.encoder.CategoricalEncoder()
 
+    max_length = hparams.get("max_length", 160000)  # default to 10 seconds at 16kHz
+
     # Define audio pipeline
-    @sb.utils.data_pipeline.takes("path", "max_length")
+    @sb.utils.data_pipeline.takes("path")
     @sb.utils.data_pipeline.provides("signal", "duration")
-    def audio_pipeline(file_path, max_length):
+    def audio_pipeline(file_path):
         """Load the signal, resample, and pass it and its length."""
 
         signal, sr_og = torchaudio.load(file_path)
@@ -173,7 +175,6 @@ def dataio_prep(hparams):
     dynamic_items.append(label_pipeline)
     output_keys.append("label_encoded")
 
-
     if hparams["cache_encoder"]:
         speech_encoder = hparams["encoder"]
         # Do this to take advantage of auto padding
@@ -181,7 +182,7 @@ def dataio_prep(hparams):
         num_outputs = num_layers if speech_encoder.output_hidden_states else 1
         output_vars = ["emb_{}".format(i) for i in range(num_outputs)]
 
-        @CachedPersistDynamicItem.cache(hparams["cache_dir"], hparams["dataset_size"])
+        @CachedHDF5DynamicItem.cache(hparams["cache_dir"], 'a')
         @sb.utils.data_pipeline.takes("id", "signal")
         @sb.utils.data_pipeline.provides(*output_vars)
         def cache_emb(id, signal):
@@ -198,7 +199,6 @@ def dataio_prep(hparams):
 
         dynamic_items.append(cache_emb)
         output_keys += output_vars
-
 
     # Retrieve the data
     with open(hparams["train_annotation"], "r") as f:
@@ -229,6 +229,14 @@ def dataio_prep(hparams):
             dynamic_items=dynamic_items,
             output_keys=output_keys,
         )
+
+    if hparams["cache_encoder"]:
+        warmup_ds = [datasets['test_train'], datasets['test_val']]
+        for i, ds in enumerate(warmup_ds):
+            print(f"Iterating dataset {i} to warm the cache.")
+            ds.iterate_once()
+        cache_emb.change_file_mode('r')  # change to read mode
+
     return datasets
 
 
