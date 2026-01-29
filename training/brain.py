@@ -14,7 +14,6 @@ class DiagnosticsBrain(sb.Brain):
         self.cache = None
         self.checkpointer.recover_if_possible()
 
-        self.stat = {}
 
     def compute_forward(self, batch, stage):
         """Runs all the computation that transforms the input into the
@@ -46,10 +45,9 @@ class DiagnosticsBrain(sb.Brain):
             wavs, lens = batch.signal
             # Forward pass through the model
             wavs = self.modules.model.encoder(wavs, lens)
-        T = wavs.size(1)
-        abs_lens = (lens * T).long()
-        predictions = self.modules.model.probe(wavs, lens)
-        return *predictions, abs_lens
+
+        return self.modules.model.probe(wavs, lens)
+
 
     def augment_input(self, wavs, stage):
         """Applies data augmentation based on hparams (if available)."""
@@ -85,8 +83,6 @@ class DiagnosticsBrain(sb.Brain):
         loss : torch.Tensor
             A one-element tensor used for backpropagating the gradient.
         """
-        predictions, boundary_mask, boundary_prob, scores, abs_lens = predictions
-
         # Dynamically retrieve the label using the 'label_key' from hparams
         label_key = getattr(self.hparams, "label_key", "label_encoded")
         lab = getattr(batch, label_key)
@@ -104,22 +100,6 @@ class DiagnosticsBrain(sb.Brain):
         weight = torch.tensor([getattr(self.hparams, "positive_class_weight", 1.0)]).to(self.device)
         loss = sb.nnet.losses.bce_loss(predictions, lab, pos_weight=weight)
 
-        # Add load balancing loss if specified
-        if boundary_mask is not None or boundary_prob is not None:
-            # lb_loss = self.get_load_balancing_loss(boundary_prob, boundary_mask, N=8)
-            # print("Load balancing loss: {:.4f}".format(lb_loss.item()))
-            # loss = loss + lb_loss * 0.5
-
-            boundary_prob = boundary_prob[:, :, 1].squeeze(-1)  # (B, T)
-            chunk_losses = self.boundary_regularizers(
-                boundary_prob,
-                (boundary_prob > 0.1).float(),
-                length_target=4.0  # Target ~20 frames per chunk
-            )
-
-            loss = (loss + 0.01 * chunk_losses["loss_coverage"] +
-                    0.01 * chunk_losses["loss_entropy"] +
-                    0.5 * chunk_losses["loss_smooth"])
 
         # Append this batch of losses to the loss metric
         self.loss_metric.append(
@@ -131,14 +111,6 @@ class DiagnosticsBrain(sb.Brain):
             self.error_metrics.append(batch.id, predictions, lab)
             self.record.add(predictions, lab)
 
-        if stage == sb.Stage.TEST:
-            ids = batch.id
-            for i in range(len(ids)):
-                self.stat[ids[i]] = {
-                    "duration": abs_lens[i].item(),
-                    "boundary_prob": boundary_prob[i].cpu(),
-                    "scores": scores[i].cpu()
-                }
         return loss
 
     def get_load_balancing_loss(self, boundary_prob, boundary_mask, N: float = 5.0) -> torch.Tensor:
@@ -227,7 +199,7 @@ class DiagnosticsBrain(sb.Brain):
                 {"Epoch loaded": self.hparams.epoch_counter.current},
                 test_stats=stats,
             )
-            torch.save(self.stat, Path(self.hparams.output_folder) / "test_diagnostics.pt")
+
 
     def calc_epoch_metrics(self, stage_loss):
         """ Call this after the epoch only"""

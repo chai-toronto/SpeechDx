@@ -132,38 +132,29 @@ def dataio_prep(hparams):
 
     # Define audio pipeline
     @sb.utils.data_pipeline.takes("path")
-    @sb.utils.data_pipeline.provides("signal", "duration")
+    @sb.utils.data_pipeline.provides("raw_signal", "raw_duration")
     def audio_pipeline(file_path):
         """Load the signal, resample, and pass it and its length."""
 
-        signal, sr_og = torchaudio.load(file_path)
+        raw_signal, sr_og = torchaudio.load(file_path)
         # handle multi-channel
-        if signal.shape[0] > 1:
-            signal = signal.mean(dim=0, keepdim=False)
+        if raw_signal.shape[0] > 1:
+            raw_signal = raw_signal.mean(dim=0, keepdim=False)
 
         if sr_og != sample_rate:
-            signal = F.resample(signal, sr_og, new_freq=sample_rate,
+            raw_signal = F.resample(raw_signal, sr_og, new_freq=sample_rate,
                                 lowpass_filter_width=64,
                                 rolloff=0.9475937167399596,
                                 resampling_method="sinc_interp_kaiser",
                                 beta=14.769656459379492
                                 )
 
-        signal = signal.squeeze()
-        duration = len(signal)
-        if duration > max_length: # randomly crop if too long
-            start = random.randint(0, duration - max_length)
-            signal = signal[start:start + max_length]
-            duration = max_length
-
-        if duration < min_length:  # Concat to itself if too short
-            n_repeats = int(min_length / duration) + 1
-            signal = signal.repeat(n_repeats)[:min_length]
-            duration = len(signal)
-        return signal, duration
+        raw_signal = raw_signal.squeeze()
+        raw_duration = len(raw_signal)
+        return raw_signal, raw_duration
 
     dynamic_items.append(audio_pipeline)
-    output_keys.extend(["signal", "duration"])
+    output_keys.extend(["raw_signal", "raw_duration"])
 
     # Define label pipeline
     @sb.utils.data_pipeline.takes("label")
@@ -182,11 +173,11 @@ def dataio_prep(hparams):
         # Do this to take advantage of auto padding
         num_layers = hparams["num_layers"]
         num_outputs = num_layers if speech_encoder.output_hidden_states else 1
-        output_vars = ["emb_{}".format(i) for i in range(num_outputs)]
+        raw_output_vars = [f"raw_emb_{i}" for i in range(num_outputs)]
 
         @CachedHDF5DynamicItem.cache(hparams["cache_dir"], 'a')
         @sb.utils.data_pipeline.takes("id", "signal")
-        @sb.utils.data_pipeline.provides(*output_vars)
+        @sb.utils.data_pipeline.provides(*raw_output_vars)
         def cache_emb(id, signal):
             # signal is 1D tensor
             with torch.no_grad():
@@ -198,7 +189,59 @@ def dataio_prep(hparams):
             return emb
 
         dynamic_items.append(cache_emb)
-        output_keys += output_vars
+        output_keys += raw_output_vars
+
+        output_vars = [f"emb_{i}" for i in range(num_outputs)]
+
+        # Handling too short or too long data
+        @sb.utils.data_pipeline.takes(*raw_output_vars, "raw_duration")
+        @sb.utils.data_pipeline.provides(*output_vars, "duration")
+        def process_emb(*args):
+            raw_embs = args[:-1]
+            duration = args[-1]
+            rel_min_length = duration / min_length
+            if rel_min_length < 1.0:
+                # pad
+                output_embs = []
+                for raw_emb in raw_embs:
+                    T, D = raw_emb.shape
+                    n_repeats = int(1.0 / rel_min_length) + 1
+                    padded_emb = raw_emb.repeat(n_repeats, 1)[:min_length]
+                    output_embs.append(padded_emb)
+                return (*output_embs, min_length)
+
+            rel_max_length = duration / max_length
+            if rel_max_length > 1.0:
+                # randomly crop
+                output_embs = []
+                for raw_emb in raw_embs:
+                    T, D = raw_emb.shape
+                    new_length = int(T / rel_max_length)
+                    start = random.randint(0, T - new_length)
+                    cropped_emb = raw_emb[start:start + new_length]
+                    output_embs.append(cropped_emb)
+                return (*output_embs, new_length)
+
+            return (*raw_embs, duration)
+        dynamic_items.append(process_emb)
+        output_keys += output_vars + ["duration"]
+
+    else:
+        # Handling too short or too long data.
+        @sb.utils.data_pipeline.takes("raw_signal", "raw_duration")
+        @sb.utils.data_pipeline.provides("signal", "duration")
+        def process_signal(raw_signal, raw_duration):
+            if raw_duration > max_length: # randomly crop if too long
+                start = random.randint(0, raw_duration - max_length)
+                signal = raw_signal[start:start + max_length]
+                duration = max_length
+
+            if raw_duration < min_length:  # Concat to itself if too short
+                n_repeats = int(min_length / raw_duration) + 1
+                signal = raw_signal.repeat(n_repeats)[:min_length]
+                duration = len(signal)
+            return signal, duration
+
 
     # Retrieve the data
     with open(hparams["train_annotation"], "r") as f:
