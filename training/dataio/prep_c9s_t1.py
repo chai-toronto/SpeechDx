@@ -151,6 +151,9 @@ def dataio_prep(hparams):
 
         raw_signal = raw_signal.squeeze()
         raw_duration = len(raw_signal)
+
+        if raw_duration == 0:
+            raise ValueError(f"Zero-length audio file: {file_path}")
         return raw_signal, raw_duration
 
     dynamic_items.append(audio_pipeline)
