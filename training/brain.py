@@ -1,10 +1,8 @@
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 import speechbrain as sb
-from speechbrain.dataio.dataloader import SaveableDataLoader, LoopedLoader
-from tensorboard.plugins.hparams.summary_v2 import hparams
-
 from training.metric import Record, roc_auc_score_rev, accuracy
 
 
@@ -48,8 +46,10 @@ class DiagnosticsBrain(sb.Brain):
             wavs, lens = batch.signal
             # Forward pass through the model
             wavs = self.modules.model.encoder(wavs, lens)
+        T = wavs.size(1)
+        abs_lens = (lens * T).long()
         predictions = self.modules.model.probe(wavs, lens)
-        return predictions
+        return *predictions, abs_lens
 
     def augment_input(self, wavs, stage):
         """Applies data augmentation based on hparams (if available)."""
@@ -85,7 +85,8 @@ class DiagnosticsBrain(sb.Brain):
         loss : torch.Tensor
             A one-element tensor used for backpropagating the gradient.
         """
-        predictions, boundary_mask, boundary_prob, scores = predictions
+        predictions, boundary_mask, boundary_prob, scores, abs_lens = predictions
+
         # Dynamically retrieve the label using the 'label_key' from hparams
         label_key = getattr(self.hparams, "label_key", "label_encoded")
         lab = getattr(batch, label_key)
@@ -105,9 +106,20 @@ class DiagnosticsBrain(sb.Brain):
 
         # Add load balancing loss if specified
         if boundary_mask is not None or boundary_prob is not None:
-            lb_loss = self.get_load_balancing_loss(boundary_prob, boundary_mask)
-            print("Load balancing loss: {:.4f}".format(lb_loss.item()))
-            loss = loss + lb_loss * 0.03
+            # lb_loss = self.get_load_balancing_loss(boundary_prob, boundary_mask, N=8)
+            # print("Load balancing loss: {:.4f}".format(lb_loss.item()))
+            # loss = loss + lb_loss * 0.5
+
+            boundary_prob = boundary_prob[:, :, 1].squeeze(-1)  # (B, T)
+            chunk_losses = self.boundary_regularizers(
+                boundary_prob,
+                (boundary_prob > 0.1).float(),
+                length_target=4.0  # Target ~20 frames per chunk
+            )
+
+            loss = (loss + 0.01 * chunk_losses["loss_coverage"] +
+                    0.01 * chunk_losses["loss_entropy"] +
+                    0.5 * chunk_losses["loss_smooth"])
 
         # Append this batch of losses to the loss metric
         self.loss_metric.append(
@@ -123,6 +135,7 @@ class DiagnosticsBrain(sb.Brain):
             ids = batch.id
             for i in range(len(ids)):
                 self.stat[ids[i]] = {
+                    "duration": abs_lens[i].item(),
                     "boundary_prob": boundary_prob[i].cpu(),
                     "scores": scores[i].cpu()
                 }
@@ -201,7 +214,7 @@ class DiagnosticsBrain(sb.Brain):
             # Log stats and save checkpoint
             self.hparams.train_logger.log_stats(
                 {"Epoch": epoch},
-                train_stats={"val_loss": self.train_loss},
+                train_stats={"loss": self.avg_train_loss},
                 valid_stats=stats,
             )
 
@@ -231,11 +244,39 @@ class DiagnosticsBrain(sb.Brain):
             "sens": metrics['TP'] / (metrics['TP'] + metrics['FN']),
             "accuracy": accuracy(preds, tgts),
 
-
         }
         self.record.clear()
         return stats
 
+    def boundary_regularizers(self,
+                              start_prob: torch.Tensor,
+                              start_hard: torch.Tensor,
+                              length_target: float | None = 20.0,
+                              eps: float = 1e-9):
+        # Compute three auxiliary losses for stability: entropy, coverage, smoothness.
+        B, T = start_prob.shape
+        p = start_prob[:, 1:].clamp(eps, 1 - eps)  # avoid log(0); ignore first frame
+
+        ent = -(p * torch.log(p) + (1 - p) * torch.log(1 - p))  # [B,T]
+        # Binary entropy per frame; we maximize entropy - equivalent to minimizing -entropy
+        loss_entropy = -ent.mean() if T >= 2 else torch.tensor(0.0, device=start_prob.device)
+        num_starts = start_hard.sum(dim=1)  # [B] number of segments per sequence
+
+        if length_target is not None and length_target > 0:
+            seg_target = T / length_target  # desired number of segments based on target length
+            loss_coverage = ((num_starts - seg_target) ** 2).mean() / (
+                        seg_target + 1e-6)  # MSE between actual and target number of segments, normalized
+        else:
+            loss_coverage = torch.tensor(0.0, device=start_prob.device)
+
+        # encourage smoothness over time and discourage rapid fluctuations
+        smooth = F.mse_loss(p[:, 1:], p[:, :-1]) if T >= 3 else torch.tensor(0.0, device=start_prob.device)
+
+        return {
+            "loss_entropy": loss_entropy,
+            "loss_coverage": loss_coverage,
+            "loss_smooth": smooth,
+        }
 
 
 

@@ -127,6 +127,8 @@ def dataio_prep(hparams):
     label_encoder = sb.dataio.encoder.CategoricalEncoder()
 
     max_length = hparams.get("max_length", 160000)  # default to 10 seconds at 16kHz
+    sample_rate = hparams.get("sample_rate", 16000)
+    min_length = hparams.get("min_length", 16000)  # default to 1 second at 16kHz
 
     # Define audio pipeline
     @sb.utils.data_pipeline.takes("path")
@@ -139,8 +141,8 @@ def dataio_prep(hparams):
         if signal.shape[0] > 1:
             signal = signal.mean(dim=0, keepdim=False)
 
-        if sr_og != 16000:
-            signal = F.resample(signal, sr_og, new_freq=16000,
+        if sr_og != sample_rate:
+            signal = F.resample(signal, sr_og, new_freq=sample_rate,
                                 lowpass_filter_width=64,
                                 rolloff=0.9475937167399596,
                                 resampling_method="sinc_interp_kaiser",
@@ -154,10 +156,10 @@ def dataio_prep(hparams):
             signal = signal[start:start + max_length]
             duration = max_length
 
-        if duration < 16000:  # handle empty audio
-            signal = torch.zeros(16000)
-            duration = 16000
-            warnings.warn("Empty audio file found: {}".format(file_path))
+        if duration < min_length:  # Concat to itself if too short
+            n_repeats = int(min_length / duration) + 1
+            signal = signal.repeat(n_repeats)[:min_length]
+            duration = len(signal)
         return signal, duration
 
     dynamic_items.append(audio_pipeline)
@@ -187,9 +189,7 @@ def dataio_prep(hparams):
         @sb.utils.data_pipeline.provides(*output_vars)
         def cache_emb(id, signal):
             # signal is 1D tensor
-            device = next(speech_encoder.parameters()).device
             with torch.no_grad():
-                signal = signal.to(device=device)
                 emb = speech_encoder(signal.unsqueeze(0))
             if speech_encoder.output_hidden_states:
                 emb = tuple(x.squeeze(0) for x in emb)

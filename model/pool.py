@@ -48,7 +48,7 @@ def attn_pool(lengths, scores, x):
 
     # Mask BEFORE softmax so pads get zero probability
     masked_scores = scores.masked_fill(~mask, float('-inf'))
-    weights = F.softmax(masked_scores)  # (B, T_max)
+    weights = F.softmax(masked_scores, dim=-1)  # (B, T_max)
 
     pooled = torch.bmm(weights.unsqueeze(1), x).squeeze(1)  # (B, D)
     return pooled
@@ -288,6 +288,7 @@ class ChunkPool(nn.Module):
         # Convert to boundary score: high cosine sim � low boundary prob
         boundary_score = (1 - cos_sim) / 2  # (B, L-1), range [0, 1]
 
+
         # Using Sigmoid instead
         # q = self.q_proj(x[:, :-1])  # (B, L-1, D)
         # k = self.k_proj(x[:, 1:])  # (B, L-1, D)
@@ -297,6 +298,8 @@ class ChunkPool(nn.Module):
         # boundary_score = 1 - sim  # (B, L-1), range [0, 1]
 
         boundary_score = F.pad(boundary_score, (1, 0), value=1.0)  # First token always boundary
+
+        boundary_score[:, 1::2] = 0.0  # Force even positions to be non-boundaries (for stability)
 
         boundary_prob = torch.stack(((1 - boundary_score), boundary_score), dim=-1)
 

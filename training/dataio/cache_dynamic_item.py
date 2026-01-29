@@ -116,26 +116,19 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
         The mode to use when opening the HDF5 file. When creating the
         cache, writing must be allowed, but when reading from multiple
         processes, writing should not be allowed.
-    persist: bool
-        Whether to persist the cache on RAM. Be very careful with what
-        you are caching if you enable this. Default: False
     *args
     **kwargs
         Forwarded to DynamicItem constructor
     """
 
-    def __init__(self, cache_location, file_mode="a", persist=False, *args, **kwargs):
+    def __init__(self, cache_location, file_mode="a", *args, **kwargs):
         super().__init__(cache_location, *args, **kwargs)
 
         # Open connection to HDF5 file
         self.file_mode = file_mode
         self.cache_location /= "cache.hdf5"
 
-        self.persist = persist
-        if self.persist:
-            self.hdf5file = h5py.File(self.cache_location, file_mode, driver="core", backing_store=True)
-        else:
-            self.hdf5file = h5py.File(self.cache_location, file_mode)
+        self.hdf5file = h5py.File(self.cache_location, file_mode)
 
     def _is_cached(self, uid):
         """Test whether uid is cached."""
@@ -154,13 +147,10 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
         writing format (building cache) to read-only format (multi-process loading)."""
         self.hdf5file.close()
         self.file_mode = new_file_mode
-        if self.persist:
-            self.hdf5file = h5py.File(self.cache_location, new_file_mode, driver="core", backing_store=True)
-        else:
-            self.hdf5file = h5py.File(self.cache_location, new_file_mode)
+        self.hdf5file = h5py.File(self.cache_location, new_file_mode)
 
     @classmethod
-    def cache(cls, cache_location, file_mode="a", persist=False):
+    def cache(cls, cache_location, file_mode="a"):
         """Decorator which takes a DynamicItem and creates a CachedHDF5DynamicItem
 
         Arguments
@@ -203,7 +193,6 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
             return cls(
                 cache_location,
                 file_mode,
-                persist,
                 takes=obj.takes,
                 func=obj.func,
                 provides=obj.provides,

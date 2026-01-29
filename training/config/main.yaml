@@ -3,7 +3,7 @@ random_seed: 2025
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
 model_name: wavlm-large-last
-probe_name: chunkAttTprobe-upsampler-0.1
+probe_name: chunkAttTprobe-upsampler-t0.1-regs-chunk4
 data_folder: ./data/
 #slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
 slurm_tmpdir: ./tmp/
@@ -96,6 +96,7 @@ batch_size: !ref <training_params[batch_size]>
 lr_s: !ref <training_params[lr_s]>
 lr_e: !ref <training_params[lr_e]>
 sample_rate: !ref <encoder_params[sample_rate]>
+min_length: !ref <encoder_params[min_length]> # min length in samples (1s)
 
 skip_nonfinite_grads: !ref <training_params[skip_nonfinite_grads]>
 nonfinite_patience: !ref <training_params[nonfinite_patience]>
