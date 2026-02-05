@@ -260,6 +260,8 @@ class ChunkPool(nn.Module):
         self.q_proj.weight._no_reinit = True
         self.k_proj.weight._no_reinit = True
         self.up_proj = nn.Linear(d_model, d_out)
+        self.d_out = d_out
+        self.d_in = d_model
 
 
     def forward(self, x, lengths = None):
@@ -288,22 +290,20 @@ class ChunkPool(nn.Module):
         # Convert to boundary score: high cosine sim � low boundary prob
         boundary_score = (1 - cos_sim) / 2  # (B, L-1), range [0, 1]
 
-
-        # Using Sigmoid instead
-        # q = self.q_proj(x[:, :-1])  # (B, L-1, D)
-        # k = self.k_proj(x[:, 1:])  # (B, L-1, D)
-        # sim = (q * k).sum(dim=-1)  # (B, L-1)
-        # sim = F.sigmoid(sim)
-        #
-        # boundary_score = 1 - sim  # (B, L-1), range [0, 1]
-
         boundary_score = F.pad(boundary_score, (1, 0), value=1.0)  # First token always boundary
-
-        boundary_score[:, 1::2] = 0.0  # Force even positions to be non-boundaries (for stability)
 
         boundary_prob = torch.stack(((1 - boundary_score), boundary_score), dim=-1)
 
-        selected_idx = boundary_prob[:, :, 1] > 0.1  # (B, L)
+        # selected_idx = boundary_prob[:, :, 1] > 0.1  # (B, L) bool
+
+        # Guarantee chunk size
+        min_chunk_size = 4
+
+        selected_idx = pick_with_spacing_mask_batched(
+            boundary_prob[:, :, 1],
+            threshold=0.1,
+            k=min_chunk_size
+        )  # (B, L) bool
 
         boundary_mask = selected_idx != 1  # (shape hidden_states.shape[:-1])
 
@@ -337,6 +337,72 @@ class ChunkPool(nn.Module):
 
         return sorted_hidden, chunk_mask, boundary_mask, boundary_prob
 
+
+def pick_with_spacing_mask_batched(x: torch.Tensor, threshold: float, k: int) -> torch.Tensor:
+    """
+    x: (B, T)
+    Returns: (B, T) bool mask of picked indices.
+
+    Rule per row:
+      - pick index 0 (always)
+      - then greedily pick the next index i such that:
+           x[b, i] > threshold  AND  i - last_pick >= k
+        (equivalently i >= last_pick + k)
+
+    Note: if k == 0, we still force progress to the right by using step=max(k,1),
+    otherwise the greedy rule could re-pick the same index forever.
+    """
+    assert x.dim() == 2
+    B, T = x.shape
+    device = x.device
+
+    step = max(int(k), 1)
+
+    # Candidates: (B, T)
+    cand = x > threshold
+
+    # Build next-true lookup:
+    # next_idx[b, t] = smallest j >= t with cand[b, j]=True, else T
+    idx = torch.arange(T, device=device).view(1, T).expand(B, T)  # (B, T)
+    cand_pos = torch.where(cand, idx, torch.full_like(idx, T))    # True -> its index, False -> T
+    next_idx = torch.cummin(cand_pos.flip(-1), dim=-1).values.flip(-1)  # (B, T)
+
+    # Output mask
+    picked = torch.zeros((B, T), device=device, dtype=torch.bool)
+    picked[:, 0] = True  # always pick first one
+
+    cur = torch.zeros(B, device=device, dtype=torch.long)   # last picked index
+    start = cur + step                                     # next allowed starting point
+
+    done = torch.zeros(B, device=device, dtype=torch.bool)
+
+    # Safe upper bound on number of iterations (loop over picks, not over T)
+    max_steps = (T + step - 1) // step + 2
+
+    for _ in range(max_steps):
+        done = done | (start >= T)
+        if done.all():
+            break
+
+        # gather next candidate at or after start (clamp only to keep gather in-bounds)
+        start_clamped = start.clamp(max=T - 1)
+        nxt = next_idx.gather(1, start_clamped[:, None]).squeeze(1)  # (B,)
+
+        has = (nxt < T) & (~done)
+        if not has.any():
+            break
+
+        # mark picks
+        picked[has, nxt[has]] = True
+
+        # update last pick and next start
+        cur = torch.where(has, nxt, cur)
+        start = cur + step
+
+        # rows that failed to find a next candidate are done
+        done = done | (~has)
+
+    return picked
 
 
 if __name__ == "__main__":

@@ -175,7 +175,6 @@ if __name__ == "__main__":
             prepare_data_fn,
             kwargs={
                 "wav_folder": hparams["wav_folder"],
-                "audio_archive_path": hparams["audio_archive_path"],
                 "metadata_path": hparams["metadata_path"],
                 "manifest_train_path": hparams["train_annotation"],
                 "manifest_val_path": hparams["val_annotation"],
@@ -185,7 +184,6 @@ if __name__ == "__main__":
                 "raw_label_key": hparams["raw_label_key"],
                 "new_test": hparams["new_test"],
                 "num_fold": hparams["num_fold"],
-                "max_length": hparams.get("max_length", None)
             },
         )
 
@@ -327,12 +325,16 @@ if __name__ == "__main__":
 
     if not hparams.get("test_only", False):
         # Not the usual CV case anymore as train and val are merged
-        brain.fit(
-            epoch_counter=hparams["epoch_counter"],
-            train_set=datasets["train_og"],
-            valid_set=datasets["val_og"],
-            train_loader_kwargs=hparams["train_dataloader_options"],
-        )
+        try:
+            brain.fit(
+                epoch_counter=hparams["epoch_counter"],
+                train_set=datasets["train_og"],
+                valid_set=datasets["val_og"],
+                train_loader_kwargs=hparams["train_dataloader_options"],
+            )
+        except Exception as e:
+            print(f"Training failed with exception: {e}")
+            sys.exit(1)
     brain.evaluate(
         test_set=datasets["test_val"],
         test_loader_kwargs=hparams["test_dataloader_options"]

@@ -1,1 +1,2 @@
-Store downloaded compressed files in `DATASET/raw` and extracted files in `DATASET/processed`.
+Noise is from MS-SNSD
+rir is from MIT IR Survey

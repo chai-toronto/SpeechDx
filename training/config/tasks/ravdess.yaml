@@ -1,12 +1,12 @@
-task: c9s_t1
+task: ravdess
 
-dataset: c9s_t1
+dataset: torgo
 
 # ----------------------------------
 # DYNAMIC SCRIPT CONFIGURATION (Generic)
 # ----------------------------------
 # Path to the file containing the dataset-specific preparation and IO functions
-data_io_script: training.dataio.prep_c9s_t1
+data_io_script: training.dataio.prep_torgo
 
 # Name of the function to call for manifest generation
 prepare_data_fn: prepare_data
@@ -23,4 +23,5 @@ skip_prep: False
 new_test: False # Set False to use metadata's test split.
 # Cross Validation
 num_fold: 4 # works from 2 to num. subjects. To be implemented: 0 -> normal split no CV, -1 -> LOSO
-num_labels: 8
+
+num_labels: 1

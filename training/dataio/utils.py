@@ -1,5 +1,7 @@
 import json
 from pathlib import Path
+from urllib.request import urlretrieve
+
 
 def ensure_dir(path: Path):
     if path.is_file:
@@ -33,3 +35,5 @@ def locate_bad(obj, trail="$"):
         return None
     except TypeError:
         return f"{trail} :: {type(obj).__name__}"
+
+

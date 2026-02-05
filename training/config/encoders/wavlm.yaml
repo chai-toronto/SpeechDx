@@ -1,11 +1,12 @@
 sample_rate: 16000
-feature_dim: 1024 #768
-num_layers: 24 #12
+feature_dim: 768 #1024
+num_layers: 12 #24
 layer_dim: 1
 max_length: 160000  # 10s for 16kHz
+min_length: 16000   # 1s for 16kHz
 
 encoder: !new:model.wavlm.WavLM
-  ssl_encoder_source: "microsoft/wavlm-large"
+  ssl_encoder_source: "microsoft/wavlm-base-plus"
   freeze_encoder: True
   output_hidden_states: False
   sample_rate: !ref <sample_rate>

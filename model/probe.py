@@ -96,8 +96,8 @@ class LayerTemporalProbe(nn.Module):
 class ChunkTProbe(nn.Module):
     def __init__(self, input_dim, num_labels, temp_pooler, bias=True):
         super().__init__()
-        self.chunker = ChunkPool(input_dim, d_out = 1536) # For the upsampler
-        input_dim = 1536
+        self.chunker = ChunkPool(input_dim, d_out=int(input_dim*1.5)) # For the upsampler
+        input_dim = self.chunker.d_out
         self.pooler = temp_pooler
         if isinstance(self.pooler, ASP):
             input_dim = input_dim * 2  # ASP doubles the dimension
@@ -125,7 +125,57 @@ class ChunkTProbe(nn.Module):
         return (output,
                 boundary_mask.clone().detach(),
                 boundary_prob.clone().detach(),
-                scores.clone().detach())
+                scores.clone().detach() if scores is not None else None)
+
+    def chunk_stat(self, x, x_chunk, lengths, chunk_mask):
+        B, T_max, D = x.size()
+        _, T_chunk, _ = x_chunk.size()
+
+        orig_lens = (lengths * T_max).long()
+        chunk_lens = (~chunk_mask).sum(dim=1).long()
+        reduction = (orig_lens - chunk_lens).float() / orig_lens.float()
+        print("Average batch reduction: {:.2f}%".format(reduction.mean().item() * 100))
+        self.stat.append(reduction.mean().item())
+        print("Overall average reduction: {:.2f}%".format(sum(self.stat) / len(self.stat) * 100))
+
+class LayerChunkTProbe(nn.Module):
+    """
+    A probe that performs layer pool -> chunking -> temporal pool -> linear layer.
+    """
+
+    def __init__(self, input_dim, num_labels, layer_pooler, temp_pooler):
+        super().__init__()
+        self.chunker = ChunkPool(input_dim, d_out=1152) # For the upsampler
+        input_dim = self.chunker.d_out
+        self.pooler = temp_pooler
+        if isinstance(self.pooler, ASP):
+            input_dim = input_dim * 2  # ASP doubles the dimension
+        self.classifier = nn.Linear(input_dim, num_labels)
+        self.layer_pooler = layer_pooler
+        self.stat = []
+
+    def forward(self, x, lengths=None):
+        """
+        x: Tuples of each layer (B, T_max, D) tensor of batch x time x features.
+        Note: L can be at any position (e.g., B, T_max, L, D), specifiable in layer_pooler.
+        lengths: (B,) relative lengths (to T_max) per sequence. If None, we assume no padding.
+        Returns:
+          logits: (B, num_labels)
+        """
+        layer_pooled = self.layer_pooler(x, lengths)  # (B, T_max, D)
+        x_chunk, mask, boundary_mask, boundary_prob = self.chunker(layer_pooled, lengths)
+        self.chunk_stat(layer_pooled, x_chunk, lengths, mask)
+        # reconstruct lengths from mask
+        lengths = (~mask).sum(dim=1).float() / mask.size(1)
+
+        pooled, scores = self.pooler(x_chunk, lengths)  # (B, D)
+        pooled = torch.nan_to_num(pooled, nan=0.0, posinf=0.0, neginf=0.0)
+        output = self.classifier(pooled)
+
+        return (output,
+                boundary_mask.clone().detach(),
+                boundary_prob.clone().detach(),
+                scores.clone().detach() if scores is not None else None)
 
     def chunk_stat(self, x, x_chunk, lengths, chunk_mask):
         B, T_max, D = x.size()

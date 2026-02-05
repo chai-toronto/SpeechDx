@@ -10,6 +10,7 @@ To adapt to a new dataset, copy this file and modify:
 3. The 'output_keys' in dataio_prep (if the label key changes).
 """
 import json
+import os
 import random
 import warnings
 from pathlib import Path
@@ -17,6 +18,7 @@ from pathlib import Path
 import torchaudio
 import torchaudio.functional as F
 import speechbrain as sb
+from speechbrain.augment.time_domain import AddReverb, AddNoise, SpeedPerturb
 from speechbrain.utils.data_pipeline import CachedDynamicItem
 import torch
 import pandas as pd
@@ -58,6 +60,7 @@ def prepare_data(
 
     # Resolve path to be absolute
     df["path"] = Path(wav_folder).resolve() / df["path"]
+
     # split into test and non-test
     if new_test:
         raise NotImplementedError
@@ -126,6 +129,26 @@ def dataio_prep(hparams):
     sample_rate = hparams.get("sample_rate", 16000)
     min_length = hparams.get("min_length", 16000)  # default to 1 second at 16kHz
 
+    noise_folder = hparams.get("noise_folder", None)
+    noise_folder = os.path.abspath(noise_folder)
+    if noise_folder is None:
+        raise ValueError("Noise folder must be specified in hparams for this task.")
+
+    noisifier = AddNoise(os.path.join(noise_folder, 'noises.csv'),
+                         replacements={'noise_folder': os.path.join(noise_folder, 'audio')},
+                         snr_low=0,
+                         snr_high=15)
+
+    rir_folder = hparams.get("rir_folder", None)
+    if rir_folder is None:
+        raise ValueError("RIR folder must be specified in hparams for this task.")
+
+    reverb = AddReverb(os.path.join(rir_folder, 'rirs.csv'),
+                       replacements={'rir_folder': os.path.join(rir_folder, 'audio')},)
+
+    # 90% to 109% speed perturbation
+    perturbator = SpeedPerturb(orig_freq=sample_rate, speeds=list(range(90, 110, 1)))
+
     # Define audio pipeline
     @sb.utils.data_pipeline.takes("path")
     @sb.utils.data_pipeline.provides("raw_signal", "raw_duration")
@@ -133,6 +156,11 @@ def dataio_prep(hparams):
         """Load the signal, resample, and pass it and its length."""
 
         raw_signal, sr_og = torchaudio.load(file_path)
+        raw_duration = raw_signal.shape[-1]
+
+        if raw_duration == 0:
+            raise ValueError(f"Zero-length audio file: {file_path}")
+
         # handle multi-channel
         if raw_signal.shape[0] > 1:
             raw_signal = raw_signal.mean(dim=0, keepdim=False)
@@ -144,16 +172,16 @@ def dataio_prep(hparams):
                                 resampling_method="sinc_interp_kaiser",
                                 beta=14.769656459379492
                                 )
-
-        raw_signal = raw_signal.squeeze()
-        raw_duration = len(raw_signal)
-
-        if raw_duration == 0:
-            raise ValueError(f"Zero-length audio file: {file_path}")
+        raw_signal = perturbator(raw_signal)
+        raw_signal = noisifier(raw_signal, torch.ones(1))
+        raw_signal = reverb(raw_signal)
+        raw_signal = raw_signal.squeeze(0)
+        raw_duration = raw_signal.shape[0]
         return raw_signal, raw_duration
 
     dynamic_items.append(audio_pipeline)
     output_keys.extend(["raw_signal", "raw_duration"])
+
 
     # Define label pipeline
     @sb.utils.data_pipeline.takes("label")
@@ -202,9 +230,9 @@ def dataio_prep(hparams):
             if rel_min_length < 1.0:
                 # pad
                 output_embs = []
+                n_repeats = int(1.0 / rel_min_length) + 1
                 for raw_emb in raw_embs:
-                    n_repeats = int(1.0 / rel_min_length) + 1
-                    padded_emb = raw_emb.repeat(n_repeats, 1)[:min_length]
+                    padded_emb = raw_emb.repeat(n_repeats, 0)[:min_length]
                     output_embs.append(padded_emb)
                 return *output_embs, min_length
 
@@ -279,5 +307,7 @@ def dataio_prep(hparams):
         cache_emb.change_file_mode('r')  # change to read mode
 
     return datasets
+
+
 
 
