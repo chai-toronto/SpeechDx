@@ -1,0 +1,8 @@
+#feature_dim: !PLACEHOLDER
+num_labels: !PLACEHOLDER
+num_layers: !PLACEHOLDER
+#layer_dim: !PLACEHOLDER
+
+probe: !new:model.wavrx.WavRx
+  num_classes: !ref <num_labels>
+  num_hidden_layers: !ref <num_layers>

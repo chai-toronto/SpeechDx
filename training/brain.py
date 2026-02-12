@@ -3,11 +3,8 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 import speechbrain as sb
-from ray.tune.examples.pbt_tune_cifar10_with_keras import num_classes
 from torchmetrics import MetricCollection
 from torchmetrics.classification import Precision, Recall, F1Score, AUROC, Accuracy
-from training.metric import Record, roc_auc_score_rev, accuracy
-
 
 class DiagnosticsBrain(sb.Brain):
     """Class that manages the training loop for a generic diagnostics task."""
@@ -16,8 +13,9 @@ class DiagnosticsBrain(sb.Brain):
         super().__init__(**kwargs)
         self.cache = None
         self.checkpointer.recover_if_possible()
+        self.stat = {}
 
-        num_classes = self.hparams.get("num_labels", 1)
+        num_classes = self.hparams.num_labels
         if num_classes == 1:
             num_classes = None
             average = None
@@ -32,8 +30,7 @@ class DiagnosticsBrain(sb.Brain):
             f"precision_{ext}": Precision(task=task, num_classes=num_classes, average=average),
             f"recall_{ext}": Recall(task=task, num_classes=num_classes, average=average),
             f"accuracy_{ext}": Accuracy(task=task, num_classes=num_classes, average=average),
-            f"AUROC_{ext}": AUROC(task=task, num_classes=num_classes,
-                                  average=average) if task == 'multiclass' else None,
+            f"AUROC_{ext}": AUROC(task=task, num_classes=num_classes, average=average),
         })
 
     def compute_forward(self, batch, stage):
@@ -57,11 +54,9 @@ class DiagnosticsBrain(sb.Brain):
             wavs, lens = batch.signal
             # Forward pass through the model
             wavs = self.modules.model.encoder(wavs, lens)
-        T = wavs.size(1) if isinstance(wavs, torch.Tensor) else wavs[-1].size(1)
-        abs_lens = (lens * T).long()
+
         predictions = self.modules.model.probe(wavs, lens)
-        return *predictions, abs_lens
-        # return predictions, abs_lens
+        return predictions
 
     def compute_objectives(self, predictions, batch, stage):
         """Computes the loss given the predicted and targeted outputs.
@@ -81,24 +76,25 @@ class DiagnosticsBrain(sb.Brain):
         loss : torch.Tensor
             A one-element tensor used for backpropagating the gradient.
         """
-        predictions, boundary_mask, boundary_prob, scores, abs_lens = predictions
 
-        # predictions, abs_lens = predictions
         # Dynamically retrieve the label using the 'label_key' from hparams
         label_key = getattr(self.hparams, "label_key", "label_encoded")
         lab = getattr(batch, label_key)
-        lab = lab.to(self.device) # [B]
-        if lab.dim() == 1:
-            lab = lab.unsqueeze(-1)  # [B, 1]
-        lab = lab.to(predictions)
+        lab = lab.to(predictions).long()
 
-        # Compute the cost function: BCE is assumed for binary classification
-        # but pos_weight is used for imbalance handling.
-        weight = torch.tensor([getattr(self.hparams, "positive_class_weight", 1.0)]).to(self.device)
-        loss = sb.nnet.losses.bce_loss(predictions, lab, pos_weight=weight)
+        if self.hparams.num_labels == 1 and lab.dim() == 1:
+            lab = lab.unsqueeze(1)
 
-        # Add load balancing loss if specified
-        if boundary_mask is not None or boundary_prob is not None:
+        loss_kwargs = getattr(self.hparams, "loss_kwargs")
+        loss = self.hparams.loss(predictions, lab)
+
+        self.error_metrics.update(predictions, lab)
+
+        last_hidden_states = getattr(self.modules.model.probe, "last_hidden_states", None)
+
+        if last_hidden_states is not None:
+            boundary_mask, boundary_prob, scores = last_hidden_states
+
             # lb_loss = self.get_load_balancing_loss(boundary_prob, boundary_mask, N=8)
             # print("Load balancing loss: {:.4f}".format(lb_loss.item()))
             # loss = loss + lb_loss * 0.5
@@ -114,21 +110,13 @@ class DiagnosticsBrain(sb.Brain):
                     0.01 * chunk_losses["loss_entropy"] +
                     0.5 * chunk_losses["loss_smooth"])
 
-        # Append this batch of losses to the loss metric
-        self.loss_metric.append(
-            batch.id, predictions, lab, reduction="batch"
-        )
-
-        self.error_metrics.update(predictions, lab)
-
-        if stage == sb.Stage.TEST:
-            ids = batch.id
-            for i in range(len(ids)):
-                self.stat[ids[i]] = {
-                    "duration": abs_lens[i].item(),
-                    "boundary_prob": boundary_prob[i].cpu(),
-                    "scores": scores[i].cpu()
-                }
+            if stage == sb.Stage.TEST:
+                ids = batch.id
+                for i in range(len(ids)):
+                    self.stat[ids[i]] = {
+                        "boundary_prob": boundary_prob[i].cpu(),
+                        "scores": scores[i].cpu()
+                    }
         return loss
 
     def get_load_balancing_loss(self, boundary_prob, boundary_mask, N: float = 5.0) -> torch.Tensor:
@@ -159,12 +147,6 @@ class DiagnosticsBrain(sb.Brain):
         ) * N / (N - 1)
 
         return lb_loss
-
-    def on_stage_start(self, stage, epoch=None):
-        """Gets called at the beginning of each epoch."""
-        self.loss_metric = sb.utils.metric_stats.MetricStats(
-            metric=sb.nnet.losses.bce_loss
-        )
 
     def on_stage_end(self, stage, stage_loss, epoch=None):
         """Gets called at the end of an epoch."""

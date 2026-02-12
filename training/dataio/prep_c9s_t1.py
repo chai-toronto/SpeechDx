@@ -271,7 +271,7 @@ def dataio_prep(hparams):
             output_keys=output_keys,
         )
 
-    if hparams["cache_encoder"]:
+    if hparams["cache_encoder"] and hparams.get("warm_cache", True):
         warmup_ds = [datasets['test_train'], datasets['test_val']]
         for i, ds in enumerate(warmup_ds):
             print(f"Iterating dataset {i} to warm the cache.")

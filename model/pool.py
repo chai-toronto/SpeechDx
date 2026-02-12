@@ -12,6 +12,7 @@ class AttentiveTemporalPoolLite(nn.Module):
     def __init__(self, input_dim):
         super().__init__()
         self.attn  = nn.Linear(input_dim, 1)
+        self.last_scores = None
 
     def forward(self, x, lengths=None):
         """
@@ -21,8 +22,8 @@ class AttentiveTemporalPoolLite(nn.Module):
           pooled:  (B, D)
         """
         scores = torch.tanh(self.attn(x)).squeeze(-1)               # (B, T_max)
-
-        return attn_pool(lengths, scores, x), scores
+        self.last_scores = scores.clone().detach()
+        return attn_pool(lengths, scores, x)
 
 def attn_pool(lengths, scores, x):
     """
@@ -60,6 +61,8 @@ class AttentiveTemporalPool(nn.Module):
         self.attn  = nn.Linear(input_dim, hidden_dim)
         self.score = nn.Linear(hidden_dim, 1)
 
+        self.last_scores = None
+
     def forward(self, x, lengths=None):
         """
         x: (B, T_max, D) padded with zeros in the tail
@@ -70,7 +73,8 @@ class AttentiveTemporalPool(nn.Module):
         h = F.gelu(self.attn(x))           # (B, T_max, H)
         scores = self.score(h).squeeze(-1)     # (B, T_max)
 
-        return attn_pool(lengths, scores, x), scores
+        self.last_scores = scores.clone().detach()
+        return attn_pool(lengths, scores, x)
 
 class AvgTPool(nn.Module):
     def __init__(self):
@@ -91,7 +95,7 @@ class AvgTPool(nn.Module):
             lengths = lengths.clamp(min=1)      # avoid div by zero
             sum_x = x.sum(dim=-2)         # (B, D)
             pooled = sum_x / lengths.unsqueeze(1)  # (B, D)
-            return pooled, None
+            return pooled
 
 class ASP(nn.Module):
     def __init__(self, input_dim):
@@ -108,7 +112,7 @@ class ASP(nn.Module):
         x = x.transpose(1,2)  # (B, D, T_max)
         x = self.pool(x, lengths).transpose(1, 2)  # (B, 1, 2*D)
         x = x.squeeze(1)  # (B, 2*D)
-        return x, None
+        return x
 
 
 # class LayerWeightedAvgPool(nn.Module):
@@ -294,16 +298,16 @@ class ChunkPool(nn.Module):
 
         boundary_prob = torch.stack(((1 - boundary_score), boundary_score), dim=-1)
 
-        # selected_idx = boundary_prob[:, :, 1] > 0.1  # (B, L) bool
+        selected_idx = boundary_prob[:, :, 1] > 0.1  # (B, L) bool
 
-        # Guarantee chunk size
-        min_chunk_size = 4
-
-        selected_idx = pick_with_spacing_mask_batched(
-            boundary_prob[:, :, 1],
-            threshold=0.1,
-            k=min_chunk_size
-        )  # (B, L) bool
+        # # Guarantee chunk size
+        # min_chunk_size = 4
+        #
+        # selected_idx = pick_with_spacing_mask_batched(
+        #     boundary_prob[:, :, 1],
+        #     threshold=0.1,
+        #     k=min_chunk_size
+        # )  # (B, L) bool
 
         boundary_mask = selected_idx != 1  # (shape hidden_states.shape[:-1])
 

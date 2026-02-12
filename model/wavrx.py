@@ -64,35 +64,27 @@ class WavRx(nn.Module):
     """
     def __init__(
         self,
-        encoder_choice: str = 'wavlm',
-        ssl_encoder_source: str = "microsoft/wavlm-base-plus",
         num_ssl_feat: int = 768,
         num_fc_neurons:int = 768,
         num_classes: int = 1,
-        freeze_encoder: bool = True,
         pooling_1: str = 'atn',
         pooling_2: str = 'atn',
         sample_rate: int = 50,
         win_length: int = 256,
         hop_length: int = 64,
         dp = 0.25,
+        num_hidden_layers = 12,
         *args,
         **kwargs
         ):
         """
         Input:
-            encoder_choice: str
-                Upstream encoder. Default as 'wavlm', but can be switched to other SSL representations, such as Wav2vec, Hubert, data2vec, etc.
-            ssl_encoder_source: str
-                The backbone of uptream encoder. Default as 'wavlm-base-plus'. Can switch to large backbones, such as WavLM-Large.
             num_ssl_feat: int
                 Number of features in the uptream SSL representation. Default as 768, since we use the wavlm-base. Should be 1024 if using the large ones.
             num_fc_neurons: int
                 Number of neurons in the downstream fully-connected (FC) layers. Default to be the same as 'num_ssl_feat'.
             num_classes: int
                 Number of output neurons. Default as 1, since the diagnostic tasks are binary classification.
-            freeze_encoder: Boolean
-                Whether or not to freeze the upstream encoder. Default as True (only updating downstream modules).
             pooling_1: str
                 Type of pooling to operate on the temporal representation. Available choices are ['avg','atn']. Default as 'atn', which is the attentive statistic pooling.
             pooling_2: str
@@ -106,11 +98,6 @@ class WavRx(nn.Module):
         """
         
         super().__init__(*args, **kwargs)
-
-        # Upstream encoders
-        self.ssl_encoder_source = ssl_encoder_source
-        self.freeze_encoder = freeze_encoder
-        self._init_upstream()
 
         # Modulation dynamics block
         self.dynamics = modulation_block(sr=sample_rate,win_len=win_length,hop_len=hop_length)
@@ -128,17 +115,8 @@ class WavRx(nn.Module):
         self._init_clf_head()
 
         # Learnable layer weights
-        self.weights_temporal = nn.Parameter(torch.ones(self.feature_extractor.config.num_hidden_layers))
-        self.weights_dynamics = nn.Parameter(torch.ones(self.feature_extractor.config.num_hidden_layers))
-        
-    def _init_upstream(self):
-        """
-        Intializing the upstream encoder.
-        """
-        self.processor = AutoFeatureExtractor.from_pretrained(self.ssl_encoder_source)
-        self.feature_extractor = WavLMModel.from_pretrained(self.ssl_encoder_source)
-        for param in self.feature_extractor.parameters():
-            param.requires_grad = not self.freeze_encoder
+        self.weights_temporal = nn.Parameter(torch.ones(num_hidden_layers))
+        self.weights_dynamics = nn.Parameter(torch.ones(num_hidden_layers))
 
     def _init_clf_head(self):
         """
@@ -170,19 +148,16 @@ class WavRx(nn.Module):
 
     def forward(self, x, lengths=None):
         # Upstream encoder processing
-        input_values = self.processor(x, sampling_rate=16000, return_tensors="pt").input_values[0]
-        input_values = input_values.to(device=x.device, dtype=x.dtype)
-        features = self.feature_extractor(input_values, output_hidden_states=True)
-        features = torch.stack(features.hidden_states[1:],dim=1) 
-        B,L,T,F = features.shape # (batch, layer, time, features)
+        x = torch.stack(x, dim=1)
+        B,L,T,F = x.shape # (batch, layer, time, features)
 
         # temporal branch:
-        feat_t = self.weight_layer(features,branch='temporal',return_sum=True) # (batch, time, features)
+        feat_t = self.weight_layer(x,branch='temporal',return_sum=True) # (batch, time, features)
         feat_t = feat_t.permute(0,2,1)
         feat_t = self.pooling_layer_t(feat_t).squeeze(-1)
 
         # dynamics branch:
-        features = features.view(B*L,T,F)
+        features = x.view(B*L,T,F)
         feat_x = self.dynamics(features)
         feat_x = feat_x.permute(0,2,1) # (B*L, F, freq)
         feat_x = feat_x.view(B,L,F,feat_x.shape[2])
@@ -191,7 +166,7 @@ class WavRx(nn.Module):
 
         # Classification
         output = self.fc(torch.cat((feat_t,feat_x),axis=-1))
-        output = output.view(output.shape[0],1)
+
         return output
 
     def weight_layer(self, features, branch, return_sum=False):
@@ -223,19 +198,16 @@ class WavRx(nn.Module):
         self.eval()
         with torch.no_grad():
             # Upstream encoder processing
-            input_values = self.processor(x, sampling_rate=16000, return_tensors="pt").input_values[0]
-            input_values = input_values.to(device=x.device, dtype=x.dtype)
-            features = self.feature_extractor(input_values, output_hidden_states=True)
-            features = torch.stack(features.hidden_states[1:],dim=1) 
-            B,L,T,F = features.shape # (batch, layer, time, features)
+            x = torch.stack(x, dim=1)
+            B,L,T,F = x.shape # (batch, layer, time, features)
 
             # temporal branch:
-            feat_t = self.weight_layer(features,branch='temporal',return_sum=True) # (batch, time, features)
+            feat_t = self.weight_layer(x,branch='temporal',return_sum=True) # (batch, time, features)
             feat_t = feat_t.permute(0,2,1)
             feat_t = self.pooling_layer_t(feat_t).squeeze(-1)
 
             # dynamics branch:
-            features = features.view(B*L,T,F)
+            features = x.view(B*L,T,F)
             feat_x = self.dynamics(features)
             feat_x = feat_x.permute(0,2,1) # (B*L, F, freq)
             feat_x = feat_x.view(B,L,F,feat_x.shape[2])

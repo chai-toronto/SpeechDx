@@ -1,4 +1,0 @@
-sample_rate: 16000
-max_length: 160000  # 10 seconds
-
-encoder: !new:model.wavrx.WavRx

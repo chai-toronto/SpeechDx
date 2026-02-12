@@ -163,7 +163,7 @@ def dataio_prep(hparams):
 
         # handle multi-channel
         if raw_signal.shape[0] > 1:
-            raw_signal = raw_signal.mean(dim=0, keepdim=False)
+            raw_signal = raw_signal.mean(dim=0, keepdim=True)
 
         if sr_og != sample_rate:
             raw_signal = F.resample(raw_signal, sr_og, new_freq=sample_rate,

@@ -61,7 +61,7 @@ class TemporalProbe(nn.Module):
           logits: (B, num_labels)
         """
         x = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
-        pooled, scores = self.pooler(x, lengths)
+        pooled = self.pooler(x, lengths)
         pooled = torch.nan_to_num(pooled, nan=0.0, posinf=0.0, neginf=0.0)
         output = self.classifier(pooled)
 
@@ -89,21 +89,36 @@ class LayerTemporalProbe(nn.Module):
           logits: (B, num_labels)
         """
         layer_pooled = self.layer_pooler(x, lengths)  # (B, T_max, D)
-        pooled, scores = self.pooler(layer_pooled, lengths)  # (B, D)
+        pooled = self.pooler(layer_pooled, lengths)  # (B, D)
         pooled = torch.nan_to_num(pooled, nan=0.0, posinf=0.0, neginf=0.0)
         return self.classifier(pooled)
 
 class ChunkTProbe(nn.Module):
     def __init__(self, input_dim, num_labels, temp_pooler, bias=True):
         super().__init__()
-        self.chunker = ChunkPool(input_dim, d_out=int(input_dim*1.5)) # For the upsampler
-        input_dim = self.chunker.d_out
+        d_out = int(input_dim * 1.5)
+
+        self.chunker = ChunkPool(input_dim, d_out=d_out) # For the upsampler
+
+        input_dim = d_out
+
+        self.ffn = nn.Sequential(
+            nn.LayerNorm(input_dim),
+            nn.Linear(input_dim, input_dim * 4),
+            nn.GELU(),
+            nn.Linear(input_dim * 4, input_dim)
+        )
+
         self.pooler = temp_pooler
+
         if isinstance(self.pooler, ASP):
             input_dim = input_dim * 2  # ASP doubles the dimension
+
         self.classifier = nn.Linear(input_dim, num_labels, bias=bias)
+
         self.stat = []
-        self.scores = None
+
+        self.last_hidden_states = None
 
     def forward(self, x, lengths=None):
         """
@@ -113,19 +128,29 @@ class ChunkTProbe(nn.Module):
           logits: (B, num_labels)
         """
         x = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+
         x_chunk, mask, boundary_mask, boundary_prob = self.chunker(x, lengths)
+
         self.chunk_stat(x, x_chunk, lengths, mask)
+
+        x_chunk += self.ffn(x_chunk)
+
         # reconstruct lengths from mask
         lengths = (~mask).sum(dim=1).float() / mask.size(1)
 
-        pooled, scores = self.pooler(x_chunk, lengths)
+        pooled = self.pooler(x_chunk, lengths)
+
+        scores = self.pooler.last_scores if hasattr(self.pooler, 'last_scores') else None
+
         pooled = torch.nan_to_num(pooled, nan=0.0, posinf=0.0, neginf=0.0)
+
         output = self.classifier(pooled)
 
-        return (output,
-                boundary_mask.clone().detach(),
-                boundary_prob.clone().detach(),
-                scores.clone().detach() if scores is not None else None)
+        self.last_hidden_states = (boundary_mask.clone().detach(),
+                                    boundary_prob.clone().detach(),
+                                    scores)
+
+        return output
 
     def chunk_stat(self, x, x_chunk, lengths, chunk_mask):
         B, T_max, D = x.size()
@@ -145,14 +170,31 @@ class LayerChunkTProbe(nn.Module):
 
     def __init__(self, input_dim, num_labels, layer_pooler, temp_pooler):
         super().__init__()
-        self.chunker = ChunkPool(input_dim, d_out=1152) # For the upsampler
-        input_dim = self.chunker.d_out
+        d_out = int(input_dim * 1.5)
+
+        self.chunker = ChunkPool(input_dim, d_out=d_out)  # For the upsampler
+
+        input_dim = d_out
+
+        self.ffn = nn.Sequential(
+            nn.LayerNorm(input_dim),
+            nn.Linear(input_dim, input_dim * 4),
+            nn.GELU(),
+            nn.Linear(input_dim * 4, input_dim)
+        )
+
         self.pooler = temp_pooler
+
         if isinstance(self.pooler, ASP):
             input_dim = input_dim * 2  # ASP doubles the dimension
+
         self.classifier = nn.Linear(input_dim, num_labels)
+
         self.layer_pooler = layer_pooler
+
         self.stat = []
+
+        self.last_hidden_states = None
 
     def forward(self, x, lengths=None):
         """
@@ -163,19 +205,27 @@ class LayerChunkTProbe(nn.Module):
           logits: (B, num_labels)
         """
         layer_pooled = self.layer_pooler(x, lengths)  # (B, T_max, D)
+
         x_chunk, mask, boundary_mask, boundary_prob = self.chunker(layer_pooled, lengths)
+
         self.chunk_stat(layer_pooled, x_chunk, lengths, mask)
+
+        x_chunk += self.ffn(x_chunk)
+
         # reconstruct lengths from mask
         lengths = (~mask).sum(dim=1).float() / mask.size(1)
 
-        pooled, scores = self.pooler(x_chunk, lengths)  # (B, D)
+        pooled = self.pooler(x_chunk, lengths)  # (B, D)
+
+        scores = self.pooler.last_scores if hasattr(self.pooler, 'last_scores') else None
         pooled = torch.nan_to_num(pooled, nan=0.0, posinf=0.0, neginf=0.0)
         output = self.classifier(pooled)
 
-        return (output,
-                boundary_mask.clone().detach(),
-                boundary_prob.clone().detach(),
-                scores.clone().detach() if scores is not None else None)
+        self.last_hidden_states = (boundary_mask.clone().detach(),
+                                    boundary_prob.clone().detach(),
+                                    scores)
+
+        return output
 
     def chunk_stat(self, x, x_chunk, lengths, chunk_mask):
         B, T_max, D = x.size()

@@ -2,8 +2,8 @@ File: config/main.yaml
 random_seed: 2025
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
-model_name: wavlm-basep-last
-probe_name: chunkASP_LTprobe-upsampler-t0.1-regs-chunk4-guarantee
+model_name: qwen3voice
+probe_name: Tprobe-ASP
 
 data_folder: ./data/
 #slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
@@ -11,12 +11,13 @@ slurm_tmpdir: ./tmp/
 #----------------------------------
 # Most of the knobs you should change
 data_params: !include:tasks/torgo.yaml
-encoder_params: !include:encoders/wavlm.yaml
+encoder_params: !include:encoders/qwen3_voice.yaml
 
 num_layers: !ref <encoder_params[num_layers]>
-probe_params: !include:probes/CLTProbe.yaml # Change encover params accordingly
+num_labels: !ref <data_params[num_labels]>
+probe_params: !include:probes/TProbe.yaml # Change encover params accordingly
   feature_dim: !ref <encoder_params[feature_dim]>
-  num_labels: !ref <data_params[num_labels]>
+  num_labels: !ref <num_labels]>
   num_layers: !ref <num_layers>
   layer_dim: !ref <encoder_params[layer_dim]>
 
@@ -31,6 +32,7 @@ noise_folder: !ref <data_folder>/noise/
 
 cache_encoder: True
 cache_dir: !ref <slurm_tmpdir>/<task>/<model_name>/
+warm_cache: False
 
 # ----------------------------------
 # DYNAMIC SCRIPT CONFIGURATION (Generic)
@@ -64,7 +66,6 @@ train_log_dir: !ref <output_folder>/
 train_annotation: !ref ./exps/<task>/manifest/train.json
 val_annotation: !ref ./exps/<task>/manifest/valid.json
 test_annotation: !ref ./exps/<task>/manifest/test.json
-
 
 # Data preparation
 skip_prep: !ref <data_params[skip_prep]>
@@ -143,6 +144,9 @@ epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounterWithStopper
 # Optimizer
 opt_class: !name:torch.optim.AdamW
   lr: !ref <lr_s>
+
+loss: !ref <data_params[loss]>
+loss_kwargs: !ref <data_params[loss_kwargs]>
 
 # HP Optimizer
 # Enable Ray Tune hyperparameter optimization
