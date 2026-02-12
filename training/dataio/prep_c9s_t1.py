@@ -155,17 +155,6 @@ def dataio_prep(hparams):
     dynamic_items.append(audio_pipeline)
     output_keys.extend(["raw_signal", "raw_duration"])
 
-    # Define label pipeline
-    @sb.utils.data_pipeline.takes("label")
-    @sb.utils.data_pipeline.provides("label_encoded")
-    def label_pipeline(label):
-        """Defines the pipeline to process the input label ('non'/'symptomatic')."""
-        # The key produced here ('label_encoded') must match
-        # the 'label_key' used in train.py and the YAML.
-        label_encoded = label
-        yield label_encoded
-    dynamic_items.append(label_pipeline)
-    output_keys.append("label_encoded")
 
     if hparams["cache_encoder"]:
         speech_encoder = hparams["encoder"]
@@ -177,10 +166,10 @@ def dataio_prep(hparams):
         @CachedHDF5DynamicItem.cache(hparams["cache_dir"], 'a')
         @sb.utils.data_pipeline.takes("id", "raw_signal")
         @sb.utils.data_pipeline.provides(*raw_output_vars)
-        def cache_emb(id, signal):
+        def cache_emb(id, raw_signal):
             # signal is 1D tensor
             with torch.no_grad():
-                emb = speech_encoder(signal.unsqueeze(0))
+                emb = speech_encoder(raw_signal.unsqueeze(0))
             if speech_encoder.output_hidden_states:
                 emb = tuple(x.squeeze(0) for x in emb)
             else:
@@ -229,6 +218,9 @@ def dataio_prep(hparams):
         @sb.utils.data_pipeline.takes("raw_signal", "raw_duration")
         @sb.utils.data_pipeline.provides("signal", "duration")
         def process_signal(raw_signal, raw_duration):
+            signal = raw_signal
+            duration = raw_duration
+
             if raw_duration > max_length: # randomly crop if too long
                 start = random.randint(0, raw_duration - max_length)
                 signal = raw_signal[start:start + max_length]
@@ -240,6 +232,21 @@ def dataio_prep(hparams):
                 duration = len(signal)
             return signal, duration
 
+        dynamic_items.append(process_signal)
+        output_keys += ["signal", "duration"]
+
+    # Define label pipeline
+    @sb.utils.data_pipeline.takes("label")
+    @sb.utils.data_pipeline.provides("label_encoded")
+    def label_pipeline(label):
+        """Defines the pipeline to process the input label ('non'/'symptomatic')."""
+        # The key produced here ('label_encoded') must match
+        # the 'label_key' used in train.py and the YAML.
+        label_encoded = label
+        yield label_encoded
+
+    dynamic_items.append(label_pipeline)
+    output_keys.append("label_encoded")
 
     # Retrieve the data
     with open(hparams["train_annotation"], "r") as f:

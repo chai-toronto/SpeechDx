@@ -3,7 +3,7 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 import speechbrain as sb
-from torchmetrics import MetricCollection
+from torchmetrics import MetricCollection, Metric
 from torchmetrics.classification import Precision, Recall, F1Score, AUROC, Accuracy
 
 class DiagnosticsBrain(sb.Brain):
@@ -22,16 +22,18 @@ class DiagnosticsBrain(sb.Brain):
             ext = ''
             task = 'binary'
         else:
-            average = ext = 'weighted'
+            average = ext = '_weighted'
             task = 'multiclass'
 
         self.error_metrics = MetricCollection({
-            f"F1_{ext}": F1Score(task=task, num_classes=num_classes, average=average),
-            f"precision_{ext}": Precision(task=task, num_classes=num_classes, average=average),
-            f"recall_{ext}": Recall(task=task, num_classes=num_classes, average=average),
-            f"accuracy_{ext}": Accuracy(task=task, num_classes=num_classes, average=average),
-            f"AUROC_{ext}": AUROC(task=task, num_classes=num_classes, average=average),
+            f"F1{ext}": F1Score(task=task, num_classes=num_classes, average=average),
+            f"precision{ext}": Precision(task=task, num_classes=num_classes, average=average),
+            f"recall{ext}": Recall(task=task, num_classes=num_classes, average=average),
+            f"accuracy{ext}": Accuracy(task=task, num_classes=num_classes, average=average),
+            f"AUROC{ext}": AUROC(task=task, num_classes=num_classes, average=average),
         })
+
+        self.chunk_metrics = ChunkMetric()
 
     def compute_forward(self, batch, stage):
         """Runs all the computation that transforms the input into the
@@ -90,33 +92,36 @@ class DiagnosticsBrain(sb.Brain):
 
         self.error_metrics.update(predictions, lab)
 
-        last_hidden_states = getattr(self.modules.model.probe, "last_hidden_states", None)
+        last_hidden_states = getattr(self.modules.model.encoder, "last_chunk_stat", None)
+        last_reduction = getattr(self.modules.model.encoder, "last_reduction", None)
 
         if last_hidden_states is not None:
-            boundary_mask, boundary_prob, scores = last_hidden_states
+            # nonboundary_mask, boundary_prob, scores = last_hidden_states
+            boundary_mask, boundary_prob = last_hidden_states
 
-            # lb_loss = self.get_load_balancing_loss(boundary_prob, boundary_mask, N=8)
+            # lb_loss = self.get_load_balancing_loss(boundary_prob, nonboundary_mask, N=8)
             # print("Load balancing loss: {:.4f}".format(lb_loss.item()))
             # loss = loss + lb_loss * 0.5
 
             boundary_prob = boundary_prob[:, :, 1].squeeze(-1)  # (B, T)
             chunk_losses = self.boundary_regularizers(
                 boundary_prob,
-                (boundary_prob > 0.1).float(),
+                (boundary_prob > 0.5).float(),
                 length_target=4.0  # Target ~4 frames per chunk
             )
 
-            loss = (loss + 0.01 * chunk_losses["loss_coverage"] +
-                    0.01 * chunk_losses["loss_entropy"] +
-                    0.5 * chunk_losses["loss_smooth"])
+            chunk_loss = 0.01 * chunk_losses["loss_coverage"] + 0.01 * chunk_losses["loss_entropy"] + 0.5 * chunk_losses["loss_smooth"]
 
+            loss = loss + chunk_loss
             if stage == sb.Stage.TEST:
                 ids = batch.id
                 for i in range(len(ids)):
                     self.stat[ids[i]] = {
                         "boundary_prob": boundary_prob[i].cpu(),
-                        "scores": scores[i].cpu()
+                        # "scores": scores[i].cpu()
                     }
+
+            self.chunk_metrics.update(chunk_loss, last_reduction)
         return loss
 
     def get_load_balancing_loss(self, boundary_prob, boundary_mask, N: float = 5.0) -> torch.Tensor:
@@ -200,6 +205,15 @@ class DiagnosticsBrain(sb.Brain):
             )
             torch.save(self.stat, Path(self.hparams.output_folder) / "test_diagnostics.pt")
 
+        chunk_stats = self.chunk_metrics.compute()
+        self.chunk_metrics.reset()
+
+        self.hparams.train_logger.log_stats(
+            {"Epoch": epoch},
+            train_stats=chunk_stats if stage == sb.Stage.TRAIN else None,
+            valid_stats=chunk_stats if stage == sb.Stage.VALID else None,
+            test_stats=chunk_stats if stage == sb.Stage.TEST else None,
+        )
 
     def boundary_regularizers(self,
                               start_prob: torch.Tensor,
@@ -232,4 +246,20 @@ class DiagnosticsBrain(sb.Brain):
         }
 
 
+class ChunkMetric(Metric):
+    def __init__(self):
+        super().__init__()
+        self.add_state("chunk_loss", default=torch.tensor(0.0), dist_reduce_fx="sum")
+        self.add_state("reduction", default=torch.tensor(0.0), dist_reduce_fx="sum")
+        self.add_state("count", default=torch.tensor(0), dist_reduce_fx="sum")
 
+    def update(self, chunk_loss, reduction):
+        self.chunk_loss += chunk_loss.detach()
+        self.reduction += reduction
+        self.count += 1
+
+    def compute(self):
+        return {
+            "chunk_loss": self.chunk_loss / self.count if self.count > 0 else torch.tensor(0.0),
+            "reduction": self.reduction / self.count if self.count > 0 else torch.tensor(0.0)
+        }

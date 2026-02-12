@@ -268,7 +268,7 @@ class ChunkPool(nn.Module):
         self.d_in = d_model
 
 
-    def forward(self, x, lengths = None):
+    def forward(self, x, lengths = None, pad_mask = None):
         """
         x: (B, T_max, D) padded with zeros in the tail
         lengths: (B,) relative lengths (to T_max) per sequence. If None, we assume no padding.
@@ -280,11 +280,14 @@ class ChunkPool(nn.Module):
             boundary_prob: (B, T_max, 2) probabilities for non-boundary and boundary classes, respectively
         """
         B, T, D = x.shape
-        mask = None
-        if lengths is not None:
+
+        if lengths is not None and pad_mask is not None:
+            raise ValueError("Cannot provide both lengths and pad_mask; they are redundant.")
+
+        if lengths is not None and pad_mask is None:
             T = x.shape[1]
             lengths = (lengths * T).long()  # Convert to absolute lengths
-            mask = ~length_to_mask(lengths).bool() # (B, T), True for pads
+            pad_mask = ~length_to_mask(lengths).bool() # (B, T), True for pads
 
         # Cosine similarity between consecutive tokens
         q = F.normalize(self.q_proj(x[:, :-1]), dim=-1)  # (B, L-1, D)
@@ -309,20 +312,20 @@ class ChunkPool(nn.Module):
         #     k=min_chunk_size
         # )  # (B, L) bool
 
-        boundary_mask = selected_idx != 1  # (shape hidden_states.shape[:-1])
+        nonboundary_mask = selected_idx != 1  # (shape hidden_states.shape[:-1])
 
         # Handle padding: force padded positions to NOT be boundaries
-        if mask is not None:
-            boundary_mask = boundary_mask | mask
+        if pad_mask is not None:
+            nonboundary_mask = nonboundary_mask | pad_mask
 
         # Reorder so boundaries come first
         # Strategy: assign large indices to non-boundaries, small to boundaries
         token_idx = torch.arange(T, device=x.device)[None, :]  # (1, L)
-        token_idx = token_idx + boundary_mask.long() * T  # Non-boundaries get +L
+        token_idx = token_idx + nonboundary_mask.long() * T  # Non-boundaries get +L
         sorted_idx = torch.argsort(token_idx, dim=1)  # (B, L)
 
         # Count boundaries per batch
-        num_boundaries = (~boundary_mask).sum(dim=1)  # (B,)
+        num_boundaries = (~nonboundary_mask).sum(dim=1)  # (B,)
         max_boundaries = num_boundaries.max().item()
 
         if max_boundaries == 0:
@@ -335,11 +338,11 @@ class ChunkPool(nn.Module):
         )
 
         # True = Non-boundary tokens (to be masked out)
-        chunk_mask = torch.arange(max_boundaries, device=x.device)[None, :] >= num_boundaries[:, None]
+        nonchunk_mask = torch.arange(max_boundaries, device=x.device)[None, :] >= num_boundaries[:, None]
 
-        sorted_hidden = self.up_proj(sorted_hidden * (~chunk_mask).unsqueeze(-1).float())
+        sorted_hidden = self.up_proj(sorted_hidden * (~nonchunk_mask).unsqueeze(-1).float())
 
-        return sorted_hidden, chunk_mask, boundary_mask, boundary_prob
+        return sorted_hidden, nonchunk_mask, nonboundary_mask, boundary_prob
 
 
 def pick_with_spacing_mask_batched(x: torch.Tensor, threshold: float, k: int) -> torch.Tensor:

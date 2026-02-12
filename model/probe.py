@@ -129,14 +129,14 @@ class ChunkTProbe(nn.Module):
         """
         x = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
 
-        x_chunk, mask, boundary_mask, boundary_prob = self.chunker(x, lengths)
+        x_chunk, nonchunk_mask, boundary_mask, boundary_prob = self.chunker(x, lengths)
 
-        self.chunk_stat(x, x_chunk, lengths, mask)
+        chunk_stat(x, x_chunk, lengths, nonchunk_mask)
 
-        x_chunk += self.ffn(x_chunk)
+        x_chunk = x_chunk + self.ffn(x_chunk)
 
         # reconstruct lengths from mask
-        lengths = (~mask).sum(dim=1).float() / mask.size(1)
+        lengths = (~nonchunk_mask).sum(dim=1).float() / nonchunk_mask.size(1)
 
         pooled = self.pooler(x_chunk, lengths)
 
@@ -152,16 +152,6 @@ class ChunkTProbe(nn.Module):
 
         return output
 
-    def chunk_stat(self, x, x_chunk, lengths, chunk_mask):
-        B, T_max, D = x.size()
-        _, T_chunk, _ = x_chunk.size()
-
-        orig_lens = (lengths * T_max).long()
-        chunk_lens = (~chunk_mask).sum(dim=1).long()
-        reduction = (orig_lens - chunk_lens).float() / orig_lens.float()
-        print("Average batch reduction: {:.2f}%".format(reduction.mean().item() * 100))
-        self.stat.append(reduction.mean().item())
-        print("Overall average reduction: {:.2f}%".format(sum(self.stat) / len(self.stat) * 100))
 
 class LayerChunkTProbe(nn.Module):
     """
@@ -206,14 +196,14 @@ class LayerChunkTProbe(nn.Module):
         """
         layer_pooled = self.layer_pooler(x, lengths)  # (B, T_max, D)
 
-        x_chunk, mask, boundary_mask, boundary_prob = self.chunker(layer_pooled, lengths)
+        x_chunk, nonchunk_mask, boundary_mask, boundary_prob = self.chunker(layer_pooled, lengths)
 
-        self.chunk_stat(layer_pooled, x_chunk, lengths, mask)
+        chunk_stat(layer_pooled, x_chunk, lengths, nonchunk_mask)
 
-        x_chunk += self.ffn(x_chunk)
+        x_chunk = x_chunk + self.ffn(x_chunk)
 
         # reconstruct lengths from mask
-        lengths = (~mask).sum(dim=1).float() / mask.size(1)
+        lengths = (~nonchunk_mask).sum(dim=1).float() / nonchunk_mask.size(1)
 
         pooled = self.pooler(x_chunk, lengths)  # (B, D)
 
@@ -221,21 +211,20 @@ class LayerChunkTProbe(nn.Module):
         pooled = torch.nan_to_num(pooled, nan=0.0, posinf=0.0, neginf=0.0)
         output = self.classifier(pooled)
 
-        self.last_hidden_states = (boundary_mask.clone().detach(),
-                                    boundary_prob.clone().detach(),
+        self.last_hidden_states = (boundary_mask,
+                                    boundary_prob,
                                     scores)
 
         return output
 
-    def chunk_stat(self, x, x_chunk, lengths, chunk_mask):
-        B, T_max, D = x.size()
-        _, T_chunk, _ = x_chunk.size()
+def chunk_stat(x, x_chunk, lengths, nonchunk_mask):
+    B, T_max, D = x.size()
+    _, T_chunk, _ = x_chunk.size()
 
-        orig_lens = (lengths * T_max).long()
-        chunk_lens = (~chunk_mask).sum(dim=1).long()
-        reduction = (orig_lens - chunk_lens).float() / orig_lens.float()
-        print("Average batch reduction: {:.2f}%".format(reduction.mean().item() * 100))
-        self.stat.append(reduction.mean().item())
-        print("Overall average reduction: {:.2f}%".format(sum(self.stat) / len(self.stat) * 100))
+    orig_lens = (lengths * T_max).long()
+    chunk_lens = (~nonchunk_mask).sum(dim=1).long()
+    reduction = (orig_lens - chunk_lens).float() / orig_lens.float()
+
+    return reduction.mean().item() * 100
 
 
