@@ -39,6 +39,8 @@ class DiagnosticsBrain(sb.Brain):
 
         self.chunk_metrics = ChunkMetric().to(self.device)
 
+        self.model = unwrap_ddp(self.modules.model)
+
     def compute_forward(self, batch, stage):
         """Runs all the computation that transforms the input into the
         output probabilities over the N classes.
@@ -46,10 +48,9 @@ class DiagnosticsBrain(sb.Brain):
         """
         batch = batch.to(self.device)
 
-        model = unwrap_ddp(self.modules.model)
         cache_encoder = getattr(self.hparams, "cache_encoder", False)
         if cache_encoder:
-            if model.encoder.output_hidden_states:
+            if self.model.encoder.output_hidden_states:
                 num_layers = self.hparams.num_layers
                 emb_vars = ["emb_{}".format(i) for i in range(num_layers)]
                 wavs = tuple(getattr(batch, var).data.to(self.device) for var in emb_vars)
@@ -60,9 +61,9 @@ class DiagnosticsBrain(sb.Brain):
         else:
             wavs, lens = batch.signal
             # Forward pass through the model
-            wavs = model.encoder(wavs, lens)
+            wavs = self.model.encoder(wavs, lens)
 
-        predictions = model.probe(wavs, lens)
+        predictions = self.model.probe(wavs, lens)
         return predictions
 
     def compute_objectives(self, predictions, batch, stage):
@@ -97,8 +98,8 @@ class DiagnosticsBrain(sb.Brain):
 
         self.error_metrics.update(predictions, lab)
 
-        last_hidden_states = getattr(self.modules.model.encoder, "last_chunk_stat", None)
-        last_reduction = getattr(self.modules.model.encoder, "last_reduction", None)
+        last_hidden_states = getattr(self.model.encoder, "last_chunk_stat", None)
+        last_reduction = getattr(self.model.encoder, "last_reduction", None)
 
         if last_hidden_states is not None:
             threshold = self.hparams.threshold
