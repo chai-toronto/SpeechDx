@@ -5,8 +5,11 @@ layer_dim: 1
 max_length: 160000  # 10s for 16kHz
 min_length: 16000   # 1s for 16kHz
 
+threshold: 0.5 # threshold for chunking
+
 encoder: !new:model.wavlm.WavLM
   ssl_encoder_source: "microsoft/wavlm-base-plus"
   freeze_encoder: True
   output_hidden_states: True
   sample_rate: !ref <sample_rate>
+  threshold: !ref <threshold>

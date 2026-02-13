@@ -96,6 +96,7 @@ class DiagnosticsBrain(sb.Brain):
         last_reduction = getattr(self.modules.model.encoder, "last_reduction", None)
 
         if last_hidden_states is not None:
+            threshold = self.hparams.threshold
             # nonboundary_mask, boundary_prob, scores = last_hidden_states
             boundary_mask, boundary_prob = last_hidden_states
 
@@ -106,7 +107,7 @@ class DiagnosticsBrain(sb.Brain):
             boundary_prob = boundary_prob[:, :, 1].squeeze(-1)  # (B, T)
             chunk_losses = self.boundary_regularizers(
                 boundary_prob,
-                (boundary_prob > 0.5).float(),
+                (boundary_prob > threshold).float(),
                 length_target=4.0  # Target ~4 frames per chunk
             )
 

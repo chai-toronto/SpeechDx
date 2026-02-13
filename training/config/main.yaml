@@ -103,6 +103,8 @@ lr_e: !ref <training_params[lr_e]>
 sample_rate: !ref <encoder_params[sample_rate]>
 min_length: !ref <encoder_params[min_length]> # min length in samples (1s)
 
+threshold: !ref <encoder_params[threshold]> # threshold for chunking (0.5)
+
 skip_nonfinite_grads: !ref <training_params[skip_nonfinite_grads]>
 nonfinite_patience: !ref <training_params[nonfinite_patience]>
 
@@ -129,8 +131,11 @@ test_dataloader_options:
   num_workers: 0
 
 # Logger
-train_logger: !new:speechbrain.utils.train_logger.TensorboardLogger
-  save_dir: !ref <train_log_dir>
+#train_logger: !new:speechbrain.utils.train_logger.TensorboardLogger
+#  save_dir: !ref <train_log_dir>
+
+train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
+  save_file: !ref <train_log_dir>/train_log.txt
 
 progressbar: !ref <training_params[progressbar]>
 
