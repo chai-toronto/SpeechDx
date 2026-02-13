@@ -6,6 +6,10 @@ import speechbrain as sb
 from torchmetrics import MetricCollection, Metric
 from torchmetrics.classification import Precision, Recall, F1Score, AUROC, Accuracy
 
+def unwrap_ddp(module):
+    """Unwrap a module from DistributedDataParallel if needed."""
+    return getattr(module, "module", module)
+
 class DiagnosticsBrain(sb.Brain):
     """Class that manages the training loop for a generic diagnostics task."""
 
@@ -42,9 +46,10 @@ class DiagnosticsBrain(sb.Brain):
         """
         batch = batch.to(self.device)
 
+        model = unwrap_ddp(self.modules.model)
         cache_encoder = getattr(self.hparams, "cache_encoder", False)
         if cache_encoder:
-            if self.modules.model.encoder.output_hidden_states:
+            if model.encoder.output_hidden_states:
                 num_layers = self.hparams.num_layers
                 emb_vars = ["emb_{}".format(i) for i in range(num_layers)]
                 wavs = tuple(getattr(batch, var).data.to(self.device) for var in emb_vars)
@@ -55,9 +60,9 @@ class DiagnosticsBrain(sb.Brain):
         else:
             wavs, lens = batch.signal
             # Forward pass through the model
-            wavs = self.modules.model.encoder(wavs, lens)
+            wavs = model.encoder(wavs, lens)
 
-        predictions = self.modules.model.probe(wavs, lens)
+        predictions = model.probe(wavs, lens)
         return predictions
 
     def compute_objectives(self, predictions, batch, stage):
