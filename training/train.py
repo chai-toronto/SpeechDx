@@ -333,7 +333,8 @@ if __name__ == "__main__":
                 train_loader_kwargs=hparams["train_dataloader_options"],
             )
         except Exception as e:
-            print(f"Training failed with exception: {e}")
+            import traceback
+            traceback.print_exc()
             sys.exit(1)
     brain.evaluate(
         test_set=datasets["test_val"],
