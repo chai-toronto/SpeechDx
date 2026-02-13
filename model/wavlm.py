@@ -11,7 +11,14 @@ from model.probe import chunk_stat
 
 
 class WavLM(nn.Module):
-    def __init__(self, ssl_encoder_source, freeze_encoder, output_hidden_states, sample_rate, threshold = 0.5, *args, **kwargs):
+    def __init__(self,
+                 ssl_encoder_source,
+                 freeze_encoder,
+                 output_hidden_states,
+                 sample_rate,
+                 threshold = 0.5,
+                 min_chunk_size = 10,
+                 *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.processor = AutoFeatureExtractor.from_pretrained(ssl_encoder_source)
         self.wavlm = WavLMModel.from_pretrained(ssl_encoder_source)
@@ -24,7 +31,7 @@ class WavLM(nn.Module):
 
         # default to have grad
         hidden_size = self.wavlm.config.hidden_size
-        self.chunker = ChunkPool(hidden_size, hidden_size, threshold=threshold)
+        self.chunker = ChunkPool(hidden_size, hidden_size, threshold=threshold, min_chunk_size=min_chunk_size)
 
         self.freeze_encoder = freeze_encoder
 

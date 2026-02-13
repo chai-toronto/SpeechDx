@@ -254,7 +254,7 @@ class LayerWeightedAvgPool(nn.Module):
 
 
 class ChunkPool(nn.Module):
-    def __init__(self, d_model, d_out, threshold=0.5):
+    def __init__(self, d_model, d_out, threshold=0.5, min_chunk_size=4):
         super().__init__()
         self.q_proj = nn.Linear(d_model, d_model, bias=False)
         self.k_proj = nn.Linear(d_model, d_model, bias=False)
@@ -267,6 +267,7 @@ class ChunkPool(nn.Module):
         self.d_out = d_out
         self.d_in = d_model
         self.threshold = threshold
+        self.min_chunk_size = min_chunk_size
 
     def forward(self, x, lengths = None, pad_mask = None):
         """
@@ -301,16 +302,13 @@ class ChunkPool(nn.Module):
 
         boundary_prob = torch.stack(((1 - boundary_score), boundary_score), dim=-1)
 
-        # selected_idx = boundary_prob[:, :, 1] > self.threshold  # (B, L) bool
+        selected_idx = boundary_prob[:, :, 1] > self.threshold  # (B, L) bool
 
-        # Guarantee chunk size
-        min_chunk_size = 4
-
-        selected_idx = pick_with_spacing_mask_batched(
-            boundary_prob[:, :, 1],
-            threshold=self.threshold,
-            k=min_chunk_size
-        )  # (B, L) bool
+        # selected_idx = pick_with_spacing_mask_batched(
+        #     boundary_prob[:, :, 1],
+        #     threshold=self.threshold,
+        #     k=self.min_chunk_size
+        # )  # (B, L) bool
 
         nonboundary_mask = selected_idx != 1  # (shape hidden_states.shape[:-1])
 

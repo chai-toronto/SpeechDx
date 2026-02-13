@@ -109,12 +109,12 @@ class DiagnosticsBrain(sb.Brain):
             # lb_loss = self.get_load_balancing_loss(boundary_prob, nonboundary_mask, N=8)
             # print("Load balancing loss: {:.4f}".format(lb_loss.item()))
             # loss = loss + lb_loss * 0.5
-
+            min_chunk_size = self.hparams.min_chunk_size
             boundary_prob = boundary_prob[:, :, 1].squeeze(-1)  # (B, T)
             chunk_losses = self.boundary_regularizers(
                 boundary_prob,
                 (boundary_prob > threshold).float(),
-                length_target=4.0  # Target ~4 frames per chunk
+                length_target=min_chunk_size
             )
 
             chunk_loss = 0.01 * chunk_losses["loss_coverage"] + 0.01 * chunk_losses["loss_entropy"] + 0.5 * chunk_losses["loss_smooth"]
