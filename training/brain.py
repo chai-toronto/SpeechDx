@@ -35,9 +35,9 @@ class DiagnosticsBrain(sb.Brain):
             f"recall{ext}": Recall(task=task, num_classes=num_classes, average=average),
             f"accuracy{ext}": Accuracy(task=task, num_classes=num_classes, average=average),
             f"AUROC{ext}": AUROC(task=task, num_classes=num_classes, average=average),
-        })
+        }).to(self.device)
 
-        self.chunk_metrics = ChunkMetric()
+        self.chunk_metrics = ChunkMetric().to(self.device)
 
     def compute_forward(self, batch, stage):
         """Runs all the computation that transforms the input into the
