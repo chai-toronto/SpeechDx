@@ -198,7 +198,7 @@ class LayerChunkTProbe(nn.Module):
 
         x_chunk, nonchunk_mask, boundary_mask, boundary_prob = self.chunker(layer_pooled, lengths)
 
-        chunk_stat(layer_pooled, x_chunk, lengths, nonchunk_mask)
+        reduction = chunk_stat(layer_pooled, x_chunk, lengths, nonchunk_mask)
 
         x_chunk = x_chunk + self.ffn(x_chunk)
 
@@ -213,6 +213,7 @@ class LayerChunkTProbe(nn.Module):
 
         self.last_hidden_states = (boundary_mask,
                                     boundary_prob,
+                                    reduction,
                                     scores)
 
         return output
