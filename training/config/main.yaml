@@ -11,13 +11,18 @@ slurm_tmpdir: ./tmp/
 #----------------------------------
 # Most of the knobs you should change
 data_params: !include:tasks/c9s_t1.yaml
+
+threshold: 0.5 # threshold for chunking (0.5)
+min_chunk_size: 4
 encoder_params: !include:encoders/wavlm_chunker.yaml
+  min_chunk_size: !ref <min_chunk_size>
+  threshold: !ref <threshold>
 
 num_layers: !ref <encoder_params[num_layers]>
 num_labels: !ref <data_params[num_labels]>
 probe_params: !include:probes/LTProbe.yaml # Change encover params accordingly
   feature_dim: !ref <encoder_params[feature_dim]>
-  num_labels: !ref <num_labels]>
+  num_labels: !ref <num_labels>
   num_layers: !ref <num_layers>
   layer_dim: !ref <encoder_params[layer_dim]>
 
@@ -103,9 +108,6 @@ lr_e: !ref <training_params[lr_e]>
 sample_rate: !ref <encoder_params[sample_rate]>
 min_length: !ref <encoder_params[min_length]> # min length in samples (1s)
 
-threshold: !ref <encoder_params[threshold]> # threshold for chunking (0.5)
-min_chunk_size: !ref <encoder_params[min_chunk_size]>
-
 skip_nonfinite_grads: !ref <training_params[skip_nonfinite_grads]>
 nonfinite_patience: !ref <training_params[nonfinite_patience]>
 
@@ -140,8 +142,8 @@ progressbar: !ref <training_params[progressbar]>
 # Epoch management
 epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounterWithStopper
   limit: !ref <number_of_epochs>
-  limit_to_stop: 100
-  limit_warmup: 10
+  limit_to_stop: !ref <hpopt_params[grace_period]>
+  limit_warmup: !ref <hpopt_params[limit_warmup]>
   direction: !ref <hpopt_params[optim_mode]>
 
 # Optimizer

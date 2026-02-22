@@ -105,16 +105,15 @@ class DiagnosticsBrain(sb.Brain):
 
         if last_hidden_states is not None:
             threshold = self.hparams.threshold
+            min_chunk_size = self.hparams.min_chunk_size
 
-            # nonboundary_mask, boundary_prob, reduction, scores = last_hidden_states
+            # _, boundary_prob, reduction, scores = last_hidden_states
 
-            boundary_mask, boundary_prob = last_hidden_states
+            _, boundary_prob = last_hidden_states
 
             # lb_loss = self.get_load_balancing_loss(boundary_prob, nonboundary_mask, N=8)
             # print("Load balancing loss: {:.4f}".format(lb_loss.item()))
             # loss = loss + lb_loss * 0.5
-
-            min_chunk_size = self.hparams.min_chunk_size
 
             boundary_prob = boundary_prob[:, :, 1].squeeze(-1)  # (B, T)
 

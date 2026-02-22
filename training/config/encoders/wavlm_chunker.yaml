@@ -2,11 +2,11 @@ sample_rate: 16000
 feature_dim: 768 #1024
 num_layers: 12 #24
 layer_dim: 1
-max_length: 160000  # 10s for 16kHz
+max_length: 1000000000
 min_length: 16000   # 1s for 16kHz
 
-min_chunk_size: 2
-threshold: 0.5 # threshold for chunking
+min_chunk_size: !PLACEHOLDER
+threshold: !PLACEHOLDER # threshold for chunking
 
 encoder: !new:model.wavlm_chunk.WavLM
   ssl_encoder_source: "microsoft/wavlm-base-plus"
@@ -14,4 +14,4 @@ encoder: !new:model.wavlm_chunk.WavLM
   output_hidden_states: True
   sample_rate: !ref <sample_rate>
   threshold: !ref <threshold>
-  min_chunk_size: 2
+  min_chunk_size: !ref <min_chunk_size>

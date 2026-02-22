@@ -1,11 +1,12 @@
 # HP Optimizer
 # Enable Ray Tune hyperparameter optimization
-hpopt_mode: null  # Set to 'ray' to enable, null to disable
+hpopt_mode: null  # Set to 'ray' to enable, null to use EarlyStopping
 continue_exp: True  # Continue previous experiment if available (i.e., environment is the same)
-optim_metric: 'F1'
-optim_mode: 'max'  # 'min' or 'max' depending on the metric
+optim_metric: 'loss'
+optim_mode: 'min'  # 'min' or 'max' depending on the metric
 max_concurrent_trials: 1  # Number of concurrent trials to run
 grace_period: 5  # Number of epochs to wait before considering early stopping
+limit_warmup: 5  # Number of epochs to ignore for ONLY early stopping
 reduction_factor: 2  # Factor by which to reduce trials at each rung
 sequential: True  # Set to True to run trials sequentially. Else, runs in parallel.
 

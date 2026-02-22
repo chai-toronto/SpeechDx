@@ -158,11 +158,20 @@ class LayerChunkTProbe(nn.Module):
     A probe that performs layer pool -> chunking -> temporal pool -> linear layer.
     """
 
-    def __init__(self, input_dim, num_labels, layer_pooler, temp_pooler):
+    def __init__(self,
+                 input_dim,
+                 num_labels,
+                 layer_pooler,
+                 temp_pooler,
+                 threshold=0.5,
+                 min_chunk_size=2,):
         super().__init__()
         d_out = int(input_dim * 1.5)
 
-        self.chunker = ChunkPool(input_dim, d_out=d_out)  # For the upsampler
+        self.chunker = ChunkPool(input_dim,
+                                 d_out=d_out,
+                                 threshold=threshold,
+                                 min_chunk_size=min_chunk_size)  # For the upsampler
 
         input_dim = d_out
 
