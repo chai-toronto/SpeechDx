@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from random import random
 from urllib.request import urlretrieve
 
 
@@ -37,3 +38,29 @@ def locate_bad(obj, trail="$"):
         return f"{trail} :: {type(obj).__name__}"
 
 
+def proc_length_vec(*vectors, duration, min_length=100, max_length=1000):
+    """ Assume 1D vector"""
+    raw_embs = vectors
+    rel_min_length = duration / min_length
+    if rel_min_length < 1.0:
+        # pad
+        output_embs = []
+        for raw_emb in raw_embs:
+            n_repeats = int(1.0 / rel_min_length) + 1
+            padded_emb = raw_emb.repeat(n_repeats, 0)[:min_length]
+            output_embs.append(padded_emb)
+        return *output_embs, min_length
+
+    rel_max_length = duration / max_length
+    if rel_max_length > 1.0:
+        # randomly crop
+        output_embs = []
+        for raw_emb in raw_embs:
+            T, D = raw_emb.shape
+            new_length = int(T / rel_max_length)
+            start = random.randint(0, T - new_length)
+            cropped_emb = raw_emb[start:start + new_length]
+            output_embs.append(cropped_emb)
+        return *output_embs, new_length
+
+    return *raw_embs, duration

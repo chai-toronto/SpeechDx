@@ -41,7 +41,6 @@ class LinearProbe(nn.Module):
         """
         return self.classifier(x)
 
-
 class TemporalProbe(nn.Module):
     """
     A probe with a temporal pooling layer followed by a linear layer.
@@ -151,7 +150,6 @@ class ChunkTProbe(nn.Module):
                                     scores)
 
         return output
-
 
 class LayerChunkTProbe(nn.Module):
     """

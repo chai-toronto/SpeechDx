@@ -25,7 +25,7 @@ import pandas as pd
 
 from training.dataio.cache_dynamic_item import CachedHDF5DynamicItem, CachedPersistDynamicItem
 from training.dataio.stratified_group_k_fold import stratified_group_kfold_df
-from training.dataio.utils import ensure_dir, PathEncoder, locate_bad
+from training.dataio.utils import ensure_dir, PathEncoder, locate_bad, proc_length_vec
 
 
 def prepare_data(
@@ -119,7 +119,7 @@ def dataio_prep(hparams):
     For a new task, modify the label_pipeline and the output_keys.
     """
 
-    dynamic_items = []
+    train_dynamic_items, val_dynamic_items = [], []
     output_keys = ["id", "path"]
 
     # Initialization of the label encoder.
@@ -163,7 +163,7 @@ def dataio_prep(hparams):
 
         # handle multi-channel
         if raw_signal.shape[0] > 1:
-            raw_signal = raw_signal.mean(dim=0, keepdim=True)
+            raw_signal = raw_signal.mean(dim=0, keepdim=False)
 
         if sr_og != sample_rate:
             raw_signal = F.resample(raw_signal, sr_og, new_freq=sample_rate,
@@ -172,6 +172,15 @@ def dataio_prep(hparams):
                                 resampling_method="sinc_interp_kaiser",
                                 beta=14.769656459379492
                                 )
+
+        return raw_signal, raw_duration
+
+    train_dynamic_items.append(audio_pipeline)
+    output_keys.extend(["raw_signal", "raw_duration"])
+
+    @sb.utils.data_pipeline.takes("raw_signal", "raw_duration")
+    @sb.utils.data_pipeline.provides("raw_signal", "raw_duration")
+    def augment(raw_signal, raw_duration):
         raw_signal = perturbator(raw_signal)
         raw_signal = noisifier(raw_signal, torch.ones(1))
         raw_signal = reverb(raw_signal)
@@ -179,9 +188,8 @@ def dataio_prep(hparams):
         raw_duration = raw_signal.shape[0]
         return raw_signal, raw_duration
 
-    dynamic_items.append(audio_pipeline)
-    output_keys.extend(["raw_signal", "raw_duration"])
-
+    # Notice we only augment the training data, not validation or test.
+    train_dynamic_items.append(augment)
 
     # Define label pipeline
     @sb.utils.data_pipeline.takes("label")
@@ -192,7 +200,7 @@ def dataio_prep(hparams):
         # the 'label_key' used in train.py and the YAML.
         label_encoded = label
         yield label_encoded
-    dynamic_items.append(label_pipeline)
+    train_dynamic_items.append(label_pipeline)
     output_keys.append("label_encoded")
 
     if hparams["cache_encoder"]:
@@ -215,7 +223,7 @@ def dataio_prep(hparams):
                 emb = emb.squeeze(0)
             return emb
 
-        dynamic_items.append(cache_emb)
+        train_dynamic_items.append(cache_emb)
         output_keys += raw_output_vars
 
         output_vars = [f"emb_{i}" for i in range(num_outputs)]
@@ -223,33 +231,10 @@ def dataio_prep(hparams):
         # Handling too short or too long data
         @sb.utils.data_pipeline.takes(*raw_output_vars, "raw_duration")
         @sb.utils.data_pipeline.provides(*output_vars, "duration")
-        def process_emb(*args):
-            raw_embs = args[:-1]
-            duration = args[-1]
-            rel_min_length = duration / min_length
-            if rel_min_length < 1.0:
-                # pad
-                output_embs = []
-                n_repeats = int(1.0 / rel_min_length) + 1
-                for raw_emb in raw_embs:
-                    padded_emb = raw_emb.repeat(n_repeats, 0)[:min_length]
-                    output_embs.append(padded_emb)
-                return *output_embs, min_length
+        def proc_length_vec_populated(*raw_embs, raw_duration):
+            return proc_length_vec(*raw_embs, duration=raw_duration, min_length=min_length, max_length=max_length)
 
-            rel_max_length = duration / max_length
-            if rel_max_length > 1.0:
-                # randomly crop
-                output_embs = []
-                for raw_emb in raw_embs:
-                    T, D = raw_emb.shape
-                    new_length = int(T / rel_max_length)
-                    start = random.randint(0, T - new_length)
-                    cropped_emb = raw_emb[start:start + new_length]
-                    output_embs.append(cropped_emb)
-                return *output_embs, new_length
-
-            return *raw_embs, duration
-        dynamic_items.append(process_emb)
+        train_dynamic_items.append(proc_length_vec_populated)
         output_keys += output_vars + ["duration"]
 
     else:
@@ -266,6 +251,7 @@ def dataio_prep(hparams):
                 n_repeats = int(min_length / raw_duration) + 1
                 signal = raw_signal.repeat(n_repeats)[:min_length]
                 duration = len(signal)
+
             return signal, duration
 
 
@@ -295,7 +281,7 @@ def dataio_prep(hparams):
     for dataset in data_dict:
         datasets[dataset] = sb.dataio.dataset.DynamicItemDataset(
             data=data_dict[dataset],
-            dynamic_items=dynamic_items,
+            dynamic_items=train_dynamic_items if "train" in dataset else val_dynamic_items,
             output_keys=output_keys,
         )
 

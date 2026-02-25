@@ -98,32 +98,33 @@ class DiagnosticsBrain(sb.Brain):
 
         self.error_metrics.update(predictions, lab)
 
-        last_hidden_states = getattr(self.model.encoder, "last_chunk_stat", None)
-        reduction = getattr(self.model.encoder, "last_reduction", None)
-
-        # last_hidden_states = getattr(self.model.probe, "last_chunk_stat", None)
+        # last_hidden_states = getattr(self.model.encoder, "last_chunk_stat", None)
+        # reduction = getattr(self.model.encoder, "last_reduction", None)
+        last_hidden_states = getattr(self.model.probe, "last_hidden_states", None)
 
         if last_hidden_states is not None:
             threshold = self.hparams.threshold
             min_chunk_size = self.hparams.min_chunk_size
 
-            # _, boundary_prob, reduction, scores = last_hidden_states
+            nonboundary_mask, boundary_prob, reduction, scores = last_hidden_states
+            # nonboundary_mask, boundary_prob = last_hidden_states
 
-            _, boundary_prob = last_hidden_states
+            chunk_loss = self.get_load_balancing_loss(boundary_prob, nonboundary_mask, N=min_chunk_size)
+            print(chunk_loss)
+            print(reduction)
+            loss = loss + chunk_loss * 0.2
 
-            # lb_loss = self.get_load_balancing_loss(boundary_prob, nonboundary_mask, N=8)
-            # print("Load balancing loss: {:.4f}".format(lb_loss.item()))
-            # loss = loss + lb_loss * 0.5
-
-            boundary_prob = boundary_prob[:, :, 1].squeeze(-1)  # (B, T)
-
-            chunk_losses = self.boundary_regularizers(
-                boundary_prob,
-                (boundary_prob > threshold).float(),
-                length_target=min_chunk_size
-            )
-
-            chunk_loss = 0.01 * chunk_losses["loss_coverage"] + 0.01 * chunk_losses["loss_entropy"] + 0.5 * chunk_losses["loss_smooth"]
+            # boundary_prob = boundary_prob[:, :, 1].squeeze(-1)  # (B, T)
+            #
+            # chunk_losses = self.boundary_regularizers(
+            #     boundary_prob,
+            #     (boundary_prob > threshold).float(),
+            #     length_target=min_chunk_size
+            # )
+            #
+            # chunk_loss = (0.01 * chunk_losses["loss_coverage"]
+            #               + 0.01 * chunk_losses["loss_entropy"]
+            #               + 0.5 * chunk_losses["loss_smooth"])
 
             loss = loss + chunk_loss
             if stage == sb.Stage.TEST:
@@ -137,7 +138,7 @@ class DiagnosticsBrain(sb.Brain):
             self.chunk_metrics.update(chunk_loss, reduction)
         return loss
 
-    def get_load_balancing_loss(self, boundary_prob, boundary_mask, N: float = 5.0) -> torch.Tensor:
+    def get_load_balancing_loss(self, boundary_prob, nonboundary_mask, N: float = 5.0) -> torch.Tensor:
         """
         Compute load balancing loss from last forward pass.
 
@@ -154,7 +155,7 @@ class DiagnosticsBrain(sb.Brain):
         tokenized_prob = boundary_prob[..., 1]  # (B, L)
 
         # Empirical vs predicted boundary ratios
-        true_ratio = boundary_mask.float().mean()  # Actual fraction of boundaries
+        true_ratio = (~nonboundary_mask).float().mean()  # Actual fraction of boundaries
         avg_prob = tokenized_prob.float().mean()  # Predicted fraction
 
         # Load balancing loss
