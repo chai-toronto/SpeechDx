@@ -6,7 +6,7 @@ optim_metric: 'F1'
 optim_mode: 'max'  # 'min' or 'max' depending on the metric
 max_concurrent_trials: 1  # Number of concurrent trials to run
 grace_period: 3  # Number of epochs to wait before considering early stopping
-limit_warmup: 10  # Number of epochs to ignore for ONLY early stopping
+limit_warmup: 5  # Number of epochs to ignore for ONLY early stopping
 reduction_factor: 2  # Factor by which to reduce trials at each rung
 sequential: True  # Set to True to run trials sequentially. Else, runs in parallel.
 

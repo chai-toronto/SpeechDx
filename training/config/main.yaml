@@ -3,7 +3,7 @@ random_seed: 2025
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
 model_name: wavlm-basep-all
-probe_name: CLTProbe-ASP-FNN-lb8
+probe_name: CLTProbe-ASP-FNN-lb8-scheduled
 
 data_folder: ./data/
 #slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
@@ -14,7 +14,7 @@ data_params: !include:tasks/c9s_t1.yaml
 
 threshold: 0.5 # threshold for chunking (0.5)
 
-min_chunk_size: 1
+min_chunk_size: 2
 max_chunk_size: 8
 
 encoder_params: !include:encoders/wavlm.yaml
@@ -42,7 +42,7 @@ noise_folder: !ref <data_folder>/noise/
 
 cache_encoder: True
 cache_dir: !ref <slurm_tmpdir>/<task>/<model_name>/
-warm_cache: False
+warm_cache: True
 
 # ----------------------------------
 # DYNAMIC SCRIPT CONFIGURATION (Generic)

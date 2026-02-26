@@ -126,8 +126,9 @@ class DiagnosticsBrain(sb.Brain):
             # chunk_loss = (0.01 * chunk_losses["loss_coverage"]
             #               + 0.01 * chunk_losses["loss_entropy"]
             #               + 0.5 * chunk_losses["loss_smooth"])
+            # loss = loss + chunk_loss
 
-            loss = loss + chunk_loss
+
             if stage == sb.Stage.TEST:
                 ids = batch.id
                 for i in range(len(ids)):
@@ -152,6 +153,8 @@ class DiagnosticsBrain(sb.Brain):
         Returns:
             loss: scalar tensor
         """
+        assert N > 1, "N must be greater than 1 for load balancing loss"
+
         # Extract probability of boundary class
         tokenized_prob = boundary_prob[..., 1]  # (B, L)
 

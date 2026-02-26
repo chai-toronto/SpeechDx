@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from random import random
+import random
 from urllib.request import urlretrieve
 
 

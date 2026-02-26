@@ -243,7 +243,7 @@ class LayerWeightedAvgPool(nn.Module):
             # Normalize each [1, D] vector to unit norm to prevent large values
             xi = xi / torch.linalg.vector_norm(xi, dim=-1, keepdim=True).clamp(min=self.eps)
             if not torch.isnan(xi).any() and not torch.isinf(xi).any():
-                pooled = pooled + xi * wi.item()
+                pooled = pooled + xi * wi
             else:
                 print(f"Warning: Skipping layer due to NaN/Inf values")
 
