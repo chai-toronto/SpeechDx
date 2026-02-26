@@ -153,8 +153,8 @@ if __name__ == "__main__":
     # Reading command line arguments
     hparams_file, run_opts, overrides = sb.parse_arguments(sys.argv[1:])
 
-    # Initialize ddp
-    sb.utils.distributed.ddp_init_group(run_opts)
+    if run_opts.get("distributed_launch", False):
+        sb.utils.distributed.ddp_init_group(run_opts)
 
     # Load hyperparameters file with command-line overrides
     hparams_file = Path(hparams_file).resolve()
