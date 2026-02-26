@@ -169,8 +169,9 @@ def dataio_prep(hparams):
         @sb.utils.data_pipeline.provides(*raw_output_vars)
         def cache_emb(id, raw_signal):
             # signal is 1D tensor
+            device = next(speech_encoder.parameters()).device
             with torch.no_grad():
-                emb = speech_encoder(raw_signal.unsqueeze(0))
+                emb = speech_encoder(raw_signal.unsqueeze(0).to(device))
             if speech_encoder.output_hidden_states:
                 emb = tuple(x.squeeze(0) for x in emb)
             else:
