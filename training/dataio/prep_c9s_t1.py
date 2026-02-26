@@ -171,7 +171,14 @@ def dataio_prep(hparams):
             # signal is 1D tensor
             device = next(speech_encoder.parameters()).device
             with torch.no_grad():
-                emb = speech_encoder(raw_signal.unsqueeze(0).to(device))
+                # move to encoder's device and add batch dimension
+                raw_signal = raw_signal.unsqueeze(0).to(device)
+
+                emb = speech_encoder(raw_signal)
+
+                # Speechbrain batch is with numpy
+                emb = emb.cpu()
+
             if speech_encoder.output_hidden_states:
                 emb = tuple(x.squeeze(0) for x in emb)
             else:

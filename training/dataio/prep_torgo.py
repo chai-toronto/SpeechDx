@@ -213,10 +213,18 @@ def dataio_prep(hparams):
         @CachedHDF5DynamicItem.cache(hparams["cache_dir"], 'a')
         @sb.utils.data_pipeline.takes("id", "raw_signal")
         @sb.utils.data_pipeline.provides(*raw_output_vars)
-        def cache_emb(id, signal):
+        def cache_emb(id, raw_signal):
             # signal is 1D tensor
+            device = next(speech_encoder.parameters()).device
             with torch.no_grad():
-                emb = speech_encoder(signal.unsqueeze(0))
+                # move to encoder's device and add batch dimension
+                raw_signal = raw_signal.unsqueeze(0).to(device)
+
+                emb = speech_encoder(raw_signal)
+
+                # Speechbrain batch is with numpy
+                emb = emb.cpu()
+
             if speech_encoder.output_hidden_states:
                 emb = tuple(x.squeeze(0) for x in emb)
             else:
