@@ -153,7 +153,7 @@ if __name__ == "__main__":
     # Reading command line arguments
     hparams_file, run_opts, overrides = sb.parse_arguments(sys.argv[1:])
 
-    if run_opts.get("distributed_launch", False):
+    if os.environ.get("WORLD_SIZE"):
         sb.utils.distributed.ddp_init_group(run_opts)
 
     # Load hyperparameters file with command-line overrides
