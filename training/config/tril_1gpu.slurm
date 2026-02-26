@@ -28,7 +28,7 @@ mkdir -p $MPLCONFIGDIR $FONTCONFIG_PATH
 export RAY_TMPDIR=/scratch/kieu/ray_tmp
 mkdir -p $RAY_TMPDIR
 
-module load StdEnv/2023 gcc arrow python/3.12 ffmpeg rust
+module load StdEnv/2023 gcc arrow python/3.11 ffmpeg rust
 source ~/shai/bin/activate
 
 
