@@ -176,13 +176,10 @@ def dataio_prep(hparams):
 
                 emb = speech_encoder(raw_signal)
 
-                # Speechbrain batch is with numpy
-                emb = emb.cpu()
-
             if speech_encoder.output_hidden_states:
-                emb = tuple(x.squeeze(0) for x in emb)
+                emb = tuple(x.squeeze(0).cpu() for x in emb)
             else:
-                emb = emb.squeeze(0)
+                emb = emb.squeeze(0).cpu()
             return emb
 
         dynamic_items.append(cache_emb)
