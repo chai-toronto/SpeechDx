@@ -40,6 +40,7 @@ class DiagnosticsBrain(sb.Brain):
         self.chunk_metrics = ChunkMetric().to(self.device)
 
         self.model = unwrap_ddp(self.modules.model)
+        self.min_chunk_size = self.hparams.min_chunk_size  # promoted to brain attribute
 
     def compute_forward(self, batch, stage):
         """Runs all the computation that transforms the input into the
@@ -104,7 +105,7 @@ class DiagnosticsBrain(sb.Brain):
 
         if last_hidden_states is not None:
             threshold = self.hparams.threshold
-            min_chunk_size = self.hparams.min_chunk_size
+            min_chunk_size = self.min_chunk_size
 
             nonboundary_mask, boundary_prob, reduction, scores = last_hidden_states
             # nonboundary_mask, boundary_prob = last_hidden_states
@@ -200,6 +201,9 @@ class DiagnosticsBrain(sb.Brain):
             # For Early Stopping
             epoch_counter = self.hparams.epoch_counter
             epoch_counter.update_metric(stats[optim_metric])
+            # Sync scheduled chunk size to brain attribute
+            if hasattr(epoch_counter, 'min_chunk_size'):
+                self.min_chunk_size = epoch_counter.min_chunk_size
 
             # Log stats and save checkpoint
             self.hparams.train_logger.log_stats(

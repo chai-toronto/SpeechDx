@@ -13,7 +13,10 @@ slurm_tmpdir: ./tmp/
 data_params: !include:tasks/c9s_t1.yaml
 
 threshold: 0.5 # threshold for chunking (0.5)
-min_chunk_size: 8
+
+min_chunk_size: 1
+max_chunk_size: 8
+
 encoder_params: !include:encoders/wavlm.yaml
 #  min_chunk_size: !ref <min_chunk_size>
 #  threshold: !ref <threshold>
@@ -39,7 +42,7 @@ noise_folder: !ref <data_folder>/noise/
 
 cache_encoder: True
 cache_dir: !ref <slurm_tmpdir>/<task>/<model_name>/
-warm_cache: True
+warm_cache: False
 
 # ----------------------------------
 # DYNAMIC SCRIPT CONFIGURATION (Generic)
@@ -142,11 +145,13 @@ train_logger: !new:speechbrain.utils.train_logger.TensorboardLogger
 progressbar: !ref <training_params[progressbar]>
 
 # Epoch management
-epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounterWithStopper
+epoch_counter: !new:training.chunk_counter.ChunkScheduledEpochCounter
   limit: !ref <number_of_epochs>
   limit_to_stop: !ref <hpopt_params[grace_period]>
   limit_warmup: !ref <hpopt_params[limit_warmup]>
   direction: !ref <hpopt_params[optim_mode]>
+  min_chunk_size: !ref <min_chunk_size>
+  max_chunk_size: !ref <max_chunk_size>
 
 # Optimizer
 opt_class: !name:torch.optim.AdamW

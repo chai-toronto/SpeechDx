@@ -239,8 +239,11 @@ def dataio_prep(hparams):
         # Handling too short or too long data
         @sb.utils.data_pipeline.takes(*raw_output_vars, "raw_duration")
         @sb.utils.data_pipeline.provides(*output_vars, "duration")
-        def proc_length_vec_populated(*raw_embs, raw_duration):
-            return proc_length_vec(*raw_embs, duration=raw_duration, min_length=min_length, max_length=max_length)
+        def proc_length_vec_populated(*args):
+            raw_embs = args[:-1]
+            raw_duration = args[-1]
+            return proc_length_vec(*raw_embs, duration=raw_duration,
+                                   min_length=min_length, max_length=max_length)  # populated portion
 
         train_dynamic_items.append(proc_length_vec_populated)
         output_keys += output_vars + ["duration"]
