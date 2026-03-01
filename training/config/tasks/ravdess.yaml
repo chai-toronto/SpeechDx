@@ -6,7 +6,7 @@ dataset: ravdess
 # DYNAMIC SCRIPT CONFIGURATION (Generic)
 # ----------------------------------
 # Path to the file containing the dataset-specific preparation and IO functions
-data_io_script: training.dataio.prep_ravdess
+data_io_script: training.dataio.prep_torgo
 
 # Name of the function to call for manifest generation
 prepare_data_fn: prepare_data
@@ -27,4 +27,3 @@ num_fold: 4 # works from 2 to num. subjects. To be implemented: 0 -> normal spli
 num_labels: 8
 
 loss: !new:torch.nn.CrossEntropyLoss
-loss_kwargs: {}

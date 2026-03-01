@@ -2,8 +2,8 @@ sample_rate: 24000
 feature_dim: 512
 num_layers: 1
 layer_dim: 1
-max_length: 240000  # 10s at 24kHz
-min_length: 24000   # 1s at 24kHz
+max_length: 1e10
+min_length: 1
 
 encoder: !new:model.qwen3_voice.Qwen3Voice
   source: "Qwen/Qwen3-TTS-Tokenizer-12Hz"

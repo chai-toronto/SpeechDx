@@ -9,5 +9,5 @@ probe: !new:model.probe.LayerTemporalProbe
   layer_pooler: !new:model.pool.LayerWeightedAvgPool
     num_layers: !ref <num_layers>
     layer_dim: !ref <layer_dim>
-  temp_pooler: !new:model.pool.ASP
+  temp_pooler: !new:model.pool.AttentiveTemporalPool
     input_dim: !ref <feature_dim>
