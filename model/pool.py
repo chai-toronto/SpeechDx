@@ -316,27 +316,34 @@ class ChunkPool(nn.Module):
         if pad_mask is not None:
             nonboundary_mask = nonboundary_mask | pad_mask
 
-        # Reorder so boundaries come first
-        # Strategy: assign large indices to non-boundaries, small to boundaries
-        token_idx = torch.arange(T, device=x.device)[None, :]  # (1, L)
-        token_idx = token_idx + nonboundary_mask.long() * T  # Non-boundaries get +L
-        sorted_idx = torch.argsort(token_idx, dim=1)  # (B, L)
+        # Assign chunk IDs via cumsum on boundary mask
+        boundary_mask = ~nonboundary_mask  # True at boundaries
+        chunk_ids = boundary_mask.long().cumsum(dim=1)  # (B, T), 1-indexed
 
-        # Count boundaries per batch
-        num_boundaries = (~nonboundary_mask).sum(dim=1)  # (B,)
-        max_boundaries = num_boundaries.max().item()
+        # Zero out padded positions so they don't contribute
+        if pad_mask is not None:
+            chunk_ids = chunk_ids * (~pad_mask).long()
 
-        if max_boundaries == 0:
+        # Count chunks per batch
+        num_chunks = chunk_ids.max(dim=1).values  # (B,)
+        max_chunks = num_chunks.max().item()
+
+        if max_chunks == 0:
             raise ValueError("No boundaries detected in any sequence.")
 
-        # Gather reordered tokens (only first max_boundaries)
-        sorted_hidden = torch.gather(
-            x, dim=1,
-            index=sorted_idx[:, :max_boundaries].unsqueeze(-1).expand(-1, -1, D)
-        )
+        # Mean-pool all timesteps within each chunk via scatter
+        chunk_sum = torch.zeros(B, max_chunks + 1, D, device=x.device, dtype=x.dtype)
+        chunk_sum.scatter_add_(1, chunk_ids.unsqueeze(-1).expand_as(x), x)
+        chunk_sum = chunk_sum[:, 1:]  # drop the 0-bucket (padding)
 
-        # True = Non-boundary tokens (to be masked out)
-        nonchunk_mask = torch.arange(max_boundaries, device=x.device)[None, :] >= num_boundaries[:, None]
+        chunk_count = torch.zeros(B, max_chunks + 1, device=x.device, dtype=x.dtype)
+        chunk_count.scatter_add_(1, chunk_ids, torch.ones_like(chunk_ids, dtype=x.dtype))
+        chunk_count = chunk_count[:, 1:]  # drop the 0-bucket
+
+        sorted_hidden = chunk_sum / chunk_count.unsqueeze(-1).clamp(min=1)
+
+        # True = padding chunk slots (to be masked out)
+        nonchunk_mask = torch.arange(max_chunks, device=x.device)[None, :] >= num_chunks[:, None]
 
         sorted_hidden = self.up_proj(sorted_hidden * (~nonchunk_mask).unsqueeze(-1).float())
 
@@ -421,7 +428,7 @@ if __name__ == "__main__":
     # lengths = torch.tensor([1.0, 0.8])
     lengths = None
 
-    chunk_pool = ChunkPool(d_model=2)
+    chunk_pool = ChunkPool(d_model=2, d_out=4)
     sorted_hidden, chunk_mask, boundary_mask, boundary_prob = chunk_pool(x, lengths)
 
     print("Input shape:", x.shape)
