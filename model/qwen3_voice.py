@@ -9,7 +9,7 @@ class Qwen3Voice(nn.Module):
     def __init__(self, source, freeze_encoder, sample_rate, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Register the custom model type so AutoModel can load it
-        AutoConfig.register("qwen3_tts_tokenizer_12hz", Qwen3TTSTokenizerV2Config)
+        AutoConfig.register(source, Qwen3TTSTokenizerV2Config)
         AutoModel.register(Qwen3TTSTokenizerV2Config, Qwen3TTSTokenizerV2Model)
 
         self.model = AutoModel.from_pretrained(source)
@@ -47,3 +47,4 @@ class Qwen3Voice(nn.Module):
             features = conv_output.transpose(1, 2)  # [B, T', D]
 
         return features
+
