@@ -46,10 +46,13 @@ class ChunkScheduledEpochCounter(EpochCounterWithStopper):
 
     @mark_as_saver
     def _save(self, path):
+        best_score = self.best_score
+        if hasattr(best_score, "item"):
+            best_score = best_score.item()
         save_dict = {
             "current_epoch": self.current,
             "best_epoch": self.best_limit,
-            "best_score": self.best_score,
+            "best_score": float(best_score),
             "should_stop": self.should_stop,
             "min_chunk_size": self.min_chunk_size,
             "phase_start": self._phase_start,
