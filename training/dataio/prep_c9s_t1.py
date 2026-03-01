@@ -129,7 +129,7 @@ def dataio_prep(hparams):
 
     # Define audio pipeline
     @sb.utils.data_pipeline.takes("path")
-    @sb.utils.data_pipeline.provides("raw_signal", "raw_duration")
+    @sb.utils.data_pipeline.provides("raw_signal", "duration")
     def audio_pipeline(file_path):
         """Load the signal, resample, and pass it and its length."""
 
@@ -147,14 +147,31 @@ def dataio_prep(hparams):
                                 )
 
         raw_signal = raw_signal.squeeze()
-        raw_duration = len(raw_signal)
+        duration = len(raw_signal)
 
-        if raw_duration == 0:
+        if duration == 0:
             raise ValueError(f"Zero-length audio file: {file_path}")
-        return raw_signal, raw_duration
+        return raw_signal, duration
 
     dynamic_items.append(audio_pipeline)
-    output_keys.extend(["raw_signal", "raw_duration"])
+    output_keys.extend(["raw_signal", "duration"])
+
+    # Handling too short or too long data.
+    @sb.utils.data_pipeline.takes("raw_signal", "duration")
+    @sb.utils.data_pipeline.provides("signal", "duration")
+    def process_signal(signal, duration):
+        if signal > max_length:  # randomly crop if too long
+            start = random.randint(0, duration - max_length)
+            signal = signal[start:start + max_length]
+
+        if duration < min_length:  # Concat to itself if too short
+            n_repeats = int(min_length / duration) + 1
+            signal = signal.repeat(n_repeats)[:min_length]
+        duration = len(signal)
+        return signal, duration
+
+    dynamic_items.append(process_signal)
+    output_keys.append("signal")
 
 
     if hparams["cache_encoder"]:
@@ -162,11 +179,11 @@ def dataio_prep(hparams):
         # Do this to take advantage of auto padding
         num_layers = hparams["num_layers"]
         num_outputs = num_layers if speech_encoder.output_hidden_states else 1
-        raw_output_vars = [f"raw_emb_{i}" for i in range(num_outputs)]
+        output_vars = [f"emb_{i}" for i in range(num_outputs)]
 
         @CachedHDF5DynamicItem.cache(hparams["cache_dir"], 'a')
-        @sb.utils.data_pipeline.takes("id", "raw_signal")
-        @sb.utils.data_pipeline.provides(*raw_output_vars)
+        @sb.utils.data_pipeline.takes("id", "signal")
+        @sb.utils.data_pipeline.provides(*output_vars)
         def cache_emb(id, raw_signal):
             # signal is 1D tensor
             device = next(speech_encoder.parameters()).device
@@ -183,42 +200,8 @@ def dataio_prep(hparams):
             return emb
 
         dynamic_items.append(cache_emb)
-        output_keys += raw_output_vars
+        output_keys += output_vars
 
-        output_vars = [f"emb_{i}" for i in range(num_outputs)]
-
-        # Handling too short or too long data
-        @sb.utils.data_pipeline.takes(*raw_output_vars, "raw_duration")
-        @sb.utils.data_pipeline.provides(*output_vars, "duration")
-        def proc_length_vec_populated(*args):
-            raw_embs = args[:-1]
-            raw_duration = args[-1]
-            return proc_length_vec(*raw_embs, duration=raw_duration,
-                                   min_length=min_length, max_length=max_length)  # populated portion
-        dynamic_items.append(proc_length_vec_populated)
-        output_keys += output_vars + ["duration"]
-
-    else:
-        # Handling too short or too long data.
-        @sb.utils.data_pipeline.takes("raw_signal", "raw_duration")
-        @sb.utils.data_pipeline.provides("signal", "duration")
-        def process_signal(raw_signal, raw_duration):
-            signal = raw_signal
-            duration = raw_duration
-
-            if raw_duration > max_length: # randomly crop if too long
-                start = random.randint(0, raw_duration - max_length)
-                signal = raw_signal[start:start + max_length]
-                duration = max_length
-
-            if raw_duration < min_length:  # Concat to itself if too short
-                n_repeats = int(min_length / raw_duration) + 1
-                signal = raw_signal.repeat(n_repeats)[:min_length]
-                duration = len(signal)
-            return signal, duration
-
-        dynamic_items.append(process_signal)
-        output_keys += ["signal", "duration"]
 
     # Define label pipeline
     @sb.utils.data_pipeline.takes("label")

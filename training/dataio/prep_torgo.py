@@ -151,14 +151,14 @@ def dataio_prep(hparams):
 
     # Define audio pipeline
     @sb.utils.data_pipeline.takes("path")
-    @sb.utils.data_pipeline.provides("raw_signal", "raw_duration")
+    @sb.utils.data_pipeline.provides("raw_signal", "duration")
     def audio_pipeline(file_path):
         """Load the signal, resample, and pass it and its length."""
 
         raw_signal, sr_og = torchaudio.load(file_path)
-        raw_duration = raw_signal.shape[-1]
+        duration = raw_signal.shape[-1]
 
-        if raw_duration == 0:
+        if duration == 0:
             raise ValueError(f"Zero-length audio file: {file_path}")
 
         # handle multi-channel
@@ -173,23 +173,45 @@ def dataio_prep(hparams):
                                 beta=14.769656459379492
                                 )
 
-        return raw_signal, raw_duration
+        raw_signal = raw_signal.squeeze(0)
+
+        return raw_signal, duration
 
     train_dynamic_items.append(audio_pipeline)
-    output_keys.extend(["raw_signal", "raw_duration"])
+    val_dynamic_items.append(audio_pipeline)
+    output_keys.extend(["raw_signal", "duration"])
 
-    @sb.utils.data_pipeline.takes("raw_signal", "raw_duration")
-    @sb.utils.data_pipeline.provides("raw_signal", "raw_duration")
-    def augment(raw_signal, raw_duration):
+    @sb.utils.data_pipeline.takes("raw_signal")
+    @sb.utils.data_pipeline.provides("raw_signal", "duration")
+    def augment(raw_signal):
+        raw_signal = raw_signal.unsqueeze(0)  # add batch dimension for augmentations
         raw_signal = perturbator(raw_signal)
         raw_signal = noisifier(raw_signal, torch.ones(1))
         raw_signal = reverb(raw_signal)
         raw_signal = raw_signal.squeeze(0)
-        raw_duration = raw_signal.shape[0]
-        return raw_signal, raw_duration
+        duration = raw_signal.shape[0]
+        return raw_signal, duration
 
     # Notice we only augment the training data, not validation or test.
     train_dynamic_items.append(augment)
+
+    # Handling too short or too long data.
+    @sb.utils.data_pipeline.takes("raw_signal", "duration")
+    @sb.utils.data_pipeline.provides("signal", "duration")
+    def process_signal(signal, duration):
+        if signal > max_length:  # randomly crop if too long
+            start = random.randint(0, duration - max_length)
+            signal = signal[start:start + max_length]
+
+        if duration < min_length:  # Concat to itself if too short
+            n_repeats = int(min_length / duration) + 1
+            signal = signal.repeat(n_repeats)[:min_length]
+        duration = len(signal)
+        return signal, duration
+
+    train_dynamic_items.append(process_signal)
+    val_dynamic_items.append(process_signal)
+    output_keys += ["signal"]
 
     # Define label pipeline
     @sb.utils.data_pipeline.takes("label")
@@ -200,7 +222,9 @@ def dataio_prep(hparams):
         # the 'label_key' used in train.py and the YAML.
         label_encoded = label
         yield label_encoded
+
     train_dynamic_items.append(label_pipeline)
+    val_dynamic_items.append(label_pipeline)
     output_keys.append("label_encoded")
 
     if hparams["cache_encoder"]:
@@ -208,11 +232,11 @@ def dataio_prep(hparams):
         # Do this to take advantage of auto padding
         num_layers = hparams["num_layers"]
         num_outputs = num_layers if speech_encoder.output_hidden_states else 1
-        raw_output_vars = [f"raw_emb_{i}" for i in range(num_outputs)]
+        output_vars = [f"emb_{i}" for i in range(num_outputs)]
 
         @CachedHDF5DynamicItem.cache(hparams["cache_dir"], 'a')
-        @sb.utils.data_pipeline.takes("id", "raw_signal")
-        @sb.utils.data_pipeline.provides(*raw_output_vars)
+        @sb.utils.data_pipeline.takes("id", "signal")
+        @sb.utils.data_pipeline.provides(*output_vars)
         def cache_emb(id, raw_signal):
             # signal is 1D tensor
             device = next(speech_encoder.parameters()).device
@@ -229,40 +253,8 @@ def dataio_prep(hparams):
             return emb
 
         train_dynamic_items.append(cache_emb)
-        output_keys += raw_output_vars
-
-        output_vars = [f"emb_{i}" for i in range(num_outputs)]
-
-        # Handling too short or too long data
-        @sb.utils.data_pipeline.takes(*raw_output_vars, "raw_duration")
-        @sb.utils.data_pipeline.provides(*output_vars, "duration")
-        def proc_length_vec_populated(*args):
-            raw_embs = args[:-1]
-            raw_duration = args[-1]
-            return proc_length_vec(*raw_embs, duration=raw_duration,
-                                   min_length=min_length, max_length=max_length) # populated portion
-
-        train_dynamic_items.append(proc_length_vec_populated)
-        output_keys += output_vars + ["duration"]
-
-    else:
-        # Handling too short or too long data.
-        @sb.utils.data_pipeline.takes("raw_signal", "raw_duration")
-        @sb.utils.data_pipeline.provides("signal", "duration")
-        def process_signal(raw_signal, raw_duration):
-
-            if raw_duration > max_length: # randomly crop if too long
-                start = random.randint(0, raw_duration - max_length)
-                signal = raw_signal[start:start + max_length]
-                duration = max_length
-
-            if raw_duration < min_length:  # Concat to itself if too short
-                n_repeats = int(min_length / raw_duration) + 1
-                signal = raw_signal.repeat(n_repeats)[:min_length]
-                duration = len(signal)
-
-            return signal, duration
-
+        val_dynamic_items.append(cache_emb)
+        output_keys += output_vars
 
     # Retrieve the data
     with open(hparams["train_annotation"], "r") as f:
