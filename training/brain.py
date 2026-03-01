@@ -3,13 +3,14 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 import speechbrain as sb
-from torchmetrics import MetricCollection, Metric
+from torchmetrics import MetricCollection, Metric, MeanMetric
 from torchmetrics.classification import Precision, Recall, F1Score, AUROC, Accuracy
 
 def unwrap_ddp(module):
     """Unwrap a module from DistributedDataParallel if needed."""
     return getattr(module, "module", module)
 
+LB_LOSS_WEIGHT = 0.2
 class DiagnosticsBrain(sb.Brain):
     """Class that manages the training loop for a generic diagnostics task."""
 
@@ -25,9 +26,12 @@ class DiagnosticsBrain(sb.Brain):
             average = None
             ext = ''
             task = 'binary'
+            self.binary = True
         else:
-            average = ext = '_weighted'
+            ext = '_weighted'
+            average = 'weighted'
             task = 'multiclass'
+            self.binary = False
 
         self.error_metrics = MetricCollection({
             f"F1{ext}": F1Score(task=task, num_classes=num_classes, average=average),
@@ -89,12 +93,12 @@ class DiagnosticsBrain(sb.Brain):
         # Dynamically retrieve the label using the 'label_key' from hparams
         label_key = getattr(self.hparams, "label_key", "label_encoded")
         lab = getattr(batch, label_key)
-        lab = lab.to(predictions).long()
+        lab = lab.to(predictions)
+        lab = lab.float() if self.binary else lab.long()
 
         if self.hparams.num_labels == 1 and lab.dim() == 1:
             lab = lab.unsqueeze(1)
 
-        loss_kwargs = getattr(self.hparams, "loss_kwargs")
         loss = self.hparams.loss(predictions, lab)
 
         self.error_metrics.update(predictions, lab)
@@ -110,10 +114,9 @@ class DiagnosticsBrain(sb.Brain):
             nonboundary_mask, boundary_prob, reduction, scores = last_hidden_states
             # nonboundary_mask, boundary_prob = last_hidden_states
 
-            chunk_loss = self.get_load_balancing_loss(boundary_prob, nonboundary_mask, N=min_chunk_size)
+            chunk_loss = self.get_load_balancing_loss(boundary_prob, nonboundary_mask, N=min_chunk_size) * LB_LOSS_WEIGHT
             print(chunk_loss)
             print(reduction)
-            loss = loss + chunk_loss * 0.2
 
             # boundary_prob = boundary_prob[:, :, 1].squeeze(-1)  # (B, T)
             #
@@ -126,8 +129,8 @@ class DiagnosticsBrain(sb.Brain):
             # chunk_loss = (0.01 * chunk_losses["loss_coverage"]
             #               + 0.01 * chunk_losses["loss_entropy"]
             #               + 0.5 * chunk_losses["loss_smooth"])
-            # loss = loss + chunk_loss
 
+            loss = loss + chunk_loss
 
             if stage == sb.Stage.TEST:
                 ids = batch.id
@@ -138,6 +141,7 @@ class DiagnosticsBrain(sb.Brain):
                     }
 
             self.chunk_metrics.update(chunk_loss, reduction)
+
         return loss
 
     def get_load_balancing_loss(self, boundary_prob, nonboundary_mask, N: float = 5.0) -> torch.Tensor:
@@ -174,36 +178,46 @@ class DiagnosticsBrain(sb.Brain):
     def on_stage_end(self, stage, stage_loss, epoch=None):
         """Gets called at the end of an epoch."""
 
-        # Store the train loss until the validation stage.
-        if stage == sb.Stage.TRAIN:
-            self.train_loss = stage_loss
-            self.checkpointer.delete_checkpoints(num_to_keep=0)
-            self.checkpointer.save_checkpoint(name='last_train')
-            return
+        chunk_stats = self.chunk_metrics.compute()
+        self.chunk_metrics.reset()
 
-        stats = self.error_metrics.compute()
+        eval_stats = self.error_metrics.compute()
         self.error_metrics.reset()
 
-        stats["loss"] = stage_loss
+        eval_stats["loss"] = stage_loss
+        eval_stats = eval_stats | chunk_stats
 
-        optim_metric = getattr(self.hparams, "optim_metric", "F1")
-        optim_mode = getattr(self.hparams, "optim_mode", "max")
-        max_keys, min_keys = [], []
-        if optim_mode == "max":
-            max_keys.append(optim_metric)
-        else:
-            min_keys.append(optim_metric)
+        eval_stats["clf_loss"] = stage_loss - chunk_stats["chunk_loss"]
+
+        if stage == sb.Stage.TRAIN:
+            self.hparams.train_logger.log_stats(
+                {"Epoch": epoch},
+                train_stats=eval_stats,
+            )
+
+            self.checkpointer.delete_checkpoints(num_to_keep=0)
+            self.checkpointer.save_checkpoint(name='last_train')
+
 
         # At the end of validation...
         if stage == sb.Stage.VALID:
+            optim_metric = getattr(self.hparams, "optim_metric", "F1")
+            optim_mode = getattr(self.hparams, "optim_mode", "max")
+            max_keys, min_keys = [], []
+            if optim_mode == "max":
+                max_keys.append(optim_metric)
+            else:
+                min_keys.append(optim_metric)
+
+            # For Early Stopping
+            epoch_counter = self.hparams.epoch_counter
+            epoch_counter.update_metric(eval_stats[optim_metric])
+
             old_lr, new_lr = self.hparams.lr_annealing(epoch)
             sb.nnet.schedulers.update_learning_rate(
                 self.optimizer, new_lr
             )
 
-            # For Early Stopping
-            epoch_counter = self.hparams.epoch_counter
-            epoch_counter.update_metric(stats[optim_metric])
             # Sync scheduled chunk size to brain attribute
             if hasattr(epoch_counter, 'min_chunk_size'):
                 self.min_chunk_size = epoch_counter.min_chunk_size
@@ -211,30 +225,19 @@ class DiagnosticsBrain(sb.Brain):
             # Log stats and save checkpoint
             self.hparams.train_logger.log_stats(
                 {"Epoch": epoch},
-                train_stats={"loss": self.train_loss},
-                valid_stats=stats,
+                valid_stats=eval_stats,
             )
 
             # Save the current checkpoint and delete previous checkpoints, based on F1
-            self.checkpointer.save_and_keep_only(meta=stats, max_keys=max_keys, min_keys=min_keys)
+            self.checkpointer.save_and_keep_only(meta=eval_stats, max_keys=max_keys, min_keys=min_keys)
 
-        # We also write statistics about test data to stdout and to the logfile.
         if stage == sb.Stage.TEST:
             self.hparams.train_logger.log_stats(
                 {"Epoch loaded": self.hparams.epoch_counter.current},
-                test_stats=stats,
+                test_stats=eval_stats,
             )
             torch.save(self.stat, Path(self.hparams.output_folder) / "test_diagnostics.pt")
 
-        chunk_stats = self.chunk_metrics.compute()
-        self.chunk_metrics.reset()
-
-        self.hparams.train_logger.log_stats(
-            {"Epoch": epoch},
-            train_stats=chunk_stats if stage == sb.Stage.TRAIN else None,
-            valid_stats=chunk_stats if stage == sb.Stage.VALID else None,
-            test_stats=chunk_stats if stage == sb.Stage.TEST else None,
-        )
 
     def boundary_regularizers(self,
                               start_prob: torch.Tensor,
@@ -267,6 +270,7 @@ class DiagnosticsBrain(sb.Brain):
         }
 
 
+
 class ChunkMetric(Metric):
     def __init__(self):
         super().__init__()
@@ -284,3 +288,4 @@ class ChunkMetric(Metric):
             "chunk_loss": self.chunk_loss / self.count if self.count > 0 else torch.tensor(0.0),
             "reduction": self.reduction / self.count if self.count > 0 else torch.tensor(0.0)
         }
+
