@@ -1,8 +1,6 @@
 import librosa
 import torch
 import torch.nn as nn
-import torchaudio
-import torchaudio.functional as F
 from chatterbox.models.s3gen import S3GEN_SR # 24000
 from chatterbox.models.s3tokenizer import S3_SR # 16000
 from chatterbox.models.t3.modules.cond_enc import T3Cond

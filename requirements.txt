@@ -1,4 +1,6 @@
 huggingface_hub
+librosa
+soundfile
 HyperPyYAML==1.2.2
 numpy
 pandas==2.3.3
@@ -10,7 +12,7 @@ sylber==0.1.4
 torch<=2.8.0
 torchaudio<=2.8.0
 torchcodec<=0.7.0
-transformers
+transformers==5.0.0
 torchmetrics
 optuna
 tensorboardx

@@ -15,8 +15,8 @@ import warnings
 from functools import partial
 from pathlib import Path
 
-import torchaudio
-import torchaudio.functional as F
+import soundfile as sf
+import librosa
 import speechbrain as sb
 from speechbrain.utils.data_pipeline import CachedDynamicItem
 import torch
@@ -133,20 +133,15 @@ def dataio_prep(hparams):
     def audio_pipeline(file_path):
         """Load the signal, resample, and pass it and its length."""
 
-        raw_signal, sr_og = torchaudio.load(file_path)
-        # handle multi-channel
-        if raw_signal.shape[0] > 1:
-            raw_signal = raw_signal.mean(dim=0, keepdim=False)
+        data, sr_og = sf.read(file_path, dtype='float32')
+        # sf.read returns (samples,) or (samples, channels)
+        if data.ndim > 1:
+            data = data.mean(axis=1)
 
         if sr_og != sample_rate:
-            raw_signal = F.resample(raw_signal, sr_og, new_freq=sample_rate,
-                                lowpass_filter_width=64,
-                                rolloff=0.9475937167399596,
-                                resampling_method="sinc_interp_kaiser",
-                                beta=14.769656459379492
-                                )
+            data = librosa.resample(data, orig_sr=sr_og, target_sr=sample_rate)
 
-        raw_signal = raw_signal.squeeze()
+        raw_signal = torch.from_numpy(data)
         duration = len(raw_signal)
 
         if duration == 0:
@@ -160,7 +155,7 @@ def dataio_prep(hparams):
     @sb.utils.data_pipeline.takes("raw_signal", "duration")
     @sb.utils.data_pipeline.provides("signal", "duration")
     def process_signal(signal, duration):
-        if signal > max_length:  # randomly crop if too long
+        if duration > max_length:  # randomly crop if too long
             start = random.randint(0, duration - max_length)
             signal = signal[start:start + max_length]
 
