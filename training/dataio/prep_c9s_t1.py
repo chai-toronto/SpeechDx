@@ -149,7 +149,6 @@ def dataio_prep(hparams):
         return raw_signal, duration
 
     dynamic_items.append(audio_pipeline)
-    output_keys.extend(["raw_signal", "duration"])
 
     # Handling too short or too long data.
     @sb.utils.data_pipeline.takes("raw_signal", "duration")
@@ -196,6 +195,7 @@ def dataio_prep(hparams):
 
         dynamic_items.append(cache_emb)
         output_keys += output_vars
+        output_keys.remove("signal")
 
 
     # Define label pipeline

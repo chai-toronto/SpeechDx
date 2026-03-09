@@ -3,6 +3,7 @@
 Author:
  * Peter Plantinga
 """
+import os
 import pathlib
 import torch
 
@@ -127,7 +128,7 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
         # Open connection to HDF5 file
         self.file_mode = file_mode
         self.cache_location /= "cache.hdf5"
-
+        print(f"Opening HDF5 cache at {self.cache_location} with mode {file_mode}")
         self.hdf5file = h5py.File(self.cache_location, file_mode)
 
     def _is_cached(self, uid):

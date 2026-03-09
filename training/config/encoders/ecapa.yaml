@@ -1,0 +1,9 @@
+sample_rate: 16000
+feature_dim: 192
+num_layers: 12 #?
+layer_dim: 1 #?
+max_length: 160000  # 10s for 16kHz
+min_length: 16000   # 1s for 16kHz
+
+encoder: !new:model.ecapa.ECAPA_TDNN
+  freeze_encoder: True

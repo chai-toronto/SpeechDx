@@ -160,21 +160,20 @@ def dataio_prep(hparams):
         if data.ndim > 1:
             data = data.mean(axis=1)
 
-        duration = len(data)
-
-        if duration == 0:
+        if len(data) == 0:
             raise ValueError(f"Zero-length audio file: {file_path}")
 
         if sr_og != sample_rate:
             data = librosa.resample(data, orig_sr=sr_og, target_sr=sample_rate)
 
         raw_signal = torch.from_numpy(data)
+        duration = len(raw_signal)
 
         return raw_signal, duration
 
     train_dynamic_items.append(audio_pipeline)
     val_dynamic_items.append(audio_pipeline)
-    output_keys.extend(["raw_signal", "duration"])
+    # output_keys.extend(["raw_signal", "duration"])
 
     @sb.utils.data_pipeline.takes("raw_signal")
     @sb.utils.data_pipeline.provides("raw_signal", "duration")
@@ -229,7 +228,10 @@ def dataio_prep(hparams):
         num_outputs = num_layers if speech_encoder.output_hidden_states else 1
         output_vars = [f"emb_{i}" for i in range(num_outputs)]
 
-        @CachedHDF5DynamicItem.cache(hparams["cache_dir"], 'a')
+        read_only = hparams.get("cache_read_only", False)
+        file_mode = 'r' if read_only else 'a'
+
+        @CachedHDF5DynamicItem.cache(hparams["cache_dir"], file_mode)
         @sb.utils.data_pipeline.takes("id", "signal")
         @sb.utils.data_pipeline.provides(*output_vars)
         def cache_emb(id, raw_signal):
@@ -251,6 +253,19 @@ def dataio_prep(hparams):
         train_dynamic_items.append(cache_emb)
         val_dynamic_items.append(cache_emb)
         output_keys += output_vars
+        output_keys.remove("signal")  # we don't need the raw signal after caching
+
+        @sb.utils.data_pipeline.takes(*output_vars)
+        @sb.utils.data_pipeline.provides(*output_vars)
+        def shape_bandage(emb):
+            # TODO: account for the case where we cache all layers and repurpose for Tprobe
+            # if not speech_encoder.output_hidden_states and isinstance(emb, torch.Tensor) and emb.dim() == 3:
+            #     print("Hey yo")
+            return emb[-1, :, :]
+
+
+        train_dynamic_items.append(shape_bandage)
+        val_dynamic_items.append(shape_bandage)
 
     # Retrieve the data
     with open(hparams["train_annotation"], "r") as f:
@@ -288,6 +303,7 @@ def dataio_prep(hparams):
             print(f"Iterating dataset {i} to warm the cache.")
             ds.iterate_once()
         cache_emb.change_file_mode('r')  # change to read mode
+
 
     return datasets
 

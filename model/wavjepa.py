@@ -13,19 +13,58 @@ class WavJEPA(nn.Module):
         self.freeze_encoder = freeze_encoder
 
         self.output_hidden_states = output_hidden_states
-        if output_hidden_states:
-            raise NotImplementedError("WavJEPA does not support output_hidden_states=True")
-
         self.sample_rate = sample_rate
 
     def forward(self, x, lengths=None):
         input_values = self.extract_features(x, lengths)['input_values']
         input_values = input_values.to(device=x.device, dtype=x.dtype)
-        features, _ = self.model(input_values)
-        # features: (B, 2, T, D), timestamps: (B, T)
-        # timestamp is the time index of each frame along T dimension
-        features = features.mean(dim=1, keepdims=False)  # average the 2 channels to get (B, T, D)
-        return features
+
+        if self.output_hidden_states:
+            features, _ = self._forward_with_hidden_states(input_values)
+            # features: tuple of (B, 2, T, D) per layer -> average channels -> tuple of (B, T, D)
+            return tuple(f.mean(dim=1, keepdims=False) for f in features)
+        else:
+            features, _ = self.model(input_values)
+            # features: (B, 2, T, D), timestamps: (B, T)
+            features = features.mean(dim=1, keepdims=False)  # average the 2 channels to get (B, T, D)
+            return features
+
+    def _forward_with_hidden_states(self, input_values):
+        """Run model forward, hooking encoder layers to capture per-layer outputs."""
+        inner = self.model.model  # WavJEPANat
+        encoder = inner.encoder
+
+        # Register forward hooks on each encoder layer to capture outputs
+        layer_outputs = [[] for _ in encoder.layers]
+        hooks = []
+        for i, layer in enumerate(encoder.layers):
+            def make_hook(idx):
+                def hook_fn(module, input, output):
+                    layer_outputs[idx].append(output.detach())
+                return hook_fn
+            hooks.append(layer.register_forward_hook(make_hook(i)))
+
+        try:
+            # Run the normal forward pass — hooks capture layer outputs
+            features, ts = self.model(input_values)
+        finally:
+            for h in hooks:
+                h.remove()
+
+        # Use the final output's time dimension as the correct cut_off
+        from einops import rearrange
+        T = features.shape[2]  # trimmed time dim from the model
+        C = inner.in_channels
+
+        result = []
+        for i in range(len(encoder.layers)):
+            # Concat segment outputs along time, apply norm, reshape
+            cat = torch.cat(layer_outputs[i], dim=1)  # [B, C*total_steps, D]
+            normed = encoder.norm(cat)
+            reshaped = rearrange(normed, "B (C S) E -> B C S E", C=C)
+            result.append(reshaped[:, :, :T, :])
+
+        return tuple(result), ts
 
     def extract_features(self, x, lengths=None):
         # x is Tensor

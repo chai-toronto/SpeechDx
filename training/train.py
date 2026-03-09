@@ -331,6 +331,7 @@ if __name__ == "__main__":
                 train_set=datasets["train_og"],
                 valid_set=datasets["val_og"],
                 train_loader_kwargs=hparams["train_dataloader_options"],
+                valid_loader_kwargs=hparams["val_dataloader_options"],
             )
         except Exception as e:
             import traceback

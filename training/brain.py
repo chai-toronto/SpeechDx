@@ -6,11 +6,15 @@ import speechbrain as sb
 from torchmetrics import MetricCollection, Metric, MeanMetric
 from torchmetrics.classification import Precision, Recall, F1Score, AUROC, Accuracy
 
+from model.xtts import XTTS
+
+
 def unwrap_ddp(module):
     """Unwrap a module from DistributedDataParallel if needed."""
     return getattr(module, "module", module)
 
 LB_LOSS_WEIGHT = 0.2
+
 class DiagnosticsBrain(sb.Brain):
     """Class that manages the training loop for a generic diagnostics task."""
 
@@ -44,7 +48,17 @@ class DiagnosticsBrain(sb.Brain):
         self.chunk_metrics = ChunkMetric().to(self.device)
 
         self.model = unwrap_ddp(self.modules.model)
+
+        if self.hparams.enable_chunking:
+            self.model.init_chunker(
+                chunk_encoder=self.hparams.chunk_encoder,
+                threshold=self.hparams.threshold,
+                chunk_at=self.hparams.chunk_at,
+                aggregate=self.hparams.aggregate,
+            )
         self.min_chunk_size = self.hparams.min_chunk_size  # promoted to brain attribute
+
+        print(self.model)
 
     def compute_forward(self, batch, stage):
         """Runs all the computation that transforms the input into the
@@ -103,16 +117,13 @@ class DiagnosticsBrain(sb.Brain):
 
         self.error_metrics.update(predictions, lab)
 
-        # last_hidden_states = getattr(self.model.encoder, "last_chunk_stat", None)
-        # reduction = getattr(self.model.encoder, "last_reduction", None)
-        last_hidden_states = getattr(self.model.probe, "last_hidden_states", None)
+        last_hidden_states = getattr(self.model, "last_hidden_states", None)
 
         if last_hidden_states is not None:
             threshold = self.hparams.threshold
             min_chunk_size = self.min_chunk_size
 
             nonboundary_mask, boundary_prob, reduction, scores = last_hidden_states
-            # nonboundary_mask, boundary_prob = last_hidden_states
 
             chunk_loss = self.get_load_balancing_loss(boundary_prob, nonboundary_mask, N=min_chunk_size) * LB_LOSS_WEIGHT
             print(chunk_loss)
