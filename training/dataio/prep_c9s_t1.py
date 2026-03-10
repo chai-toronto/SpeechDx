@@ -197,6 +197,14 @@ def dataio_prep(hparams):
         output_keys += output_vars
         output_keys.remove("signal")
 
+        if len(output_vars) == 1: # if not output_hidden_states, just return the single embedding
+            @sb.utils.data_pipeline.takes(*output_vars)
+            @sb.utils.data_pipeline.provides(*output_vars)
+            def take_last_layer(emb):
+                return emb[-1] if emb.ndim == 3 else emb
+
+            dynamic_items.append(take_last_layer)
+
 
     # Define label pipeline
     @sb.utils.data_pipeline.takes("label")

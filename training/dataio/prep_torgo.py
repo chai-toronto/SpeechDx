@@ -255,17 +255,14 @@ def dataio_prep(hparams):
         output_keys += output_vars
         output_keys.remove("signal")  # we don't need the raw signal after caching
 
-        @sb.utils.data_pipeline.takes(*output_vars)
-        @sb.utils.data_pipeline.provides(*output_vars)
-        def shape_bandage(emb):
-            # TODO: account for the case where we cache all layers and repurpose for Tprobe
-            # if not speech_encoder.output_hidden_states and isinstance(emb, torch.Tensor) and emb.dim() == 3:
-            #     print("Hey yo")
-            return emb[-1, :, :]
+        if len(output_vars) == 1:  # if not output_hidden_states, just return the single embedding
+            @sb.utils.data_pipeline.takes(*output_vars)
+            @sb.utils.data_pipeline.provides(*output_vars)
+            def take_last_layer(emb):
+                return emb[-1] if emb.ndim == 3 else emb
 
-
-        train_dynamic_items.append(shape_bandage)
-        val_dynamic_items.append(shape_bandage)
+            train_dynamic_items.append(take_last_layer)
+            val_dynamic_items.append(take_last_layer)
 
     # Retrieve the data
     with open(hparams["train_annotation"], "r") as f:

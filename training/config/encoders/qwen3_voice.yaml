@@ -9,5 +9,5 @@ encoder: !new:model.qwen3_voice.Qwen3Voice
   source: "Qwen/Qwen3-TTS-Tokenizer-12Hz"
   freeze_encoder: True
   sample_rate: !ref <sample_rate>
-  output_hidden_states: True
+  output_hidden_states: False
 

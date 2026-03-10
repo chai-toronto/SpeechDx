@@ -1,0 +1,14 @@
+sample_rate: 24000
+feature_dim: 128
+num_layers: 1
+layer_dim: 1
+max_length: 1e10
+min_length: 24000   # 1s at 24kHz
+
+encoder: !new:model.styletts2.StyleTTS2
+  freeze_encoder: True
+  sample_rate: !ref <sample_rate>
+  dim_in: 64
+  style_dim: 128
+  max_conv_dim: 512
+  pretrained_source: "yl4579/StyleTTS2-LibriTTS"

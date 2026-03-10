@@ -3,7 +3,7 @@
 #SBATCH --chdir=./  # Set the working directory
 #SBATCH --output=exps/slurm_logs/%x_%j.out     # Output file (%x=job-name, %j=job-id)
 #SBATCH --error=exps/slurm_logs/%x_%j.err      # Error file
-#SBATCH --time=2:00:00             # Time limit (hh:mm:ss)
+#SBATCH --time=10:00:00             # Time limit (hh:mm:ss)
 #SBATCH --cpus-per-task=24          # Number of CPU cores per task
 #SBATCH --nodes=1                   # Number of nodes
 #SBATCH --ntasks=1                  # Number of tasks
@@ -36,6 +36,7 @@ nvidia-smi --query-gpu=timestamp,index,power.draw,memory.used \
            --format=csv,noheader -l 1 > "$SLURM_JOB_ID.gpu.csv" &
 LOGGER_PID=$!
 
-python -m training.train training/config3/main.yaml
+#python -m training.train training/config3/main.yaml
+
 
 kill $LOGGER_PID

@@ -1,0 +1,12 @@
+sample_rate: 24000
+feature_dim: 1024
+num_layers: 1
+layer_dim: 1
+max_length: 320000 # 13s
+min_length: 24000   # 1s at 24kHz
+
+encoder: !new:model.bark_encoder.BarkEncoder
+  freeze_encoder: True
+  sample_rate: !ref <sample_rate>
+  model_type: "text"
+  hook_layer: 12
