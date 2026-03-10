@@ -29,7 +29,8 @@ export RAY_TMPDIR=/scratch/kieu/ray_tmp
 mkdir -p $RAY_TMPDIR
 
 module load StdEnv/2023 gcc arrow python/3.12 ffmpeg rust
-source ~/spa/bin/activate
+source /scratch/kieu/speech-health-ai/spa/bin/activate
+
 
 
 nvidia-smi --query-gpu=timestamp,index,power.draw,memory.used \
