@@ -1,8 +1,8 @@
 #!/bin/bash -l
 #SBATCH --job-name=speech-health-ai
 #SBATCH --chdir=./  # Set the working directory
-#SBATCH --output=exps/slurm_logs/%x_%j.out     # Output file (%x=job-name, %j=job-id)
-#SBATCH --error=exps/slurm_logs/%x_%j.err      # Error file
+#SBATCH --output=exps/slurm_logs/%x_%j_out.txt     # Output file (%x=job-name, %j=job-id)
+#SBATCH --error=exps/slurm_logs/%x_%j_err.txt      # Error file
 #SBATCH --time=10:00:00             # Time limit (hh:mm:ss)
 #SBATCH --cpus-per-task=24          # Number of CPU cores per task
 #SBATCH --nodes=1                   # Number of nodes
@@ -29,7 +29,7 @@ export RAY_TMPDIR=/scratch/kieu/ray_tmp
 mkdir -p $RAY_TMPDIR
 
 module load StdEnv/2023 gcc arrow python/3.12 ffmpeg rust
-source ~/shai/bin/activate
+source ~/spa/bin/activate
 
 
 nvidia-smi --query-gpu=timestamp,index,power.draw,memory.used \
