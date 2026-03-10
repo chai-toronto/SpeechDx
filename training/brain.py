@@ -6,8 +6,6 @@ import speechbrain as sb
 from torchmetrics import MetricCollection, Metric, MeanMetric
 from torchmetrics.classification import Precision, Recall, F1Score, AUROC, Accuracy
 
-from model.xtts import XTTS
-
 
 def unwrap_ddp(module):
     """Unwrap a module from DistributedDataParallel if needed."""
@@ -56,6 +54,7 @@ class DiagnosticsBrain(sb.Brain):
                 chunk_at=self.hparams.chunk_at,
                 aggregate=self.hparams.aggregate,
             )
+            self.model.chunker.to(self.device)
         self.min_chunk_size = self.hparams.min_chunk_size  # promoted to brain attribute
 
         print(self.model)
@@ -81,6 +80,9 @@ class DiagnosticsBrain(sb.Brain):
             wavs, lens = batch.signal
             # Forward pass through the model
             wavs = self.model.encoder(wavs, lens)
+            # If chunking is enabled inside the encoder, use updated lengths
+            if getattr(self.model, '_chunked_lengths', None) is not None:
+                lens = self.model._chunked_lengths
 
         predictions = self.model.probe(wavs, lens)
         return predictions

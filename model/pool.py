@@ -237,8 +237,8 @@ class LayerWeightedAvgPool(nn.Module):
         pooled = torch.zeros_like(x[0])  # (B, T_max, D)
 
         T = pooled.shape[1]
-        lengths = (lengths * T).long()  # Convert to absolute lengths
-        mask = length_to_mask(lengths) if lengths is not None else None # (B, T_max)
+        lengths = (lengths * T).long().clamp(max=T)  # Convert to absolute lengths
+        mask = length_to_mask(lengths, max_len=T) if lengths is not None else None # (B, T_max)
 
         for wi, xi in zip(w, x):
             xi = xi * mask.unsqueeze(-1) if mask is not None else xi

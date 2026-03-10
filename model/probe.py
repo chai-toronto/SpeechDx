@@ -47,7 +47,12 @@ class Model(nn.Module):
         return self.probe(x, lengths)
 
     def chunker_forward_hook(self, module, inputs):
-        x, lengths = inputs
+        encoder_style = len(inputs) == 1  # Mimi/Qwen3Voice style: only hidden_states
+        if encoder_style:
+            x = inputs[0]
+            lengths = None
+        else:
+            x, lengths = inputs
         x_chunk, nonchunk_mask, boundary_mask, boundary_prob = self.chunker(x, lengths)
         # reconstruct lengths from mask
         lengths = (~nonchunk_mask).sum(dim=1).float() / nonchunk_mask.size(1)
@@ -59,7 +64,10 @@ class Model(nn.Module):
                                    boundary_prob,
                                    reduction,
                                    scores)
+        self._chunked_lengths = lengths
 
+        if encoder_style:
+            return (x_chunk,)
         return (x_chunk, lengths)
 
 

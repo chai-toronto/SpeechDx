@@ -100,6 +100,11 @@ class ChunkPool(nn.Module):
 
         sorted_hidden = self.up_proj(sorted_hidden * (~nonchunk_mask).unsqueeze(-1).float())
 
+        # Save chunk_ids and counts so callers can aggregate other tensors the same way
+        self._last_chunk_ids = chunk_ids  # (B, T_orig), 1-indexed; 0 = padding
+        self._last_chunk_count = chunk_count  # (B, max_chunks)
+        self._last_max_chunks = max_chunks
+
         return sorted_hidden, nonchunk_mask, nonboundary_mask, boundary_prob
 
 
