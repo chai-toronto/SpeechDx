@@ -37,6 +37,6 @@ nvidia-smi --query-gpu=timestamp,index,power.draw,memory.used \
 LOGGER_PID=$!
 
 #python -m training.train training/config3/main.yaml
-
+bash run_all.sh cuda
 
 kill $LOGGER_PID
