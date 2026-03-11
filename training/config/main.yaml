@@ -3,7 +3,7 @@ random_seed: 2025
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
 model_name: qwen3voice
-probe_name: CLTP-test
+probe_name: CLTP-2
 
 data_folder: ./data/
 #slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
@@ -27,7 +27,7 @@ probe_params: !include:probes/LTProbe.yaml # Change encover params accordingly
 # Chunking
 ###########
 enable_chunking: true
-chunk_encoder: false # o.w. chunk before t-pool
+chunk_encoder: true # o.w. chunk before t-pool
 # before which layer in encoder do we chunk
 chunk_at: 2 # 0 index, i.e., 2 means chunk before 3rd layer
 aggregate: "mean" # or "first"

@@ -41,7 +41,7 @@ class ChunkPool(nn.Module):
         if lengths is not None and pad_mask is None:
             T = x.shape[1]
             lengths = (lengths * T).long()  # Convert to absolute lengths
-            pad_mask = ~length_to_mask(lengths).bool() # (B, T), True for pads
+            pad_mask = ~length_to_mask(lengths, max_len=T).bool() # (B, T), True for pads
 
         # Cosine similarity between consecutive tokens
         q = F.normalize(self.q_proj(x[:, :-1]), dim=-1)  # (B, L-1, D)

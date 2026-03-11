@@ -90,7 +90,7 @@ class WavLM(nn.Module):
         # New: pass through chunker
         chunked_hidden_states, nonchunk_mask, nonboundary_mask, boundary_prob = self.chunker(hidden_states, pad_mask=~attention_mask)
 
-        reduction = chunk_stat(hidden_states, chunked_hidden_states, attention_mask.float().mean(1), nonchunk_mask)
+        reduction = chunk_stat(hidden_states, chunked_hidden_states, nonchunk_mask, attention_mask.float().mean(1))
 
         self.last_reduction = reduction
 

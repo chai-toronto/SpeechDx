@@ -54,17 +54,17 @@ class Model(nn.Module):
         else:
             x, lengths = inputs
         x_chunk, nonchunk_mask, boundary_mask, boundary_prob = self.chunker(x, lengths)
-        # reconstruct lengths from mask
-        lengths = (~nonchunk_mask).sum(dim=1).float() / nonchunk_mask.size(1)
 
         # Stat gathering
         scores = getattr(self.probe.tpooler, 'last_scores', None)
-        reduction = chunk_stat(x, x_chunk, lengths, nonchunk_mask)
+        reduction = chunk_stat(x, x_chunk, nonchunk_mask, lengths)
+
+        # reconstruct lengths from mask
+        lengths = (~nonchunk_mask).sum(dim=1).float() / nonchunk_mask.size(1)
         self.last_hidden_states = (boundary_mask,
                                    boundary_prob,
                                    reduction,
                                    scores)
-        self._chunked_lengths = lengths
 
         if encoder_style:
             return (x_chunk,)
@@ -96,7 +96,6 @@ class TemporalProbe(nn.Module):
         super().__init__()
         self.tpooler = temp_pooler
         if isinstance(self.tpooler, ASP):
-
             input_dim = input_dim * 2  # ASP doubles the dimension
         self.classifier = nn.Linear(input_dim, num_labels, bias=bias)
 
@@ -177,7 +176,7 @@ class ChunkTProbe(nn.Module):
 
         x_chunk, nonchunk_mask, boundary_mask, boundary_prob = self.chunker(x, lengths)
 
-        chunk_stat(x, x_chunk, lengths, nonchunk_mask)
+        chunk_stat(x, x_chunk, nonchunk_mask, lengths)
 
         x_chunk = x_chunk + self.ffn(x_chunk)
 
@@ -252,7 +251,7 @@ class LayerChunkTProbe(nn.Module):
 
         x_chunk, nonchunk_mask, boundary_mask, boundary_prob = self.chunker(layer_pooled, lengths)
 
-        reduction = chunk_stat(layer_pooled, x_chunk, lengths, nonchunk_mask)
+        reduction = chunk_stat(layer_pooled, x_chunk, nonchunk_mask, lengths)
 
         x_chunk = x_chunk + self.ffn(x_chunk)
 
@@ -272,13 +271,15 @@ class LayerChunkTProbe(nn.Module):
 
         return output
 
-def chunk_stat(x, x_chunk, lengths, nonchunk_mask):
-    B, T_max, D = x.size()
-    _, T_chunk, _ = x_chunk.size()
+def chunk_stat(x, x_chunk, nonchunk_mask, lengths=None):
+    T_orig, T_chunk = x.shape[1], x_chunk.shape[1]
 
-    orig_lens = (lengths * T_max).long()
-    chunk_lens = (~nonchunk_mask).sum(dim=1).long()
-    reduction = (orig_lens - chunk_lens).float() / orig_lens.float()
+    if lengths is None:
+        lengths = torch.ones(1, device=x.device)
+
+    orig_lens = (lengths * T_orig).float()
+    chunk_lens = (~nonchunk_mask).sum(dim=1).float()
+    reduction = (orig_lens - chunk_lens) / orig_lens
 
     return reduction.mean().item() * 100
 

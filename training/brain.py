@@ -80,9 +80,6 @@ class DiagnosticsBrain(sb.Brain):
             wavs, lens = batch.signal
             # Forward pass through the model
             wavs = self.model.encoder(wavs, lens)
-            # If chunking is enabled inside the encoder, use updated lengths
-            if getattr(self.model, '_chunked_lengths', None) is not None:
-                lens = self.model._chunked_lengths
 
         predictions = self.model.probe(wavs, lens)
         return predictions
