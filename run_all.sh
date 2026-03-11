@@ -28,7 +28,7 @@ trap cleanup EXIT
 #done
 
 # Qwen3Voice
-for DATASET in torgo ravdess uaspeech mvdr; do
+for DATASET in ravdess uaspeech mvdr; do
   make_config qwen3voice CLTP-2 qwen3_voice.yaml LTProbe.yaml "${DATASET}.yaml"
   python -m training.train "$TMP_CONFIG" --device=="$1"
 done
