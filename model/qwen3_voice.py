@@ -88,10 +88,11 @@ class Qwen3Voice(nn.Module):
                 # Access the chunker module to get chunk_ids for pre-chunk aggregation
                 # The hook_fn is Model.chunker_forward_hook, Model.chunker is ChunkPool
                 chunker = getattr(self._chunk_hook_fn.__self__, 'chunker', None)
-                # Recompute positional info for new sequence length
                 T = hidden_states.shape[1]
-                cache_position = torch.arange(T, device=device)
-                position_ids = cache_position.unsqueeze(0)
+                cache_position = torch.arange(T, device=device)  # sequential, batch-shared
+                assert chunker is not None and hasattr(chunker, '_last_chunk_starts')
+                # position_ids = chunker._last_chunk_starts  # (B, max_chunks) — boundary positions for RoPE
+                position_ids = cache_position.unsqueeze(0)  # (1, T), shared across batch
 
             layer_out = layer(
                 hidden_states,
@@ -109,21 +110,19 @@ class Qwen3Voice(nn.Module):
 
         if self.output_hidden_states:
             # Aggregate pre-chunk states to T_new using saved chunk_ids
-            if chunker is not None and hasattr(chunker, '_last_chunk_ids'):
-                chunk_ids = chunker._last_chunk_ids  # (B, T_orig)
-                chunk_count = chunker._last_chunk_count  # (B, max_chunks)
-                max_chunks = chunker._last_max_chunks
-                aggregated_pre = []
-                for hs in pre_chunk_states:
-                    B, T_orig, D = hs.shape
-                    agg = torch.zeros(B, max_chunks + 1, D, device=device, dtype=hs.dtype)
-                    agg.scatter_add_(1, chunk_ids.unsqueeze(-1).expand_as(hs), hs)
-                    agg = agg[:, 1:]  # drop bucket 0
-                    agg = agg / chunk_count.unsqueeze(-1).clamp(min=1)
-                    aggregated_pre.append(agg)
-            else:
-                # Fallback: repeat the first post-chunk state for pre-chunk layers
-                aggregated_pre = [post_chunk_states[0]] * len(pre_chunk_states)
+            assert chunker is not None and hasattr(chunker, '_last_chunk_ids')
+            chunk_ids = chunker._last_chunk_ids  # (B, T_orig)
+            chunk_count = chunker._last_chunk_count  # (B, max_chunks)
+            max_chunks = chunker._last_max_chunks
+            aggregated_pre = []
+            for hs in pre_chunk_states:
+                B, T_orig, D = hs.shape
+                agg = torch.zeros(B, max_chunks + 1, D, device=device, dtype=hs.dtype)
+                agg.scatter_add_(1, chunk_ids.unsqueeze(-1).expand_as(hs), hs)
+                agg = agg[:, 1:]  # drop bucket 0
+                agg = agg / chunk_count.unsqueeze(-1).clamp(min=1)
+                aggregated_pre.append(agg)
+
             return tuple(aggregated_pre + post_chunk_states)
         return hidden_states
 

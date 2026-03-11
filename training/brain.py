@@ -48,12 +48,6 @@ class DiagnosticsBrain(sb.Brain):
         self.model = unwrap_ddp(self.modules.model)
 
         if self.hparams.enable_chunking:
-            self.model.init_chunker(
-                chunk_encoder=self.hparams.chunk_encoder,
-                threshold=self.hparams.threshold,
-                chunk_at=self.hparams.chunk_at,
-                aggregate=self.hparams.aggregate,
-            )
             self.model.chunker.to(self.device)
         self.min_chunk_size = self.hparams.min_chunk_size  # promoted to brain attribute
         self.hparams.loss = self.hparams.loss.to(self.device)

@@ -98,6 +98,11 @@ encoder: !ref <encoder_params[encoder]>
 model: !new:model.probe.Model
   encoder: !ref <encoder>
   probe: !ref <probe_params[probe]>
+  enable_chunking: !ref <enable_chunking>
+  chunk_encoder: !ref <chunk_encoder>
+  chunk_at: !ref <chunk_at>
+  threshold: !ref <threshold>
+  aggregate: !ref <aggregate>
 
 # modules (for nested modules)
 modules:

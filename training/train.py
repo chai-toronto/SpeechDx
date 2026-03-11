@@ -315,6 +315,10 @@ if __name__ == "__main__":
     dataio_prep_fn = getattr(data_io_module, hparams["dataio_prep_fn"])
     datasets = dataio_prep_fn(hparams)
 
+    hparams_file = Path(hparams_file).resolve()
+    with open(hparams_file) as fin:
+        hparams = load_hyperpyyaml(fin, overrides)
+
     brain = DiagnosticsBrain(
         modules=hparams["modules"],
         opt_class=hparams["opt_class"],

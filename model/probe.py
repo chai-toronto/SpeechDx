@@ -11,7 +11,9 @@ class Model(nn.Module):
     """
     A wrapper class for various probes.
     """
-    def __init__(self, probe, encoder):
+    def __init__(self, probe, encoder,
+                 enable_chunking=False, chunk_encoder=False,
+                 chunk_at=2, threshold=0.5, aggregate="mean"):
         super().__init__()
         self.probe = probe
         self.encoder = encoder
@@ -19,11 +21,10 @@ class Model(nn.Module):
         self.chunker = None
         self.last_hidden_states = None
 
+        if enable_chunking:
+            self._init_chunker(chunk_encoder, chunk_at, threshold, aggregate)
 
-    # TODO: move this back to init for checkpoint loading.
-    def init_chunker(self, chunk_encoder=False, chunk_at=2, threshold=0.5, aggregate="mean"):
-        assert self.chunker is None, "Chunker already initialized"
-
+    def _init_chunker(self, chunk_encoder=False, chunk_at=2, threshold=0.5, aggregate="mean"):
         if not chunk_encoder:
             # Chunk before temp pool
             layer = getattr(self.probe, "tpooler", None)

@@ -100,10 +100,20 @@ class ChunkPool(nn.Module):
 
         sorted_hidden = self.up_proj(sorted_hidden * (~nonchunk_mask).unsqueeze(-1).float())
 
+        # Compute boundary start positions: index of first timestep in each chunk
+        # boundary_mask is True at boundaries; their positions are the chunk starts
+        timesteps = torch.arange(T, device=x.device).unsqueeze(0).expand(B, T)  # (B, T)
+        # For each boundary, its position; non-boundaries get T (sentinel)
+        boundary_positions = torch.where(boundary_mask, timesteps, torch.full_like(timesteps, T))
+        # Sort to push sentinels to the end, take first max_chunks
+        boundary_positions_sorted, _ = boundary_positions.sort(dim=1)
+        chunk_start_positions = boundary_positions_sorted[:, :max_chunks]  # (B, max_chunks)
+
         # Save chunk_ids and counts so callers can aggregate other tensors the same way
         self._last_chunk_ids = chunk_ids  # (B, T_orig), 1-indexed; 0 = padding
         self._last_chunk_count = chunk_count  # (B, max_chunks)
         self._last_max_chunks = max_chunks
+        self._last_chunk_starts = chunk_start_positions  # (B, max_chunks)
 
         return sorted_hidden, nonchunk_mask, nonboundary_mask, boundary_prob
 
