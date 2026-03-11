@@ -35,7 +35,7 @@ nvidia-smi --query-gpu=timestamp,index,power.draw,memory.used \
            --format=csv,noheader -l 1 > "$SLURM_JOB_ID.gpu.csv" &
 LOGGER_PID=$!
 
-python -m training.train training/config3/main.yaml
+python -m training.train training/config/main.yaml
 #bash run_all.sh cuda
 
 kill $LOGGER_PID
