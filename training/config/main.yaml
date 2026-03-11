@@ -3,14 +3,14 @@ random_seed: 2025
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
 model_name: qwen3voice
-probe_name: CLTP-2test
+probe_name: CLTP-2-pos
 
 data_folder: ./data/
 #slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
 slurm_tmpdir: ./tmp/
 #----------------------------------
 # Most of the knobs you should change
-data_params: !include:tasks/torgo.yaml
+data_params: !include:tasks/c9s_t1.yaml
 
 encoder_params: !include:encoders/qwen3_voice.yaml
 

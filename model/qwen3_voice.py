@@ -91,8 +91,8 @@ class Qwen3Voice(nn.Module):
                 T = hidden_states.shape[1]
                 cache_position = torch.arange(T, device=device)  # sequential, batch-shared
                 assert chunker is not None and hasattr(chunker, '_last_chunk_starts')
-                # position_ids = chunker._last_chunk_starts  # (B, max_chunks) — boundary positions for RoPE
-                position_ids = cache_position.unsqueeze(0)  # (1, T), shared across batch
+                position_ids = chunker._last_chunk_starts  # (B, max_chunks) — boundary positions for RoPE
+                # position_ids = cache_position.unsqueeze(0)  # (1, T), shared across batch
 
             layer_out = layer(
                 hidden_states,
