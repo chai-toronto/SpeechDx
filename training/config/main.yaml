@@ -27,7 +27,7 @@ probe_params: !include:probes/LTProbe.yaml # Change encover params accordingly
 # Chunking
 ###########
 enable_chunking: true
-chunk_encoder: true # o.w. chunk before t-pool
+chunk_encoder: false # o.w. chunk before t-pool
 # before which layer in encoder do we chunk
 chunk_at: 2 # 0 index, i.e., 2 means chunk before 3rd layer
 aggregate: "mean" # or "first"
