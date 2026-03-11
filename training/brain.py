@@ -56,6 +56,7 @@ class DiagnosticsBrain(sb.Brain):
             )
             self.model.chunker.to(self.device)
         self.min_chunk_size = self.hparams.min_chunk_size  # promoted to brain attribute
+        self.hparams.loss = self.hparams.loss.to(self.device)
 
         print(self.model)
 

@@ -19,6 +19,8 @@ class Model(nn.Module):
         self.chunker = None
         self.last_hidden_states = None
 
+
+    # TODO: move this back to init for checkpoint loading.
     def init_chunker(self, chunk_encoder=False, chunk_at=2, threshold=0.5, aggregate="mean"):
         assert self.chunker is None, "Chunker already initialized"
 

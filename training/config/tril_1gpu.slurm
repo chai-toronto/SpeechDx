@@ -3,7 +3,7 @@
 #SBATCH --chdir=./  # Set the working directory
 #SBATCH --output=exps/slurm_logs/%x_%j_out.txt     # Output file (%x=job-name, %j=job-id)
 #SBATCH --error=exps/slurm_logs/%x_%j_err.txt      # Error file
-#SBATCH --time=3:00:00             # Time limit (hh:mm:ss)
+#SBATCH --time=2:00:00             # Time limit (hh:mm:ss)
 #SBATCH --cpus-per-task=24          # Number of CPU cores per task
 #SBATCH --nodes=1                   # Number of nodes
 #SBATCH --ntasks=1                  # Number of tasks
@@ -28,14 +28,14 @@ mkdir -p $MPLCONFIGDIR $FONTCONFIG_PATH
 export RAY_TMPDIR=/scratch/kieu/ray_tmp
 mkdir -p $RAY_TMPDIR
 
-module load StdEnv/2023 gcc arrow python/3.11 ffmpeg rust
-source ~/shai/bin/activate
-
+module load StdEnv/2023 gcc arrow python/3.12 ffmpeg rust
+source /scratch/kieu/speech-health-ai/spa/bin/activate
 
 nvidia-smi --query-gpu=timestamp,index,power.draw,memory.used \
            --format=csv,noheader -l 1 > "$SLURM_JOB_ID.gpu.csv" &
 LOGGER_PID=$!
 
-python -m training.train training/config/main.yaml
+#python -m training.train training/config3/main.yaml
+bash run_all.sh cuda
 
 kill $LOGGER_PID

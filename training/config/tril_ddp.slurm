@@ -27,7 +27,7 @@ export FONTCONFIG_PATH=$SLURM_TMPDIR/tmp/fontconfig-$USER
 mkdir -p $MPLCONFIGDIR $FONTCONFIG_PATH
 
 module load StdEnv/2023 gcc arrow python/3.12 ffmpeg rust
-source ~/shai/bin/activate
+source /scratch/kieu/speech-health-ai/spa/bin/activate
 
 nvidia-smi --query-gpu=timestamp,index,power.draw,memory.used \
            --format=csv,noheader -l 1 > "exps/slurm_logs/$SLURM_JOB_ID.gpu.csv" &
