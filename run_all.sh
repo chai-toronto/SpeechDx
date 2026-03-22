@@ -32,7 +32,7 @@ trap cleanup EXIT
 for DATASET in torgo ravdess; do
   for CHUNK_AT in 0 1 2 3 4 5 6 7; do
     # TODO: update encoder yaml to not output layers, chunk_enc false @main
-    make_config qwen3voice CTP-${CHUNK_AT} qwen3_voice.yaml TProbe.yaml "${DATASET}.yaml"
+    make_config qwen3voice CTP-${CHUNK_AT} qwen3_voice.yaml TProbe.yaml "${DATASET}.yaml" ${CHUNK_AT}
     python -m training.train "$TMP_CONFIG" --device=="$1"
   done
 done
