@@ -242,7 +242,8 @@ class DiagnosticsBrain(sb.Brain):
                 test_stats=eval_stats,
             )
             torch.save(self.stat, Path(self.hparams.output_folder) / "test_diagnostics.pt")
-
+            print(eval_stats.keys())
+            print(eval_stats.values())
 
     def boundary_regularizers(self,
                               start_prob: torch.Tensor,
