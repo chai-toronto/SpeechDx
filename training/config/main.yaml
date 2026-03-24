@@ -3,7 +3,7 @@ random_seed: 2025
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
 model_name: qwen3voice
-probe_name: CTP-2
+probe_name: CTP-t
 
 data_folder: ./data/
 #slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
@@ -151,7 +151,8 @@ test_dataloader_options:
   num_workers: 0
 
 # Logger
-train_logger: !new:speechbrain.utils.train_logger.TensorboardLogger
+# Combining TensorBoard + FileLogger
+train_logger: !new:training.logger.CombinedLogger
   save_dir: !ref <train_log_dir>
 
 progressbar: !ref <training_params[progressbar]>

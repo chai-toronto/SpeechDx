@@ -29,8 +29,13 @@ class Model(nn.Module):
             # Chunk before temp pool
             layer = getattr(self.probe, "tpooler", None)
             assert layer is not None, "Probe must have a temporal pooler for chunking"
-            d_in, d_out = layer.input_dim, layer.output_dim
-            self.chunker = ChunkPool(d_in, d_out, threshold, aggregate)
+            chunker_d_out = layer.input_dim
+
+            # Assume after encoder before tpool, dim is invariant
+            chunker_d_in = self.encoder.d_transformer
+
+            self.chunker = ChunkPool(chunker_d_in, chunker_d_out, threshold, aggregate)
+
             layer.register_forward_pre_hook(self.chunker_forward_hook)
 
         else:
@@ -97,6 +102,12 @@ class TemporalProbe(nn.Module):
     """
     def __init__(self, input_dim, num_labels, temp_pooler, bias=True):
         super().__init__()
+
+        if isinstance(input_dim, float):
+            input_dim_int = int(input_dim)
+            assert input_dim - input_dim_int == 0, "Float input_dim can't be cast to int"
+            input_dim = input_dim_int
+
         self.tpooler = temp_pooler
         if isinstance(self.tpooler, ASP):
             input_dim = input_dim * 2  # ASP doubles the dimension

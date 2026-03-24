@@ -103,6 +103,11 @@ class AvgTPool(nn.Module):
 class ASP(nn.Module):
     def __init__(self, input_dim):
         super().__init__()
+        if isinstance(input_dim, float):
+            input_dim_int = int(input_dim)
+            assert input_dim - input_dim_int == 0, "Float input_dim can't be cast to int"
+            input_dim = input_dim_int
+
         self.pool = AttentiveStatisticsPooling(input_dim, attention_channels = input_dim, global_context=True)
         self.input_dim = input_dim
         self.output_dim = 2 * input_dim
@@ -118,62 +123,6 @@ class ASP(nn.Module):
         x = self.pool(x, lengths).transpose(1, 2)  # (B, 1, 2*D)
         x = x.squeeze(1)  # (B, 2*D)
         return x
-
-
-# class LayerWeightedAvgPool(nn.Module):
-#     """
-#     Learnable softmax weights over layers to pool across the layer dimension.
-#
-#     Args:
-#         num_layers (int): number of layers (L).
-#         init (str): 'uniform' (default) or 'last' to bias toward higher layers.
-#         temperature (float): softmax temperature; <1.0 makes weights peakier.
-#         learnable (bool): if False, keeps uniform fixed weights.
-#
-#     Forward:
-#         x: Tuples of each layer (B, T_max, D) tensor of batch x time x features.
-#         layer_mask: optional boolean mask of shape (L,) where False drops a layer
-#         return_weights: if True, also returns the normalized weights (L,)
-#
-#     Returns:
-#         pooled: x with the layer dimension removed (weighted average over L)
-#         (optionally) weights: the softmax weights over layers (L,)
-#     """
-#     def __init__(self, num_layers, layer_dim = 1, init="uniform", temperature=1.0, learnable=True):
-#         super().__init__()
-#         self.num_layers = num_layers
-#         self.temperature = float(temperature)
-#
-#         # logits -> softmax -> weights
-#         logits = torch.ones(num_layers)
-#         if init == "last":
-#             # bias toward deeper layers (monotonic increasing logits)
-#             logits = torch.linspace(-1.0, 1.0, steps=num_layers)
-#
-#         self.logits = nn.Parameter(logits, requires_grad=learnable)
-#
-#     def forward(self, x: Tuple[Tensor], layer_mask=None, return_weights=False):
-#         # Get the number of layers present in x along the chosen dimension
-#         num_layer = len(x)
-#         assert num_layer == self.num_layers, f"Expected L={self.num_layers}, got L={num_layer}"
-#
-#         logits = self.logits / self.temperature
-#
-#         if layer_mask is not None:
-#             # layer_mask: bool or {0,1} of shape (L,)
-#             mask = layer_mask.to(dtype=torch.bool)
-#             if mask.shape != (num_layer,):
-#                 raise ValueError(f"layer_mask must have shape (L,), got {mask.shape}")
-#             # Exclude masked layers by setting their logit to -inf before softmax
-#             logits = torch.where(mask, logits, torch.full_like(logits, float("-inf")))
-#
-#         w = F.softmax(logits, dim=0)  # (L,)
-#
-#         pooled = torch.zeros_like(x[0])  # (B, T_max, D)
-#         for wi, xi in zip(w, x):
-#             pooled.add_(xi, alpha=wi.item())
-#
-#         return (pooled, w) if return_weights else pooled
 
 
 class LayerWeightedAvgPool(nn.Module):
