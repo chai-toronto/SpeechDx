@@ -3,6 +3,7 @@ import ray
 from ray import tune
 from speechbrain.dataio.dataloader import LoopedLoader
 from speechbrain.utils import hpopt as hp
+from speechbrain.utils.epoch_loop import EpochCounter
 import speechbrain as sb
 import torch
 from torch.utils.data import DataLoader
@@ -41,6 +42,10 @@ class Brains:
 
         self.num_brains = hparams.get("num_fold", kwargs.get("num_brains", 1))
         self.hparams = hparams
+        # Disable internal early stopping — Ray Tune handles trial stopping
+        self.hparams["epoch_counter"] = EpochCounter(
+            limit=hparams["number_of_epochs"]
+        )
         self.hparams_file = hparams_file
         self.overrides = overrides
         self.run_opts = run_opts
