@@ -1,14 +1,14 @@
 # HP Optimizer
 # Enable Ray Tune hyperparameter optimization
-hpopt_mode: null  # Set to 'ray' to enable, null to use EarlyStopping
+hpopt_mode: ray  # Set to 'ray' to enable, null to use EarlyStopping
 continue_exp: True  # Continue previous experiment if available (i.e., environment is the same)
 optim_metric: 'loss'
 optim_mode: 'min'  # 'min' or 'max' depending on the metric
 max_concurrent_trials: 1  # Number of concurrent trials to run
 grace_period: 3  # Number of epochs to wait before considering early stopping
 limit_warmup: 2  # 4: Number of epochs to ignore for ONLY early stopping
-reduction_factor: 2  # Factor by which to reduce trials at each rung
-sequential: True  # Set to True to run trials sequentially. Else, runs in parallel.
+reduction_factor: 1  # Factor by which to reduce trials at each rung
+sequential: False  # Set to True to run trials sequentially. Else, runs in parallel.
 
 # Ray Tune specific configuration
 ray_tune_config:
@@ -21,18 +21,10 @@ ray_tune_config:
 # Define hyperparameter search space
 # This is optional - if not provided, defaults will be used
 hpopt_config:
-  lr:
+  lr_s:
     type: "!tune.loguniform"
-    values: [1e-4, 1e-3]
+    values: [1e-5, 1e-3]
 
   number_of_epochs:
     type: "!tune.randint"
-    values: [30, 100]
-
-  l2:
-    type: "!tune.loguniform"
-    values: [0.01, 0.1]
-
-#  l2_ratio:
-#    type: "!tune.uniform"
-#    values: [0.01, 0.5]
+    values: [1, 50]
