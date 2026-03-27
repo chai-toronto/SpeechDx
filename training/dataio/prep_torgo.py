@@ -127,7 +127,7 @@ def dataio_prep(hparams):
 
     max_length = hparams.get("max_length", 160000)  # default to 10 seconds at 16kHz
     sample_rate = hparams.get("sample_rate", 16000)
-    min_length = hparams.get("min_length", 16000)  # default to 1 second at 16kHz
+    min_length = hparams.get("min_length", 1)  # default to 1 second at 16kHz
 
     noise_folder = hparams.get("noise_folder", None)
     noise_folder = os.path.abspath(noise_folder)
@@ -238,7 +238,6 @@ def dataio_prep(hparams):
             # signal is 1D tensor
             device = next(speech_encoder.parameters()).device
             with torch.no_grad():
-
                 # move to encoder's device and add batch dimension
                 raw_signal = raw_signal.unsqueeze(0).to(device)
 
