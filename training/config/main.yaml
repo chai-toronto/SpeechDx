@@ -23,18 +23,6 @@ probe_params: !include:probes/TProbe.yaml # Change encover params accordingly
   num_layers: !ref <num_layers>
   layer_dim: !ref <encoder_params[layer_dim]>
 
-###########
-# Chunking
-###########
-enable_chunking: true
-chunk_encoder: false # o.w. chunk before t-pool
-# before which layer in encoder do we chunk
-chunk_at: 2 # 0 index, i.e., 2 means chunk before 3rd layer
-aggregate: "mean" # or "first"
-threshold: 0.5 # threshold for chunking (0.5)
-min_chunk_size: 4
-max_chunk_size: 8 # Only if curriculum
-
 hpopt_params: !include:hpopt.yaml
 training_params: !include:training.yaml
 #----------------------------------
@@ -98,11 +86,6 @@ encoder: !ref <encoder_params[encoder]>
 model: !new:model.probe.Model
   encoder: !ref <encoder>
   probe: !ref <probe_params[probe]>
-  enable_chunking: !ref <enable_chunking>
-  chunk_encoder: !ref <chunk_encoder>
-  chunk_at: !ref <chunk_at>
-  threshold: !ref <threshold>
-  aggregate: !ref <aggregate>
 
 # modules (for nested modules)
 modules:
@@ -162,9 +145,6 @@ epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounterWithStopper
   limit_to_stop: !ref <hpopt_params[grace_period]>
   limit_warmup: !ref <hpopt_params[limit_warmup]>
   direction: !ref <hpopt_params[optim_mode]>
-#  min_chunk_size: !ref <min_chunk_size>
-#  max_chunk_size: !ref <max_chunk_size>
-
 # Optimizer
 opt_class: !name:torch.optim.AdamW
   lr: !ref <lr_s>
