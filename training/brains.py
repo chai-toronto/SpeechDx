@@ -386,7 +386,9 @@ class DiagnosticsCVBrain(DiagnosticsBrain):
             return
 
         # Calculate metrics
-        stats = self.calc_epoch_metrics(stage_loss)
+        stats = self.error_metrics.compute()
+        self.error_metrics.reset()
+        stats["loss"] = stage_loss
 
         # At the end of validation, store stats for retrieval
         if stage == sb.Stage.VALID:
@@ -486,7 +488,9 @@ class DiagnosticsSequentialBrain(DiagnosticsBrain):
             return
 
         # Calculate metrics
-        stats = self.calc_epoch_metrics(stage_loss)
+        stats = self.error_metrics.compute()
+        self.error_metrics.reset()
+        stats["loss"] = stage_loss
 
         # At the end of validation, store stats for retrieval
         if stage == sb.Stage.VALID:

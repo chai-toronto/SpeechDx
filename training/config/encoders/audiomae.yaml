@@ -1,0 +1,25 @@
+# AudioMAE Configuration
+#
+# Uses the HuggingFace-compatible model from hance-ai/audiomae
+# https://huggingface.co/hance-ai/audiomae
+#
+# Key specs:
+# - 12 transformer layers (ViT-Base)
+# - 768 hidden dimension
+# - Maximum audio length: 10 seconds (longer audio is clipped)
+# - Output: (768, 8, 64) = (latent_dim, freq_dim, time_dim) reshaped to [B, 512, 768]
+
+sample_rate: 16000
+feature_dim: 768  # ViT-Base hidden size
+max_length_s: 10  # Maximum audio length in seconds (AudioMAE clips longer audio internally)
+max_length: null  # null = try full audio, fallback on OOM
+fallback_max_length: 160000  # 10s @ 16kHz (AudioMAE internally limits to 10s)
+num_layers: 12  # ViT-Base has 12 transformer layers
+layer_dim: 1
+
+encoder: !new:model.audiomae.AudioMAE
+  ssl_encoder_source: "hance-ai/audiomae"
+  freeze_encoder: True
+  output_hidden_states: False
+  sample_rate: !ref <sample_rate>
+  max_length_s: !ref <max_length_s>

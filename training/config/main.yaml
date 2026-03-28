@@ -62,7 +62,7 @@ metadata_path: !ref <data_folder>/<dataset>/processed/<dataset>.csv
 raw_label_key: !ref <data_params[raw_label_key]>
 
 # Output folder structure
-output_folder: !ref ./exps/<task>/<model_name>-<probe_name>/brain-logs/
+output_folder: !ref ./exps/<task>/<model_name>-<probe_name>-<experiment_tag>/
 save_folder: !ref <output_folder>/save
 train_log_dir: !ref <output_folder>/
 
@@ -102,10 +102,10 @@ precision: !ref <training_params[precision]>
 eval_precision: !ref <training_params[eval_precision]>
 number_of_epochs: !ref <training_params[number_of_epochs]>
 batch_size: !ref <training_params[batch_size]>
-lr_s: !ref <training_params[lr_s]>
+lr_s: !ref <training_params[lr]>
 lr_e: !ref <lr_s> / 10
 sample_rate: !ref <encoder_params[sample_rate]>
-min_length: !ref <encoder_params[min_length]> # min length in samples (1s)
+l2: !ref <training_params[l2]>
 
 skip_nonfinite_grads: !ref <training_params[skip_nonfinite_grads]>
 nonfinite_patience: !ref <training_params[nonfinite_patience]>
@@ -148,6 +148,7 @@ epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounterWithStopper
 # Optimizer
 opt_class: !name:torch.optim.AdamW
   lr: !ref <lr_s>
+  weight_decay: !ref <l2>
 
 loss: !ref <data_params[loss]>
 

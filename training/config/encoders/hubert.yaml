@@ -1,0 +1,12 @@
+sample_rate: 16000
+feature_dim: 1024  # 1024 for large, 768 for base
+max_length: null  # null = try full audio, fallback on OOM
+fallback_max_length: 320000  # 20s @ 16kHz
+num_layers: 24  # 24 for large, 12 for base
+layer_dim: 1
+
+encoder: !new:model.hubert.HuBERT
+  ssl_encoder_source: "facebook/hubert-large-ls960-ft"
+  freeze_encoder: True
+  output_hidden_states: False
+  sample_rate: !ref <sample_rate>

@@ -45,17 +45,12 @@ class TemporalProbe(nn.Module):
     """
     A probe with a temporal pooling layer followed by a linear layer.
     """
-    def __init__(self, input_dim, num_labels, temp_pooler, bias=True):
+    def __init__(self, input_dim, num_labels, temp_pooler, bias=True, dropout=0.0):
         super().__init__()
-
-        if isinstance(input_dim, float):
-            input_dim_int = int(input_dim)
-            assert input_dim - input_dim_int == 0, "Float input_dim can't be cast to int"
-            input_dim = input_dim_int
-
-        self.tpooler = temp_pooler
-        if isinstance(self.tpooler, ASP):
+        self.pooler = temp_pooler
+        if isinstance(self.pooler, ASP):
             input_dim = input_dim * 2  # ASP doubles the dimension
+        self.dropout = nn.Dropout(p=dropout)
         self.classifier = nn.Linear(input_dim, num_labels, bias=bias)
 
     def forward(self, x, lengths=None):
@@ -76,11 +71,13 @@ class LayerTemporalProbe(nn.Module):
     A probe that performs layer pool -> temporal pool -> linear layer.
     """
 
-    def __init__(self, input_dim, num_labels, layer_pooler, temp_pooler, bias=True):
+    def __init__(self, input_dim, num_labels, layer_pooler, temp_pooler, bias=True, dropout=0.0):
         super().__init__()
-        self.tpooler = temp_pooler
-        if isinstance(self.tpooler, ASP):
+        self.pooler = temp_pooler
+        if isinstance(self.pooler, ASP):
             input_dim = input_dim * 2  # ASP doubles the dimension
+        self.dropout = nn.Dropout(p=dropout)
+        print("DROPOUT:", self.dropout)
         self.classifier = nn.Linear(input_dim, num_labels, bias=bias)
         self.layer_pooler = layer_pooler
 

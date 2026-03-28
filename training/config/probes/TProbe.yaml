@@ -1,9 +1,10 @@
 feature_dim: !PLACEHOLDER
 num_labels: !PLACEHOLDER
+dropout: !PLACEHOLDER
 
 probe: !new:model.probe.TemporalProbe
   input_dim: !ref <feature_dim>
   num_labels: !ref <num_labels>
-#  temp_pooler: !new:model.pool.AttentiveTemporalPool
+  dropout: !ref <dropout>
   temp_pooler: !new:model.pool.ASP
     input_dim: !ref <feature_dim>

@@ -12,8 +12,6 @@ class AttentiveTemporalPoolLite(nn.Module):
     def __init__(self, input_dim):
         super().__init__()
         self.attn  = nn.Linear(input_dim, 1)
-        self.last_scores = None
-        self.input_dim = self.output_dim = input_dim
 
     def forward(self, x, lengths=None):
         """
@@ -23,7 +21,7 @@ class AttentiveTemporalPoolLite(nn.Module):
           pooled:  (B, D)
         """
         scores = torch.tanh(self.attn(x)).squeeze(-1)               # (B, T_max)
-        self.last_scores = scores.clone().detach()
+
         return attn_pool(lengths, scores, x)
 
 def attn_pool(lengths, scores, x):
@@ -61,9 +59,6 @@ class AttentiveTemporalPool(nn.Module):
         super().__init__()
         self.attn  = nn.Linear(input_dim, hidden_dim)
         self.score = nn.Linear(hidden_dim, 1)
-        self.input_dim = self.output_dim = input_dim
-
-        self.last_scores = None
 
     def forward(self, x, lengths=None):
         """
@@ -72,16 +67,15 @@ class AttentiveTemporalPool(nn.Module):
         Returns:
           pooled:  (B, D)
         """
-        h = F.gelu(self.attn(x))           # (B, T_max, H)
+        h = torch.tanh(self.attn(x))           # (B, T_max, H)
         scores = self.score(h).squeeze(-1)     # (B, T_max)
 
         self.last_scores = scores.clone().detach()
         return attn_pool(lengths, scores, x)
 
 class AvgTPool(nn.Module):
-    def __init__(self, input_dim):
+    def __init__(self):
         super().__init__()
-        self.input_dim = self.output_dim = input_dim
 
     def forward(self, x, lengths=None):
         """
@@ -103,14 +97,7 @@ class AvgTPool(nn.Module):
 class ASP(nn.Module):
     def __init__(self, input_dim):
         super().__init__()
-        if isinstance(input_dim, float):
-            input_dim_int = int(input_dim)
-            assert input_dim - input_dim_int == 0, "Float input_dim can't be cast to int"
-            input_dim = input_dim_int
-
         self.pool = AttentiveStatisticsPooling(input_dim, attention_channels = input_dim, global_context=True)
-        self.input_dim = input_dim
-        self.output_dim = 2 * input_dim
 
     def forward(self, x, lengths=None):
         """

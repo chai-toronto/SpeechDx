@@ -1,0 +1,18 @@
+sample_rate: 48000  # CLAP uses 48kHz by default!
+feature_dim: 768  # CLAP audio encoder hidden size
+max_length_s: 10  # maximum audio length in seconds (CLAP internal)
+max_length: null  # null = try full audio, fallback on OOM
+fallback_max_length: 480000  # 10s @ 48kHz
+num_layers: 4  # CLAP uses hierarchical Swin stages (not standard transformer layers)
+layer_dim: 1
+
+# Note: CLAP's default sample rate is 48kHz, not 16kHz!
+# If your audio is 16kHz, the feature extractor will handle resampling,
+# but it's recommended to resample your audio to 48kHz beforehand.
+
+encoder: !new:model.clap.CLAP
+  ssl_encoder_source: "laion/clap-htsat-unfused"
+  freeze_encoder: True
+  output_hidden_states: False
+  sample_rate: !ref <sample_rate>
+  max_length_s: !ref <max_length_s>

@@ -2,12 +2,14 @@ feature_dim: !PLACEHOLDER
 num_labels: !PLACEHOLDER
 num_layers: !PLACEHOLDER
 layer_dim: !PLACEHOLDER
+dropout: !PLACEHOLDER
 
 probe: !new:model.probe.LayerTemporalProbe
   input_dim: !ref <feature_dim>
   num_labels: !ref <num_labels>
+  dropout: !ref <dropout>
   layer_pooler: !new:model.pool.LayerWeightedAvgPool
     num_layers: !ref <num_layers>
     layer_dim: !ref <layer_dim>
-  temp_pooler: !new:model.pool.AttentiveTemporalPool
+  temp_pooler: !new:model.pool.ASP
     input_dim: !ref <feature_dim>

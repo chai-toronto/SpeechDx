@@ -46,7 +46,7 @@ def train_with_ray(config, hparams_file, run_opts, overrides):
         config: Dict containing hyperparameters from Ray Tune
         hparams_file: Path to the yaml hyperparameter file
         run_opts: SpeechBrain run options
-        overrides: Command line overrides
+        overrides: Command line overrides (dict or string)
     """
     # Update overrides with Ray Tune config
     ray_overrides = overrides.copy() if overrides else {}
@@ -231,13 +231,6 @@ if __name__ == "__main__":
             reduction_factor=hparams.get("reduction_factor", 2),
         )
 
-        plateau_stopper = TrialPlateauStopper(
-            metric=optim_metric,
-            mode=optim_mode,  # "max" for F1/ROC, "min" for loss
-            std=hparams.get("plateau_std", 1e-4),
-            num_results=hparams.get("plateau_window", 9),  # like "patience window"
-            grace_period=hparams.get("patience_grace", 10),  # minimum epochs before checking
-        )
 
         resources_per_trial = tune_config.get("resources_per_trial", {"cpu": 1, "gpu": 0})
         if not hparams.get('sequential', True):
@@ -277,11 +270,10 @@ if __name__ == "__main__":
             search_alg=search_alg,
             scheduler=scheduler,
             resources_per_trial=resources_per_trial,
-            stop=plateau_stopper
         )
 
         # Print best hyperparameters
-        best_config = analysis.get_best_config(metric=optim_metric, mode=optim_mode)
+        best_config = analysis.get_best_config(metric=optim_metric, mode=optim_mode, scope="all")
         print(f"\nBest hyperparameters found: {best_config}")
 
         # Save best config

@@ -1,0 +1,31 @@
+# OPERA-GT Configuration (MAE ViT Small encoder)
+#
+# OPERA: OPEn Respiratory Acoustic Foundation Models
+# Paper: https://arxiv.org/abs/2406.16148
+# HuggingFace: https://huggingface.co/evelyn0414/OPERA
+# GitHub: https://github.com/evelyn0414/OPERA
+#
+# OPERA-GT uses MAE (Masked Autoencoder) with ViT Small architecture
+# Pretrained on respiratory audio datasets with masked reconstruction objective
+#
+# Key specs:
+# - MAE ViT Small encoder
+# - 384 hidden dimension
+# - 12 transformer layers
+# - Input: 8 second audio clips
+# - Sample rate: 16kHz
+
+sample_rate: 16000
+feature_dim: 384
+input_sec: 8
+num_layers: 1  # Single output embedding (CLS token)
+layer_dim: 1
+max_length: null  # null = try full audio, fallback on OOM
+fallback_max_length: 128000  # 8s @ 16kHz (OPERA uses 8s internally)
+
+encoder: !new:model.opera.OPERA
+  ssl_encoder_source: "operaGT"
+  freeze_encoder: True
+  output_hidden_states: False
+  sample_rate: !ref <sample_rate>
+  input_sec: !ref <input_sec>

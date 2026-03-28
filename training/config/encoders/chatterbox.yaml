@@ -1,8 +1,0 @@
-sample_rate: 23000
-feature_dim: 1024
-max_length: 1e10 # Doesnt matter, placeholder
-min_length: 115000 # 5 seconds at 23kHz
-num_layers: 24 # Doesnt matter, placeholder
-layer_dim: 1 # Doesnt matter, placeholder
-
-encoder: !new:model.chatterbox.Chatterbox

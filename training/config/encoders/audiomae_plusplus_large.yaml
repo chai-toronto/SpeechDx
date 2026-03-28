@@ -1,0 +1,15 @@
+# AudioMAE++ Large encoder configuration
+# Largest AudioMAE++ variant - best performance
+
+sample_rate: 16000
+feature_dim: 5120  # 1024 * 5 freq patches
+num_layers: 24
+layer_dim: 1
+max_length: null  # null = try full audio, fallback on OOM
+fallback_max_length: 160000  # 10s @ 16kHz (large model, conservative)
+
+encoder: !new:model.audiomae_plusplus.AudioMAEPP_Large
+  freeze_encoder: True
+  output_hidden_states: False
+  sample_rate: !ref <sample_rate>
+  checkpoint_path: /nvmepool/aina10/checkpoint-99.pth

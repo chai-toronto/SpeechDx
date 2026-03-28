@@ -13,6 +13,9 @@ class WavJEPA(nn.Module):
         self.freeze_encoder = freeze_encoder
 
         self.output_hidden_states = output_hidden_states
+        if output_hidden_states:
+            raise NotImplementedError("WavJEPA does not support output_hidden_states=True")
+
         self.sample_rate = sample_rate
 
     def forward(self, x, lengths=None):
