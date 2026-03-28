@@ -106,7 +106,7 @@ precision: !ref <training_params[precision]>
 eval_precision: !ref <training_params[eval_precision]>
 number_of_epochs: !ref <training_params[number_of_epochs]>
 batch_size: !ref <training_params[batch_size]>
-lr_s: !ref <training_params[lr]>
+lr_s: !ref <training_params[lr_s]>
 lr_e: !ref <lr_s> / 10
 sample_rate: !ref <encoder_params[sample_rate]>
 l2: !ref <training_params[l2]>

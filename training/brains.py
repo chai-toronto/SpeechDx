@@ -399,6 +399,11 @@ class DiagnosticsCVBrain(DiagnosticsBrain):
                 valid_stats=stats,
             )
 
+            old_lr, new_lr = self.hparams.lr_annealing(epoch)
+            sb.nnet.schedulers.update_learning_rate(
+                self.optimizer, new_lr
+            )
+
             # Store stats to be returned by validate_epoch
             self.last_valid_stats = stats
             print(f"Brain {self.brain_id}: Validation stats - {stats}")
@@ -499,6 +504,11 @@ class DiagnosticsSequentialBrain(DiagnosticsBrain):
                 {"Epoch": epoch, "Brain": self.brain_id},
                 train_stats={"loss": self.train_loss},
                 valid_stats=stats,
+            )
+
+            old_lr, new_lr = self.hparams.lr_annealing(epoch)
+            sb.nnet.schedulers.update_learning_rate(
+                self.optimizer, new_lr
             )
 
             # Store stats to be returned by validate_epoch
