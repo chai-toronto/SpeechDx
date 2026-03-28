@@ -131,6 +131,15 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
         print(f"Opening HDF5 cache at {self.cache_location} with mode {file_mode}")
         self.hdf5file = h5py.File(self.cache_location, file_mode)
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        del state["hdf5file"]
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.hdf5file = h5py.File(self.cache_location, self.file_mode)
+
     def _is_cached(self, uid):
         """Test whether uid is cached."""
         return uid in self.hdf5file

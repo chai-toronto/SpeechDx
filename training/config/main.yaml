@@ -3,7 +3,8 @@ random_seed: 2025
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
 model_name: qwen3voice
-probe_name: CTP-t
+probe_name: paralel
+experiment_tag: default
 
 data_folder: ./data/
 #slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
@@ -17,11 +18,14 @@ encoder_params: !include:encoders/qwen3_voice.yaml
 num_layers: !ref <encoder_params[num_layers]>
 num_labels: !ref <data_params[num_labels]>
 
+dropout: 0.1
+
 probe_params: !include:probes/TProbe.yaml # Change encover params accordingly
   feature_dim: !ref <encoder_params[feature_dim]>
   num_labels: !ref <num_labels>
   num_layers: !ref <num_layers>
   layer_dim: !ref <encoder_params[layer_dim]>
+  dropout: !ref <dropout>
 
 hpopt_params: !include:hpopt.yaml
 training_params: !include:training.yaml
@@ -134,7 +138,7 @@ test_dataloader_options:
   num_workers: 0
 
 # Logger
-train_logger: !new:speechbrain.utils.train_logger.TensorBoardLogger
+train_logger: !new:speechbrain.utils.train_logger.TensorboardLogger
   save_dir: !ref <train_log_dir>
 
 progressbar: !ref <training_params[progressbar]>

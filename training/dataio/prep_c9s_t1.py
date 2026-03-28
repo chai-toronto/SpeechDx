@@ -175,7 +175,9 @@ def dataio_prep(hparams):
         num_outputs = num_layers if speech_encoder.output_hidden_states else 1
         output_vars = [f"emb_{i}" for i in range(num_outputs)]
 
-        @CachedHDF5DynamicItem.cache(hparams["cache_dir"], 'a')
+        read_only = hparams.get("cache_read_only", False)
+        file_mode = 'r' if read_only else 'a'
+        @CachedHDF5DynamicItem.cache(hparams["cache_dir"], file_mode)
         @sb.utils.data_pipeline.takes("id", "signal")
         @sb.utils.data_pipeline.provides(*output_vars)
         def cache_emb(id, raw_signal):

@@ -3,11 +3,11 @@
 #SBATCH --chdir=./  # Set the working directory
 #SBATCH --output=exps/slurm_logs/%x_%j_out.txt     # Output file (%x=job-name, %j=job-id)
 #SBATCH --error=exps/slurm_logs/%x_%j_err.txt      # Error file
-#SBATCH --time=4:00:00             # Time limit (hh:mm:ss)
+#SBATCH --time=0:15:00             # Time limit (hh:mm:ss)
 #SBATCH --cpus-per-task=24          # Number of CPU cores per task
 #SBATCH --nodes=1                   # Number of nodes
 #SBATCH --ntasks=1                  # Number of tasks
-#SBATCH --gpus-per-node=1         # Number of GPUs per node
+#SBATCH --gpus-per-node=4         # Number of GPUs per node
 #SBATCH --mail-type=BEGIN,END,FAIL        # Optional: email on job end/failure
 #SBATCH --mail-user=dat.kieu@mail.utoronto.ca  # Your email address
 
