@@ -405,8 +405,9 @@ class DiagnosticsCVBrain(DiagnosticsBrain):
             )
 
             # Store stats to be returned by validate_epoch
-            self.last_valid_stats = stats
-            print(f"Brain {self.brain_id}: Validation stats - {stats}")
+            # Convert to plain floats for Ray serialization (avoids CUDA tensor pickling)
+            self.last_valid_stats = {k: float(v) for k, v in stats.items()}
+            print(f"Brain {self.brain_id}: Validation stats - {self.last_valid_stats}")
 
         # Handle test stage
         if stage == sb.Stage.TEST:
