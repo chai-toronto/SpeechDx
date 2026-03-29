@@ -167,6 +167,11 @@ if __name__ == "__main__":
     except KeyError:
         sys.exit("Error: 'data_io_script' path must be defined in the YAML file.")
 
+    # Warm cache early so Ray workers can open it read-only;
+    # must run before Ray spawns parallel trials
+    dataio_prep_fn = getattr(data_io_module, hparams["dataio_prep_fn"])
+    datasets = dataio_prep_fn(hparams)
+
     # Data preparation, to be run on only one process
     if not hparams["skip_prep"]:
         prepare_data_fn = getattr(data_io_module, hparams["prepare_data_fn"])
@@ -303,9 +308,6 @@ if __name__ == "__main__":
 
     # Seed for consistent final result
     sb.utils.seed.seed_everything(hparams["random_seed"])
-    # Create dataset objects
-    dataio_prep_fn = getattr(data_io_module, hparams["dataio_prep_fn"])
-    datasets = dataio_prep_fn(hparams)
 
     hparams_file = Path(hparams_file).resolve()
     with open(hparams_file) as fin:

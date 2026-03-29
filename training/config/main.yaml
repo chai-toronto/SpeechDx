@@ -38,9 +38,7 @@ noise_folder: !ref <data_folder>/noise/
 
 cache_encoder: true
 cache_dir: !ref <slurm_tmpdir>/<task>/<model_name>/
-# TODO: combine these two
 warm_cache: False
-cache_read_only: True
 
 # ----------------------------------
 # DYNAMIC SCRIPT CONFIGURATION (Generic)
