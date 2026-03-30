@@ -11,7 +11,7 @@ data_folder: ./data/
 slurm_tmpdir: ./tmp/
 #----------------------------------
 # Most of the knobs you should change
-data_params: !include:tasks/c9s_t1.yaml
+data_params: !include:tasks/ravdess.yaml
 
 encoder_params: !include:encoders/qwen3_voice.yaml
 
@@ -20,7 +20,7 @@ num_labels: !ref <data_params[num_labels]>
 
 dropout: 0.1
 
-probe_params: !include:probes/TProbe.yaml # Change encover params accordingly
+probe_params: !include:probes/LTProbe.yaml # Change encover params accordingly
   feature_dim: !ref <encoder_params[feature_dim]>
   num_labels: !ref <num_labels>
   num_layers: !ref <num_layers>
@@ -37,8 +37,10 @@ rir_folder: !ref <data_folder>/rir/
 noise_folder: !ref <data_folder>/noise/
 
 cache_encoder: true
-cache_dir: !ref <slurm_tmpdir>/<task>/<model_name>/
-warm_cache: False
+num_aug_ver: 3
+train_cache_dir: !ref <slurm_tmpdir>/<task>/<model_name>/train
+val_cache_dir: !ref <slurm_tmpdir>/<task>/<model_name>/val
+warm_cache: true
 
 # ----------------------------------
 # DYNAMIC SCRIPT CONFIGURATION (Generic)
