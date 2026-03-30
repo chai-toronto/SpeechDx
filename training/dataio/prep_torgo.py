@@ -23,7 +23,7 @@ from speechbrain.utils.data_pipeline import CachedDynamicItem
 import torch
 import pandas as pd
 
-from training.dataio.cache_dynamic_item import CachedHDF5DynamicItem, CachedPersistDynamicItem
+from training.dataio.cache_dynamic_item import CachedHDF5DynamicItem
 from training.dataio.stratified_group_k_fold import stratified_group_kfold_df
 from training.dataio.utils import ensure_dir, PathEncoder, locate_bad, proc_length_vec
 
@@ -241,9 +241,11 @@ def dataio_prep(hparams):
         train_cache_dir = hparams.get("train_cache_dir")
         val_cache_dir = hparams.get("val_cache_dir")
 
-        def make_cache_emb(cache_dir):
+        num_versions = hparams.get("num_aug_ver", 1)
+
+        def make_cache_emb(cache_dir, num_ver=1):
             if warm_cache:
-                @CachedHDF5DynamicItem.cache(cache_dir, file_mode)
+                @CachedHDF5DynamicItem.cache(cache_dir, file_mode, num_ver)
                 @sb.utils.data_pipeline.takes("id", "signal")
                 @sb.utils.data_pipeline.provides(*output_vars)
                 def cache_emb(id, raw_signal):
@@ -259,7 +261,7 @@ def dataio_prep(hparams):
                 return cache_emb
 
             # Relieve dependency of signal onto resolving other dynamic items
-            @CachedHDF5DynamicItem.cache(cache_dir, file_mode)
+            @CachedHDF5DynamicItem.cache(cache_dir, file_mode, num_ver)
             @sb.utils.data_pipeline.takes("id")
             @sb.utils.data_pipeline.provides(*output_vars)
             def read_cache(id):
@@ -267,7 +269,7 @@ def dataio_prep(hparams):
 
             return read_cache
 
-        train_cache_emb = make_cache_emb(train_cache_dir)
+        train_cache_emb = make_cache_emb(train_cache_dir, num_versions)
         val_cache_emb = make_cache_emb(val_cache_dir)
 
         train_dynamic_items.append(train_cache_emb)
@@ -316,7 +318,8 @@ def dataio_prep(hparams):
         )
 
     if hparams["cache_encoder"] and hparams.get("warm_cache", True):
-        warmup_ds = ['final_train'] # for all to be augmented
+        # for all to be augmented
+        warmup_ds = ['final_train'] * num_versions
 
         # For all not to be augmented
         for i in range(hparams['num_fold']):
@@ -330,7 +333,6 @@ def dataio_prep(hparams):
 
         train_cache_emb.change_file_mode('r')  # change to read mode
         val_cache_emb.change_file_mode('r')
-
 
 
     return datasets

@@ -22,7 +22,7 @@ from speechbrain.utils.data_pipeline import CachedDynamicItem
 import torch
 import pandas as pd
 
-from training.dataio.cache_dynamic_item import CachedHDF5DynamicItem, CachedPersistDynamicItem
+from training.dataio.cache_dynamic_item import CachedHDF5DynamicItem
 from training.dataio.stratified_group_k_fold import stratified_group_kfold_df
 from training.dataio.utils import ensure_dir, PathEncoder, locate_bad, proc_length_vec
 
@@ -177,7 +177,7 @@ def dataio_prep(hparams):
 
         warm_cache = hparams.get("warm_cache", False)
         file_mode = 'a' if warm_cache else 'r'
-        @CachedHDF5DynamicItem.cache(hparams["cache_dir"], file_mode)
+        @CachedHDF5TensorDynamicItem.cache(hparams["cache_dir"], file_mode)
         @sb.utils.data_pipeline.takes("id", "signal")
         @sb.utils.data_pipeline.provides(*output_vars)
         def cache_emb(id, raw_signal):
