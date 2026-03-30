@@ -67,6 +67,8 @@ def prepare_data(
     else:
         df_test = df[df['split'] == 2]
         df_nontest = df[df['split'] != 2]
+
+        # Official split
         df_train_og = df[df['split'] == 0]
         df_val_og = df[df['split'] == 1]
 
@@ -84,29 +86,33 @@ def prepare_data(
         train_dicts.append(train_df.set_index('uid').to_dict(orient='index'))
         valid_dicts.append(val_df.set_index('uid').to_dict(orient='index'))
 
-    test_val = df_test.set_index("uid").to_dict(orient='index')
-    test_train = df_nontest.set_index("uid").to_dict(orient='index')
-    test_data = {
-        "train": test_train,
-        "val": test_val
-    }
-
     train_dicts.append(df_train_og.set_index('uid').to_dict(orient='index'))
     valid_dicts.append(df_val_og.set_index('uid').to_dict(orient='index'))
+
+    final_test = df_test.set_index("uid").to_dict(orient='index')
+    final_train = df_nontest.set_index("uid").to_dict(orient='index')
+    test_data = {
+        "train": final_train,
+        "val": final_test
+    }
+
     print("Train og size:", len(df_train_og))
     print("Val og size:", len(df_val_og))
-    print("Test size:", len(test_val))
+    print("Test size:", len(final_test))
 
     import json
     ensure_dir(manifest_train_path)
     with open(manifest_train_path, 'w') as f:
         json.dump(train_dicts, f, indent=5, cls=PathEncoder)
+
     ensure_dir(manifest_val_path)
     with open(manifest_val_path, 'w') as f:
         json.dump(valid_dicts, f, indent=5, cls=PathEncoder)
+
     ensure_dir(manifest_test_path)
     with open(manifest_test_path, 'w') as f:
         json.dump(test_data, f, indent=4, cls=PathEncoder)
+
     print("Manifests created.")
     print("--- prepare_data finished ---")
 
@@ -223,6 +229,7 @@ def dataio_prep(hparams):
 
     if hparams["cache_encoder"]:
         speech_encoder = hparams["encoder"]
+
         # Do this to take advantage of auto padding
         num_layers = hparams["num_layers"]
         num_outputs = num_layers if speech_encoder.output_hidden_states else 1
@@ -231,26 +238,41 @@ def dataio_prep(hparams):
         warm_cache = hparams.get("warm_cache", False)
         file_mode = 'a' if warm_cache else 'r'
 
-        @CachedHDF5DynamicItem.cache(hparams["cache_dir"], file_mode)
-        @sb.utils.data_pipeline.takes("id", "signal")
-        @sb.utils.data_pipeline.provides(*output_vars)
-        def cache_emb(id, raw_signal):
-            # signal is 1D tensor
-            device = next(speech_encoder.parameters()).device
-            with torch.no_grad():
-                # move to encoder's device and add batch dimension
-                raw_signal = raw_signal.unsqueeze(0).to(device)
+        train_cache_dir = hparams.get("train_cache_dir")
+        val_cache_dir = hparams.get("val_cache_dir")
 
-                emb = speech_encoder(raw_signal)
+        def make_cache_emb(cache_dir):
+            if warm_cache:
+                @CachedHDF5DynamicItem.cache(cache_dir, file_mode)
+                @sb.utils.data_pipeline.takes("id", "signal")
+                @sb.utils.data_pipeline.provides(*output_vars)
+                def cache_emb(id, raw_signal):
+                    device = next(speech_encoder.parameters()).device
+                    with torch.no_grad():
+                        raw_signal = raw_signal.unsqueeze(0).to(device)
+                        emb = speech_encoder(raw_signal)
+                    if speech_encoder.output_hidden_states:
+                        emb = tuple(x.squeeze(0).cpu() for x in emb)
+                    else:
+                        emb = emb.squeeze(0).cpu()
+                    return emb
+                return cache_emb
 
-            if speech_encoder.output_hidden_states:
-                emb = tuple(x.squeeze(0).cpu() for x in emb)
-            else:
-                emb = emb.squeeze(0).cpu()
-            return emb
+            # Relieve dependency of signal onto resolving other dynamic items
+            @CachedHDF5DynamicItem.cache(cache_dir, file_mode)
+            @sb.utils.data_pipeline.takes("id")
+            @sb.utils.data_pipeline.provides(*output_vars)
+            def read_cache(id):
+                pass # never called, expect cache hit
 
-        train_dynamic_items.append(cache_emb)
-        val_dynamic_items.append(cache_emb)
+            return read_cache
+
+        train_cache_emb = make_cache_emb(train_cache_dir)
+        val_cache_emb = make_cache_emb(val_cache_dir)
+
+        train_dynamic_items.append(train_cache_emb)
+        val_dynamic_items.append(val_cache_emb)
+
         output_keys += output_vars
         output_keys.remove("signal")  # we don't need the raw signal after caching
 
@@ -258,7 +280,7 @@ def dataio_prep(hparams):
             @sb.utils.data_pipeline.takes(*output_vars)
             @sb.utils.data_pipeline.provides(*output_vars)
             def take_last_layer(emb):
-                return emb[-1] if emb.ndim == 3 else emb
+                return emb[-1] if emb.ndim >= 3 else emb
 
             train_dynamic_items.append(take_last_layer)
             val_dynamic_items.append(take_last_layer)
@@ -278,8 +300,8 @@ def dataio_prep(hparams):
         data_dict[f'train_{i}'] = train_folds[i]
         data_dict[f'val_{i}'] = val_folds[i]
 
-    data_dict['test_train'] = test_data['train']
-    data_dict['test_val'] = test_data['val']
+    data_dict['final_train'] = test_data['train']
+    data_dict['final_test'] = test_data['val']
 
     data_dict['train_og'] = train_folds[-1]
     data_dict['val_og'] = val_folds[-1]
@@ -294,11 +316,21 @@ def dataio_prep(hparams):
         )
 
     if hparams["cache_encoder"] and hparams.get("warm_cache", True):
-        warmup_ds = [datasets['test_train'], datasets['test_val']]
-        for i, ds in enumerate(warmup_ds):
-            print(f"Iterating dataset {i} to warm the cache.")
+        warmup_ds = ['final_train'] # for all to be augmented
+
+        # For all not to be augmented
+        for i in range(hparams['num_fold']):
+            warmup_ds.append(f"val_{i}")
+        warmup_ds.append(f"final_test")
+
+        for ds_name in warmup_ds:
+            print(f"Iterating dataset {ds_name} to warm the cache.")
+            ds = datasets[ds_name]
             ds.iterate_once()
-        cache_emb.change_file_mode('r')  # change to read mode
+
+        train_cache_emb.change_file_mode('r')  # change to read mode
+        val_cache_emb.change_file_mode('r')
+
 
 
     return datasets

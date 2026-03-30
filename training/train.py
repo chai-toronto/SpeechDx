@@ -335,8 +335,9 @@ if __name__ == "__main__":
             import traceback
             traceback.print_exc()
             sys.exit(1)
+
     brain.evaluate(
-        test_set=datasets["test_val"],
+        test_set=datasets["final_test"],
         test_loader_kwargs=hparams["test_dataloader_options"]
     )
 
