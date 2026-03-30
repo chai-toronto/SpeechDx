@@ -334,6 +334,14 @@ def dataio_prep(hparams):
         train_cache_emb.change_file_mode('r')  # change to read mode
         val_cache_emb.change_file_mode('r')
 
+        # Adapt read only cache Dynamic Items.
+        for dataset in data_dict:
+            datasets[dataset] = sb.dataio.dataset.DynamicItemDataset(
+                data=data_dict[dataset],
+                dynamic_items=train_dynamic_items if "train" in dataset else val_dynamic_items,
+                output_keys=output_keys,
+            )
+
 
     return datasets
 
