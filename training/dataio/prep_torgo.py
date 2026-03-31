@@ -137,23 +137,31 @@ def dataio_prep(hparams):
 
     noise_folder = hparams.get("noise_folder", None)
     noise_folder = os.path.abspath(noise_folder)
+
     if noise_folder is None:
         raise ValueError("Noise folder must be specified in hparams for this task.")
 
     noisifier = AddNoise(os.path.join(noise_folder, 'noises.csv'),
                          replacements={'noise_folder': os.path.join(noise_folder, 'audio')},
-                         snr_low=0,
-                         snr_high=15)
+                         snr_low= hparams["data_params"]["snr_low"],
+                         snr_high= hparams["data_params"]["snr_high"],
+                         noise_sample_rate=sample_rate,
+                         clean_sample_rate=sample_rate)
 
     rir_folder = hparams.get("rir_folder", None)
     if rir_folder is None:
         raise ValueError("RIR folder must be specified in hparams for this task.")
 
     reverb = AddReverb(os.path.join(rir_folder, 'rirs.csv'),
-                       replacements={'rir_folder': os.path.join(rir_folder, 'audio')},)
+                       replacements={'rir_folder': os.path.join(rir_folder, 'audio')},
+                       reverb_sample_rate=sample_rate,
+                       clean_sample_rate=sample_rate,
+                       )
+
 
     # 90% to 109% speed perturbation
-    perturbator = SpeedPerturb(orig_freq=sample_rate, speeds=list(range(90, 110, 1)))
+    perturbator = SpeedPerturb(orig_freq=sample_rate,
+                               speeds=hparams["data_params"]["speed"])
 
     # Define audio pipeline
     @sb.utils.data_pipeline.takes("path")

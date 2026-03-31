@@ -6,7 +6,7 @@ dataset: c9s_t1
 # DYNAMIC SCRIPT CONFIGURATION (Generic)
 # ----------------------------------
 # Path to the file containing the dataset-specific preparation and IO functions
-data_io_script: training.dataio.prep_c9s_t1
+data_io_script: training.dataio.prep_torgo
 
 # Name of the function to call for manifest generation
 prepare_data_fn: prepare_data
@@ -26,3 +26,12 @@ num_fold: 4 # works from 2 to num. subjects. To be implemented: 0 -> normal spli
 num_labels: 1
 
 loss: !new:torch.nn.BCEWithLogitsLoss
+
+# Augmentation
+snr_low: 0
+snr_high: 7
+speed: !new:builtins.list
+  - !new:builtins.range
+    - 95 #start
+    - 100 #stop
+    - 1 #step
