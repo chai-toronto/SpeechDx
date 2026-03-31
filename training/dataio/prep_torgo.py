@@ -130,10 +130,10 @@ def dataio_prep(hparams):
 
     # Initialization of the label encoder.
     label_encoder = sb.dataio.encoder.CategoricalEncoder()
-
-    max_length = hparams.get("max_length", 160000)  # default to 10 seconds at 16kHz
     sample_rate = hparams.get("sample_rate", 16000)
-    min_length = hparams.get("min_length", 1)  # default to 1 second at 16kHz
+
+    max_samples = hparams.get("max_length", 10) * sample_rate  # default to 10 seconds at 16kHz
+    min_samples = hparams.get("min_length", 3) * sample_rate  # default to torgo's avg lengths
 
     noise_folder = hparams.get("noise_folder", None)
     noise_folder = os.path.abspath(noise_folder)
@@ -207,13 +207,15 @@ def dataio_prep(hparams):
     @sb.utils.data_pipeline.takes("raw_signal", "duration")
     @sb.utils.data_pipeline.provides("signal", "duration")
     def process_signal(signal, duration):
-        if duration > max_length:  # randomly crop if too long
-            start = random.randint(0, duration - max_length)
-            signal = signal[start:start + max_length]
+        if duration > max_samples:  # randomly crop if too long
+            start = random.randint(0, duration - max_samples)
+            signal = signal[start:start + max_samples]
 
-        if duration < min_length:  # Concat to itself if too short
-            n_repeats = int(min_length / duration) + 1
-            signal = signal.repeat(n_repeats)[:min_length]
+        if duration < min_samples:  # Center pad with silence if too short
+            pad_total = min_samples - duration
+            pad_left = int(pad_total // 2)
+            pad_right = int(pad_total - pad_left)
+            signal = torch.nn.functional.pad(signal, (pad_left, pad_right), value=0.0)
         duration = len(signal)
         return signal, duration
 
@@ -249,6 +251,10 @@ def dataio_prep(hparams):
         train_cache_dir = hparams.get("train_cache_dir")
         val_cache_dir = hparams.get("val_cache_dir")
 
+        cache_mode = f"multi_L{num_layers}" if speech_encoder.output_hidden_states else "single"
+        train_cache_dir = os.path.join(train_cache_dir, cache_mode)
+        val_cache_dir = os.path.join(val_cache_dir, cache_mode)
+
         num_versions = hparams.get("num_aug_ver", 1)
 
         def make_cache_emb(cache_dir, num_ver=1):
@@ -273,6 +279,7 @@ def dataio_prep(hparams):
             @sb.utils.data_pipeline.takes("id")
             @sb.utils.data_pipeline.provides(*output_vars)
             def read_cache(id):
+                warnings.warn("Cache doesn't exist for one or more data points.")
                 pass # never called, expect cache hit
 
             return read_cache
@@ -286,14 +293,6 @@ def dataio_prep(hparams):
         output_keys += output_vars
         output_keys.remove("signal")  # we don't need the raw signal after caching
 
-        if len(output_vars) == 1:  # if not output_hidden_states, just return the single embedding
-            @sb.utils.data_pipeline.takes(*output_vars)
-            @sb.utils.data_pipeline.provides(*output_vars)
-            def take_last_layer(emb):
-                return emb[-1] if emb.ndim >= 3 else emb
-
-            train_dynamic_items.append(take_last_layer)
-            val_dynamic_items.append(take_last_layer)
 
     # Retrieve the data
     with open(hparams["train_annotation"], "r") as f:
