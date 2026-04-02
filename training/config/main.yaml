@@ -2,9 +2,9 @@ File: config/main.yaml
 random_seed: 2025
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
-model_name: qwen3omni-instructed
-probe_name: eyeProbe
-experiment_tag: test-only
+model_name: qwen3voice
+probe_name: LTProbe
+experiment_tag: test-frac-gpu
 
 data_folder: ./data/
 #slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
@@ -13,14 +13,14 @@ slurm_tmpdir: ./tmp/
 # Most of the knobs you should change
 data_params: !include:tasks/c9s_t1.yaml
 
-encoder_params: !include:encoders/qwen3omni.yaml
+encoder_params: !include:encoders/qwen3voice.yaml
 
 num_layers: !ref <encoder_params[num_layers]>
 num_labels: !ref <data_params[num_labels]>
 
 dropout: 0.1
 
-probe_params: !include:probes/EyeProbe.yaml # Change encover params accordingly
+probe_params: !include:probes/LTProbe.yaml # Change encover params accordingly
   feature_dim: !ref <encoder_params[feature_dim]>
   num_labels: !ref <num_labels>
   num_layers: !ref <num_layers>
@@ -36,7 +36,7 @@ dataset: !ref <data_params[dataset]>
 rir_folder: !ref <data_folder>/rir/
 noise_folder: !ref <data_folder>/noise/
 
-cache_encoder: false
+cache_encoder: true
 num_aug_ver: 3
 train_cache_dir: !ref <slurm_tmpdir>/<task>/<model_name>/train
 val_cache_dir: !ref <slurm_tmpdir>/<task>/<model_name>/val

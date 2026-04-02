@@ -16,8 +16,8 @@ ray_tune_config:
   num_samples: 5  # Number of trial runs
   resources_per_trial:
     cpu: 8   # CPUs per trial
-    gpu: 4    # 4 GPUs per trial (4 folds × 1 GPU each)
-
+    gpu: 1
+gpu_per_brain: 0.25 # if a trial has 1 gpu and 4 brains, each brain get 0.25 gpu
 
 # Define hyperparameter search space
 # This is optional - if not provided, defaults will be used
