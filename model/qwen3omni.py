@@ -33,7 +33,9 @@ class Qwen3Omni(nn.Module):
     @staticmethod
     def get_conversation(audio):
         """1D input"""
-        prompt = ("Detect any respiratory symptom in the following audio speech. Feel free to deliberate with yourself. "
+        prompt = ("Detect any respiratory symptom in the following audio speech. The symptoms can be one or many"
+                  " of these: dry cough, wet cough, fever, sore throat, shortness of breath, runny nose, headache,"
+                  " dizziness, and chest tightness. Feel free to deliberate with yourself. "
                   "Afterwards, begin your answer with \"FINAL ANSWER:\", followed by 1 if there is a symptom and 0 otherwise.")
         return [
                 {
