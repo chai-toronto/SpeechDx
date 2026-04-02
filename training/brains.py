@@ -58,34 +58,6 @@ class Brains:
         else:
             self._init_sequential_mode()
 
-    def _check_gpu_availability(self):
-        """Check if GPU training is possible and advisable."""
-        # Check if user explicitly disabled GPU
-        if not self.hparams.get("use_gpu", True):
-            print("GPU training disabled in configuration (use_gpu=False)")
-            return False
-
-        # Check CUDA availability
-        if not torch.cuda.is_available():
-            print("WARNING: CUDA not available. Falling back to CPU training.")
-            print("This will be significantly slower than GPU training.")
-            return False
-
-        # Check if enough GPUs available
-        available_gpus = torch.cuda.device_count()
-        if available_gpus < self.num_brains:
-            print(f"WARNING: Not enough GPUs for concurrent training!")
-            print(f"  Required: {self.num_brains} GPUs (num_fold={self.num_brains})")
-            print(f"  Available: {available_gpus} GPUs")
-            print(f"  Falling back to sequential CPU training.")
-            print(f"\nTo enable GPU training:")
-            print(f"  1. Reduce num_fold to {available_gpus} or less, OR")
-            print(f"  2. Add more GPUs to your system")
-            return False
-
-        print(f"✓ GPU training enabled with {self.num_brains} GPUs")
-        return True
-
     def _init_concurrent_gpu_mode(self):
         """Initialize brains as Ray remote actors for concurrent GPU training."""
         self.concurrent = True
@@ -94,7 +66,7 @@ class Brains:
         for i in range(self.num_brains):
             # Pass hparams_file and overrides instead of loaded hparams
             brain = DiagnosticsCVBrain.options(
-                num_gpus=1,
+                num_gpus=self.hparams['hpopt_params']['gpu_per_brain'],
                 num_cpus=self.hparams.get('num_workers', 4)
             ).remote(
                 brain_id=i,

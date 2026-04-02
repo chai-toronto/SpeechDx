@@ -239,22 +239,25 @@ if __name__ == "__main__":
 
         resources_per_trial = tune_config.get("resources_per_trial", {"cpu": 1, "gpu": 0})
         if not hparams.get('sequential', True):
-            num_workers = hparams.get("num_workers", 1)
-            num_folds = hparams.get("num_fold", 1)
+            num_workers = hparams.get("num_workers", 4)
+            num_folds = hparams.get("num_fold", 4)
+            gpu_per_brain = hparams['hpopt_params']['gpu_per_brain']
 
             resources_split = []
+
             for _ in range(num_folds):
                 resources_split.append({
                     "CPU": num_workers,
-                    "GPU": 1
+                    "GPU": gpu_per_brain
                 })
                 resources_per_trial["cpu"] -= num_workers
-                resources_per_trial["gpu"] -= 1
+                resources_per_trial["gpu"] -= gpu_per_brain
 
             resources_split.insert(0, {'CPU': resources_per_trial["cpu"]})
             resources_per_trial = tune.PlacementGroupFactory(resources_split)
 
         storage_path = (Path(hparams["output_folder"]) / "ray_results").resolve()
+
         if hparams["continue_exp"]:
             print(f"Continuing hyperparameter optimization from {storage_path}")
             resume="AUTO"
