@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 
@@ -6,17 +7,35 @@ from qwen_omni_utils import process_mm_info
 
 USE_AUDIO_IN_VIDEO = False
 
+def _resolve_local_path(source):
+    """Resolve HF repo ID to local snapshot path if cached."""
+    if os.path.isdir(source):
+        return source
+    try:
+        from huggingface_hub import try_to_load_from_cache, get_hf_file_metadata
+        cache_dir = os.environ.get("HF_HUB_CACHE", os.path.join(os.environ.get("HF_HOME", "~/.cache/huggingface"), "hub"))
+        model_dir = os.path.join(cache_dir, "models--" + source.replace("/", "--"))
+        snapshots = os.path.join(model_dir, "snapshots")
+        if os.path.isdir(snapshots):
+            revisions = sorted(os.listdir(snapshots), key=lambda r: os.path.getmtime(os.path.join(snapshots, r)), reverse=True)
+            if revisions:
+                return os.path.join(snapshots, revisions[0])
+    except Exception:
+        pass
+    return source
+
 class Qwen3Omni(nn.Module):
     def __init__(self, source, freeze_encoder=True, sample_rate=16000, output_hidden_states=False):
         super().__init__()
         assert not output_hidden_states, "Not implemented yet"
+        local_source = _resolve_local_path(source)
         self.model = Qwen3OmniMoeForConditionalGeneration.from_pretrained(
-                                                                source,
+                                                                local_source,
                                                                 dtype="auto",
                                                                 )
         self.model.disable_talker()
 
-        self.processor = Qwen3OmniMoeProcessor.from_pretrained(source)
+        self.processor = Qwen3OmniMoeProcessor.from_pretrained(local_source)
 
         if freeze_encoder:
             for param in self.model.parameters():
