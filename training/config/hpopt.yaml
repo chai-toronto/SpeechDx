@@ -1,6 +1,6 @@
 # HP Optimizer
 # Enable Ray Tune hyperparameter optimization
-hpopt_mode: null  # Set to 'ray' to enable, null to use EarlyStopping
+hpopt_mode: ray  # Set to 'ray' to enable, null to use EarlyStopping
 continue_exp: False  # Continue previous experiment if available (i.e., environment is the same)
 optim_metric: 'loss'
 optim_mode: 'min'  # 'min' or 'max' depending on the metric
