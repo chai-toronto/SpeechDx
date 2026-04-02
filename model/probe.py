@@ -116,3 +116,7 @@ class XTTSProbe(nn.Module):
         pooled_lat = self.pooler(gpt_cond_latent) # (B, D)
         both = torch.cat([pooled_lat, spk_emb], dim=-1) # (B, D + 512)
         return self.classifier(both)
+
+class EyeProbe(nn.Module):
+    def forward(self, x, lengths=None):
+        return x

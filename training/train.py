@@ -298,6 +298,10 @@ if __name__ == "__main__":
             ray_overrides[key] = value
         overrides = ray_overrides
 
+        hparams_file = Path(hparams_file).resolve()
+        with open(hparams_file) as fin:
+            hparams = load_hyperpyyaml(fin, overrides)
+
     hparams["output_folder"] = os.path.join(hparams["output_folder"], 'final_model')
 
     sb.create_experiment_directory(
@@ -309,9 +313,6 @@ if __name__ == "__main__":
     # Seed for consistent final result
     sb.utils.seed.seed_everything(hparams["random_seed"])
 
-    hparams_file = Path(hparams_file).resolve()
-    with open(hparams_file) as fin:
-        hparams = load_hyperpyyaml(fin, overrides)
 
     brain = DiagnosticsBrain(
         modules=hparams["modules"],
