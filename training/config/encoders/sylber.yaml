@@ -1,6 +1,6 @@
 sample_rate: 16000
 feature_dim: 768
-max_length: 1e10
+max_length: null
 num_layers: 9
 layer_dim: 1
 

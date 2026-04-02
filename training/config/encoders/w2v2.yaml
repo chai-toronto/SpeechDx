@@ -1,6 +1,6 @@
 sample_rate: 16000
 feature_dim: 1024
-max_length: 320000 # max length in samples (20s)
+max_length: 20 # max length in samples (20s)
 num_layers: 24
 layer_dim: 1
 

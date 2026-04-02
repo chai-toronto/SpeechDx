@@ -2,8 +2,8 @@ sample_rate: 22050
 feature_dim: 512 #512 for speaker embedding, 1024 for gpt_cond_latent
 num_layers: 1
 layer_dim: 1
-max_length: 1e10
-min_length: 66150   # 3s at 22050Hz — XTTS needs >=3s reference audio
+max_length: null
+min_length: 3   # 3s at 22050Hz — XTTS needs >=3s reference audio
 
 encoder: !new:model.xtts.XTTS
   model_name: "tts_models/multilingual/multi-dataset/xtts_v2"

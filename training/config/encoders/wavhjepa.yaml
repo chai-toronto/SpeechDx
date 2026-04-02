@@ -1,6 +1,6 @@
 sample_rate: 16000
 feature_dim: 768
-max_length: 160000  # 10 seconds * 16000 Hz = 160000 samples
+max_length: 10  # 10 seconds * 16000 Hz = 160000 samples
 num_layers: 12
 layer_dim: 1
 

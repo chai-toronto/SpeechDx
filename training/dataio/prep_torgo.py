@@ -132,7 +132,7 @@ def dataio_prep(hparams):
     label_encoder = sb.dataio.encoder.CategoricalEncoder()
     sample_rate = hparams.get("sample_rate", 16000)
 
-    max_samples = hparams.get("max_length", 10) * sample_rate  # default to 10 seconds at 16kHz
+    max_samples = hparams.get("max_length", 10e5) * sample_rate  # default to longest
     min_samples = hparams.get("min_length", 3) * sample_rate  # default to torgo's avg lengths
 
     noise_folder = hparams.get("noise_folder", None)

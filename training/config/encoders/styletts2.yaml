@@ -2,8 +2,8 @@ sample_rate: 24000
 feature_dim: 128
 num_layers: 1
 layer_dim: 1
-max_length: 1e10
-min_length: 24000   # 1s at 24kHz
+max_length: null
+min_length: 1   # 1s at 24kHz
 
 encoder: !new:model.styletts2.StyleTTS2
   freeze_encoder: True
