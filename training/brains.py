@@ -63,9 +63,13 @@ class Brains:
         self.concurrent = True
         self.brains = []
 
+        # Create remote class dynamically to avoid serialization issues
+        # with SpeechBrain's GenericModule at import time
+        RemoteBrain = ray.remote(DiagnosticsCVBrain)
+
         for i in range(self.num_brains):
             # Pass hparams_file and overrides instead of loaded hparams
-            brain = DiagnosticsCVBrain.options(
+            brain = RemoteBrain.options(
                 num_gpus=self.hparams['hpopt_params']['gpu_per_brain'],
                 num_cpus=self.hparams.get('num_workers', 4)
             ).remote(
@@ -253,7 +257,6 @@ class Brains:
         print(f"{'='*60}\n")
 
 
-@ray.remote
 class DiagnosticsCVBrain(DiagnosticsBrain):
     """
     Remote Ray actor version of DiagnosticsBrain for concurrent GPU training.

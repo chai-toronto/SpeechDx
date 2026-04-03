@@ -239,6 +239,8 @@ def dataio_prep(hparams):
 
     if hparams["cache_encoder"]:
         speech_encoder = hparams["encoder"]
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        speech_encoder = speech_encoder.to(device)
 
         # Do this to take advantage of auto padding
         num_layers = hparams["num_layers"]

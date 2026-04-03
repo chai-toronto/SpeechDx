@@ -74,6 +74,9 @@ def train_with_ray(config, hparams_file, run_opts, overrides):
     except KeyError:
         sys.exit("Error: 'data_io_script' path must be defined in the YAML file.")
 
+    # Cache was already warmed by the main process; open read-only here
+    hparams["warm_cache"] = False
+
     # Create dataset objects
     dataio_prep_fn = getattr(data_io_module, hparams["dataio_prep_fn"])
     datasets = dataio_prep_fn(hparams)

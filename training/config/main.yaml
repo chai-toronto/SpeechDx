@@ -13,7 +13,7 @@ slurm_tmpdir: ./tmp/
 # Most of the knobs you should change
 data_params: !include:tasks/c9s_t1.yaml
 
-encoder_params: !include:encoders/qwen3voice.yaml
+encoder_params: !include:encoders/qwen3_voice.yaml
 
 num_layers: !ref <encoder_params[num_layers]>
 num_labels: !ref <data_params[num_labels]>
