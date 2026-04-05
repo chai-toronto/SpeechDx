@@ -257,7 +257,7 @@ def dataio_prep(hparams):
         train_cache_dir = os.path.join(train_cache_dir, cache_mode)
         val_cache_dir = os.path.join(val_cache_dir, cache_mode)
 
-        num_versions = hparams.get("num_aug_ver", 1)
+        num_versions = hparams["data_params"].get("num_aug_ver", 1)
 
         def make_cache_emb(cache_dir, num_ver=1):
             if warm_cache:
@@ -328,12 +328,10 @@ def dataio_prep(hparams):
 
     if hparams["cache_encoder"] and hparams.get("warm_cache", True):
         # for all to be augmented
-        warmup_ds = ['final_train'] * num_versions
+        warmup_ds = ['train_og'] * num_versions
 
         # For all not to be augmented
-        for i in range(hparams['num_fold']):
-            warmup_ds.append(f"val_{i}")
-        warmup_ds.append(f"final_test")
+        warmup_ds += ['val_og', 'final_test']
 
         for ds_name in warmup_ds:
             print(f"Iterating dataset {ds_name} to warm the cache.")

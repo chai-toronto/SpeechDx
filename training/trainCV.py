@@ -24,7 +24,6 @@ import os
 from functools import partial
 from pathlib import Path
 
-import yaml
 from ray.tune.schedulers import ASHAScheduler
 from ray.tune.search.optuna import OptunaSearch
 from ray.tune.search.searcher import ConcurrencyLimiter
@@ -40,7 +39,7 @@ from hyperpyyaml import load_hyperpyyaml
 from training.brain import DiagnosticsBrain
 from training.brains import Brains, DiagnosticsCVBrain
 
-def train_with_ray(config, hparams_file, run_opts, overrides, project_root):
+def train_with_ray(config, hparams_file, run_opts, overrides):
     """Ray Tune trainable function that wraps the SpeechBrain training loop.
 
     Args:
@@ -48,7 +47,6 @@ def train_with_ray(config, hparams_file, run_opts, overrides, project_root):
         hparams_file: Path to the yaml hyperparameter file
         run_opts: SpeechBrain run options
         overrides: Command line overrides (dict or string)
-        project_root: Absolute path to the project root directory
     """
     # Update overrides with Ray Tune config
     ray_overrides = overrides.copy() if overrides else {}
@@ -60,16 +58,9 @@ def train_with_ray(config, hparams_file, run_opts, overrides, project_root):
     with open(hparams_file) as fin:
         hparams = load_hyperpyyaml(fin, ray_overrides)
 
-    # Resolve relative paths against project root for Ray workers
-    root = Path(project_root)
-    for key, val in hparams.items():
-        if isinstance(val, str) and not Path(val).is_absolute() and (key.endswith("_dir") or key.endswith("_folder") or key.endswith("_path") or key.endswith("_annotation")):
-            hparams[key] = str(root / val)
-
     # Create experiment directory with trial-specific folder
     trial_id = tune.get_context().get_trial_id() or "default"
     hparams["output_folder"] = os.path.join(hparams["output_folder"], trial_id)
-    hparams["save_folder"] = os.path.join(hparams["save_folder"], trial_id)
 
     sb.create_experiment_directory(
         experiment_directory=hparams["output_folder"],
@@ -83,34 +74,33 @@ def train_with_ray(config, hparams_file, run_opts, overrides, project_root):
     except KeyError:
         sys.exit("Error: 'data_io_script' path must be defined in the YAML file.")
 
-    # Cache should already be warmed by the main process; open read-only here
+    # Cache was already warmed by the main process; open read-only here
     hparams["warm_cache"] = False
 
     # Create dataset objects
     dataio_prep_fn = getattr(data_io_module, hparams["dataio_prep_fn"])
     datasets = dataio_prep_fn(hparams)
 
-    # Rebuild checkpointer with trial-specific save_folder
-    checkpointer = sb.utils.checkpoints.Checkpointer(
-        checkpoints_dir=hparams["save_folder"],
-        recoverables=hparams["checkpointer"].recoverables,
+    # ============== KEY CHANGE: New Brains API ==============
+    # Initialize the Brains object by passing hparams_file and overrides
+    # instead of the loaded hparams (which contains unpickleable modules)
+    brains = Brains(
+        hparams_file=hparams_file,      # Pass file path
+        overrides=ray_overrides,         # Pass overrides dict
+        run_opts=run_opts,               # Pass run_opts
     )
+    # Each Ray actor will independently load hparams from the file
+    # ========================================================
 
-    brain = DiagnosticsBrain(
-        ray_optim=True,
-        modules=hparams["modules"],
-        opt_class=hparams["opt_class"],
-        hparams=hparams,
-        run_opts=run_opts,
-        checkpointer=checkpointer,
-    )
+    train_sets = [datasets[f"train_{i}"] for i in range(hparams["num_fold"])]
+    valid_sets = [datasets[f"val_{i}"] for i in range(hparams["num_fold"])]
 
-    brain.fit(
-        epoch_counter=hparams["epoch_counter"],
-        train_set=datasets["train_og"],
-        valid_set=datasets["val_og"],
+    brains.fit(
+        train_sets=train_sets,
+        valid_sets=valid_sets,
         train_loader_kwargs=hparams["train_dataloader_options"],
         valid_loader_kwargs=hparams["val_dataloader_options"],
+        progressbar=hparams["progressbar"]
     )
 
 
@@ -180,7 +170,7 @@ if __name__ == "__main__":
     except KeyError:
         sys.exit("Error: 'data_io_script' path must be defined in the YAML file.")
 
-    # Warm cache (if True) early so Ray workers can open it read-only;
+    # Warm cache early so Ray workers can open it read-only;
     # must run before Ray spawns parallel trials
     dataio_prep_fn = getattr(data_io_module, hparams["dataio_prep_fn"])
     datasets = dataio_prep_fn(hparams)
@@ -205,24 +195,13 @@ if __name__ == "__main__":
             },
         )
 
-    _project_root = str(Path.cwd().resolve())
-
     optim_metric = hparams.get("optim_metric", "F1")
     optim_mode = hparams.get("optim_mode", "max")
     best_config = None
     # Check if hyperparameter optimization is enabled
     if hparams.get("hpopt_mode") == "ray":
         # Initialize Ray
-        ray.init(
-            ignore_reinit_error=True,
-            runtime_env={
-                "excludes": [
-                    "data/", "exps/", "tmp/", ".idea/",
-                    "*.DS_Store", "uv.lock", "pyproject.toml",
-                    ".python-version",
-                ],
-            },
-        )
+        ray.init(ignore_reinit_error=True)
 
         # Parse search space
         search_space = parse_hp_search_space(hparams)
@@ -232,7 +211,6 @@ if __name__ == "__main__":
             hparams_file=hparams_file,
             run_opts=run_opts,
             overrides=overrides,
-            project_root=_project_root,
         )
 
         # Configure Ray Tune
@@ -240,7 +218,7 @@ if __name__ == "__main__":
 
         # Set up reporter
         reporter = CLIReporter(
-            metric_columns=["F1", "loss", "precision", "recall", "AUROC", "accuracy"],
+            metric_columns=["F1", "loss", "precision", "recall", "roc", "sens", "accuracy"],
             max_report_frequency=30,
         )
 
@@ -254,16 +232,34 @@ if __name__ == "__main__":
             max_concurrent=hparams.get("max_concurrent_trials", 4)
         )
 
-        stopper = tune.stopper.TrialPlateauStopper(
+        scheduler = ASHAScheduler(
             metric=optim_metric,
             mode=optim_mode,
-            grace_period=hparams['hpopt_params']['limit_warmup'],
-            num_results=hparams['grace_period'] # correct order, semantics from SB
+            grace_period=hparams.get("grace_period", 10),
+            reduction_factor=hparams.get("reduction_factor", 2),
         )
 
-        resources_per_trial = tune_config.get("resources_per_trial", {"cpu": 1, "gpu": 0})
 
-        storage_path = (Path(hparams["output_folder"]) / "results").resolve()
+        resources_per_trial = tune_config.get("resources_per_trial", {"cpu": 1, "gpu": 0})
+        if not hparams.get('sequential', True):
+            num_workers = hparams.get("num_workers", 4)
+            num_folds = hparams.get("num_fold", 4)
+            gpu_per_brain = hparams['hpopt_params']['gpu_per_brain']
+
+            resources_split = []
+
+            for _ in range(num_folds):
+                resources_split.append({
+                    "CPU": num_workers,
+                    "GPU": gpu_per_brain
+                })
+                resources_per_trial["cpu"] -= num_workers
+                resources_per_trial["gpu"] -= gpu_per_brain
+
+            resources_split.insert(0, {'CPU': resources_per_trial["cpu"]})
+            resources_per_trial = tune.PlacementGroupFactory(resources_split)
+
+        storage_path = (Path(hparams["output_folder"]) / "ray_results").resolve()
 
         if hparams["continue_exp"]:
             print(f"Continuing hyperparameter optimization from {storage_path}")
@@ -279,53 +275,73 @@ if __name__ == "__main__":
             config=search_space,
             num_samples=tune_config.get("num_samples", 10),
             resume=resume,
-            stop=stopper,
             progress_reporter=reporter,
             storage_path=storage_path.as_posix(),
             name="hp_optimization",
             search_alg=search_alg,
+            scheduler=scheduler,
             resources_per_trial=resources_per_trial,
         )
-
-        trial_id = analysis.get_best_trial(metric=optim_metric, mode=optim_mode, scope="all").trial_id
 
         # Print best hyperparameters
         best_config = analysis.get_best_config(metric=optim_metric, mode=optim_mode, scope="all")
         print(f"\nBest hyperparameters found: {best_config}")
-        best_config["trial_id"] = trial_id
 
         # Save best config
-        best_config_path = os.path.join(hparams["output_folder"], "best_hparams.yaml")
+        best_config_path = os.path.join(hparams["output_folder"], "best_hparams.txt")
         with open(best_config_path, "w") as f:
-            yaml.dump(best_config, f)
+            for key, value in best_config.items():
+                f.write(f"{key}: {value}\n")
 
         ray.shutdown()
+        # Final Training with best HP
 
-    if best_config is None:
-        # Try to load best config
-        print("Loading best configs")
-        best_config_path = os.path.join(hparams["output_folder"], "best_hparams.yaml")
-        assert os.path.exists(best_config_path), "Cant find best config"
+    # Train final model
+    if best_config is not None:
+        # Update overrides with best config
+        ray_overrides = overrides.copy() if overrides else {}
+        for key, value in best_config.items():
+            ray_overrides[key] = value
+        overrides = ray_overrides
 
-        with open(best_config_path, "r") as f:
-            best_config = yaml.safe_load(f)
+        hparams_file = Path(hparams_file).resolve()
+        with open(hparams_file) as fin:
+            hparams = load_hyperpyyaml(fin, overrides)
 
-    hparams["output_folder"] = os.path.join(hparams["output_folder"], best_config['trial_id'])
-    hparams["save_folder"] = os.path.join(hparams["save_folder"], best_config['trial_id'])
+    hparams["output_folder"] = os.path.join(hparams["output_folder"], 'final_model')
 
-    # Rebuild checkpointer with trial-specific save_folder
-    checkpointer = sb.utils.checkpoints.Checkpointer(
-        checkpoints_dir=hparams["save_folder"],
-        recoverables=hparams["checkpointer"].recoverables,
+    sb.create_experiment_directory(
+        experiment_directory=hparams["output_folder"],
+        hyperparams_to_save=hparams_file,
+        overrides=overrides,
     )
+
+    # Seed for consistent final result
+    sb.utils.seed.seed_everything(hparams["random_seed"])
+
 
     brain = DiagnosticsBrain(
         modules=hparams["modules"],
         opt_class=hparams["opt_class"],
         hparams=hparams,
         run_opts=run_opts,
-        checkpointer=checkpointer,
+        checkpointer=hparams["checkpointer"]
     )
+
+    if not hparams.get("test_only", False):
+        # Not the usual CV case anymore as train and val are merged
+        try:
+            brain.fit(
+                epoch_counter=hparams["epoch_counter"],
+                train_set=datasets["train_og"],
+                valid_set=datasets["val_og"],
+                train_loader_kwargs=hparams["train_dataloader_options"],
+                valid_loader_kwargs=hparams["val_dataloader_options"],
+            )
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
 
     brain.evaluate(
         test_set=datasets["final_test"],

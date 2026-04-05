@@ -4,14 +4,14 @@ __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
 model_name: qwen3voice
 probe_name: LTProbe
-experiment_tag: test-frac-gpu
+experiment_tag: classic_train
 
 data_folder: ./data/
 #slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
 slurm_tmpdir: ./tmp/
 #----------------------------------
 # Most of the knobs you should change
-data_params: !include:tasks/c9s_t1.yaml
+data_params: !include:tasks/ravdess.yaml
 
 encoder_params: !include:encoders/qwen3_voice.yaml
 
@@ -37,10 +37,9 @@ rir_folder: !ref <data_folder>/rir/
 noise_folder: !ref <data_folder>/noise/
 
 cache_encoder: true
-num_aug_ver: 3
 train_cache_dir: !ref <slurm_tmpdir>/<task>/<model_name>/train
 val_cache_dir: !ref <slurm_tmpdir>/<task>/<model_name>/val
-warm_cache: true
+warm_cache: false
 
 # ----------------------------------
 # DYNAMIC SCRIPT CONFIGURATION (Generic)
@@ -150,6 +149,7 @@ epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounterWithStopper
   limit_to_stop: !ref <hpopt_params[grace_period]>
   limit_warmup: !ref <hpopt_params[limit_warmup]>
   direction: !ref <hpopt_params[optim_mode]>
+
 # Optimizer
 opt_class: !name:torch.optim.AdamW
   lr: !ref <lr_s>
@@ -165,8 +165,7 @@ optim_metric: !ref <hpopt_params[optim_metric]>
 optim_mode: !ref <hpopt_params[optim_mode]>
 max_concurrent_trials: !ref <hpopt_params[max_concurrent_trials]>
 grace_period: !ref <hpopt_params[grace_period]>
-reduction_factor: !ref <hpopt_params[reduction_factor]>
-sequential: !ref <hpopt_params[sequential]>
+limit_warmup: !ref <hpopt_params[limit_warmup]>
 
 # Ray Tune specific configuration
 ray_tune_config: !ref <hpopt_params[ray_tune_config]>

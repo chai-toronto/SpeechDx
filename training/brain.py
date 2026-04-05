@@ -2,6 +2,8 @@ from pathlib import Path
 
 import torch
 import speechbrain as sb
+from ray import tune
+from speechbrain.utils.epoch_loop import EpochCounter
 from torchmetrics import MetricCollection
 from torchmetrics.classification import Precision, Recall, F1Score, AUROC, Accuracy
 
@@ -14,7 +16,7 @@ def unwrap_ddp(module):
 class DiagnosticsBrain(sb.Brain):
     """Class that manages the training loop for a generic diagnostics task."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, ray_optim=False, **kwargs):
         super().__init__(**kwargs)
         self.cache = None
         self.checkpointer.recover_if_possible()
@@ -43,7 +45,13 @@ class DiagnosticsBrain(sb.Brain):
         self.model = unwrap_ddp(self.modules.model)
         self.hparams.loss = self.hparams.loss.to(self.device)
 
-        print(self.model)
+        self.ray_optim = ray_optim
+        if self.ray_optim:
+            # Disable internal early stopping — Ray Tune handles trial stopping
+            self.hparams.epoch_counter = EpochCounter(
+                limit=self.hparams.number_of_epochs
+            )
+
 
     def compute_forward(self, batch, stage):
         """Runs all the computation that transforms the input into the
@@ -132,9 +140,6 @@ class DiagnosticsBrain(sb.Brain):
             else:
                 min_keys.append(optim_metric)
 
-            # For Early Stopping
-            epoch_counter = self.hparams.epoch_counter
-            epoch_counter.update_metric(eval_stats[optim_metric])
 
             old_lr, new_lr = self.hparams.lr_annealing(epoch)
             sb.nnet.schedulers.update_learning_rate(
@@ -150,6 +155,14 @@ class DiagnosticsBrain(sb.Brain):
             # Save the current checkpoint and delete previous checkpoints, based on F1
             self.checkpointer.save_and_keep_only(meta=eval_stats, max_keys=max_keys, min_keys=min_keys)
 
+            if self.ray_optim:
+                eval_stats = detensor_dict(eval_stats)
+                tune.report(eval_stats)
+            else:
+                # For Early Stopping
+                epoch_counter = self.hparams.epoch_counter
+                epoch_counter.update_metric(eval_stats[optim_metric])
+
         if stage == sb.Stage.TEST:
             self.hparams.train_logger.log_stats(
                 {"Epoch loaded": self.hparams.epoch_counter.current},
@@ -159,3 +172,10 @@ class DiagnosticsBrain(sb.Brain):
             for score in eval_stats.values():
                 if isinstance(score, torch.Tensor):
                     print(score.item())
+
+def detensor_dict(d: dict):
+    new_d = {}
+    for k, v in d.items():
+        v = v.item() if isinstance(v, torch.Tensor) else v
+        new_d[k] = v
+    return new_d
