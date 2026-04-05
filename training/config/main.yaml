@@ -11,7 +11,7 @@ data_folder: ./data/
 slurm_tmpdir: ./tmp/
 #----------------------------------
 # Most of the knobs you should change
-data_params: !include:tasks/mvdr.yaml
+data_params: !include:tasks/ravdess.yaml
 
 encoder_params: !include:encoders/qwen3_voice.yaml
 
@@ -39,7 +39,7 @@ noise_folder: !ref <data_folder>/noise/
 cache_encoder: true
 train_cache_dir: !ref <slurm_tmpdir>/<task>/<model_name>/train
 val_cache_dir: !ref <slurm_tmpdir>/<task>/<model_name>/val
-warm_cache: true
+warm_cache: false
 
 # ----------------------------------
 # DYNAMIC SCRIPT CONFIGURATION (Generic)
@@ -160,7 +160,7 @@ loss: !ref <data_params[loss]>
 # HP Optimizer
 # Enable Ray Tune hyperparameter optimization
 continue_exp: !ref <hpopt_params[continue_exp]>
-hpopt_mode: !ref <hpopt_params[hpopt_mode]>
+
 optim_metric: !ref <hpopt_params[optim_metric]>
 optim_mode: !ref <hpopt_params[optim_mode]>
 max_concurrent_trials: !ref <hpopt_params[max_concurrent_trials]>

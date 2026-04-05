@@ -137,10 +137,6 @@ if __name__ == "__main__":
     except KeyError:
         sys.exit("Error: 'data_io_script' path must be defined in the YAML file.")
 
-    # Warm cache (if True) early so Ray workers can open it read-only;
-    # must run before Ray spawns parallel trials
-    dataio_prep_fn = getattr(data_io_module, hparams["dataio_prep_fn"])
-    datasets = dataio_prep_fn(hparams)
 
     # Data preparation, to be run on only one process
     if not hparams["skip_prep"]:
@@ -162,13 +158,19 @@ if __name__ == "__main__":
             },
         )
 
+    # Warm cache (if True) early so Ray workers can open it read-only;
+    # must run before Ray spawns parallel trials
+    dataio_prep_fn = getattr(data_io_module, hparams["dataio_prep_fn"])
+    datasets = dataio_prep_fn(hparams)
+
+
     _project_root = str(Path.cwd().resolve())
 
     optim_metric = hparams.get("optim_metric", "F1")
     optim_mode = hparams.get("optim_mode", "max")
     best_config = None
     # Check if hyperparameter optimization is enabled
-    if hparams.get("test_only"):
+    if not hparams.get("test_only"):
         # Initialize Ray
         ray.init(
             ignore_reinit_error=True,

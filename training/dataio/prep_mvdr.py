@@ -274,20 +274,25 @@ def dataio_prep(hparams):
 
             return read_cache
 
+        train_cache_emb = make_cache_emb(train_cache_dir, False, num_versions)
+        val_cache_emb = make_cache_emb(val_cache_dir, False)
+
+        train_dynamic_items.append(train_cache_emb)
+        val_dynamic_items.append(val_cache_emb)
+
+        output_keys += output_vars
+        output_keys.remove("signal")  # we don't need the raw signal after caching
 
         if warm_cache:
-            train_cache_emb = make_cache_emb(train_cache_dir, warm_cache, num_versions)
-            val_cache_emb = make_cache_emb(val_cache_dir, warm_cache)
-
             dataset_all_aug = sb.dataio.dataset.DynamicItemDataset(
                 data=train_folds[-1],
-                dynamic_items=train_dynamic_items + [train_cache_emb],
+                dynamic_items=train_dynamic_items,
                 output_keys=output_keys,
             )
 
             dataset_all_no_aug = sb.dataio.dataset.DynamicItemDataset(
                 data=train_folds[-1],
-                dynamic_items=val_dynamic_items + [val_cache_emb],
+                dynamic_items=val_dynamic_items,
                 output_keys=output_keys,
             )
 
@@ -300,15 +305,6 @@ def dataio_prep(hparams):
 
             train_cache_emb.change_file_mode('r')  # change to read mode
             val_cache_emb.change_file_mode('r')
-
-        train_cache_emb = make_cache_emb(train_cache_dir, False, num_versions)
-        val_cache_emb = make_cache_emb(val_cache_dir, False)
-
-        train_dynamic_items.append(train_cache_emb)
-        val_dynamic_items.append(val_cache_emb)
-
-        output_keys += output_vars
-        output_keys.remove("signal")  # we don't need the raw signal after caching
 
 
     # Define datasets.
