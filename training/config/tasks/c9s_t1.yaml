@@ -28,6 +28,8 @@ num_labels: 1
 loss: !new:torch.nn.BCEWithLogitsLoss
 
 # Augmentation
+# For all data that can be trained, during training with cached repr, will sample from versions
+num_aug_ver: 3
 snr_low: 0
 snr_high: 7
 speed: !new:builtins.list
