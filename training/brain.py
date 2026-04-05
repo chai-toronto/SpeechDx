@@ -33,11 +33,11 @@ class DiagnosticsBrain(sb.Brain):
             self.binary = False
 
         self.error_metrics = MetricCollection({
-            f"F1{ext}": F1Score(task=task, num_classes=num_classes, average=average),
-            f"precision{ext}": Precision(task=task, num_classes=num_classes, average=average),
-            f"recall{ext}": Recall(task=task, num_classes=num_classes, average=average),
-            f"accuracy{ext}": Accuracy(task=task, num_classes=num_classes, average=average),
-            f"AUROC{ext}": AUROC(task=task, num_classes=num_classes, average=average),
+            f"F1": F1Score(task=task, num_classes=num_classes, average=average),
+            f"precision": Precision(task=task, num_classes=num_classes, average=average),
+            f"recall": Recall(task=task, num_classes=num_classes, average=average),
+            f"accuracy": Accuracy(task=task, num_classes=num_classes, average=average),
+            f"AUROC": AUROC(task=task, num_classes=num_classes, average=average),
         }).to(self.device)
 
         self.model = unwrap_ddp(self.modules.model)
