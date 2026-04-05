@@ -39,6 +39,7 @@ import speechbrain as sb
 from hyperpyyaml import load_hyperpyyaml
 from training.brain import DiagnosticsBrain
 from training.brains import Brains, DiagnosticsCVBrain
+from training.hp_utils import parse_hp_search_space
 
 def train_with_ray(config, hparams_file, run_opts, overrides, project_root):
     """Ray Tune trainable function that wraps the SpeechBrain training loop.
@@ -63,7 +64,10 @@ def train_with_ray(config, hparams_file, run_opts, overrides, project_root):
     # Resolve relative paths against project root for Ray workers
     root = Path(project_root)
     for key, val in hparams.items():
-        if isinstance(val, str) and not Path(val).is_absolute() and (key.endswith("_dir") or key.endswith("_folder") or key.endswith("_path") or key.endswith("_annotation")):
+        if isinstance(val, str) and not Path(val).is_absolute() and (
+                key.endswith("_dir") or key.endswith("_folder")
+                or key.endswith("_path") or key.endswith("_annotation")
+        ):
             hparams[key] = str(root / val)
 
     # Create experiment directory with trial-specific folder
@@ -107,58 +111,11 @@ def train_with_ray(config, hparams_file, run_opts, overrides, project_root):
 
     brain.fit(
         epoch_counter=hparams["epoch_counter"],
-        train_set=datasets["train_og"],
-        valid_set=datasets["val_og"],
+        train_set=datasets["train"],
+        valid_set=datasets["val"],
         train_loader_kwargs=hparams["train_dataloader_options"],
         valid_loader_kwargs=hparams["val_dataloader_options"],
     )
-
-
-def parse_hp_search_space(hparams):
-    """Parse hyperparameter search space from hparams dict.
-
-    Looks for parameters with special Ray Tune sampling functions in the yaml.
-    Example yaml format:
-        lr_start: !tune.loguniform [0.0001, 0.01]
-        batch_size: !tune.choice [8, 16, 32]
-        dp: !tune.uniform [0.1, 0.5]
-
-    Args:
-        hparams: Hyperparameter dict from yaml
-
-    Returns:
-        Dict containing Ray Tune search space
-    """
-    search_space = {}
-
-    # Map common parameter patterns to Ray Tune functions
-    tune_mapping = {
-        "!tune.choice": tune.choice,
-        "!tune.uniform": tune.uniform,
-        "!tune.loguniform": tune.loguniform,
-        "!tune.randint": tune.randint,
-        "!tune.quniform": tune.quniform,
-    }
-
-    # Simple search space extraction - can be extended
-    # For now, define common hyperparameters to tune
-    if hparams.get("hpopt_config"):
-        for param, config in hparams["hpopt_config"].items():
-            if isinstance(config, dict) and "type" in config:
-                tune_fn = tune_mapping.get(config["type"])
-                if tune_fn == tune.choice:
-                    search_space[param] = tune_fn(config["values"])
-                else:
-                    search_space[param] = tune_fn(*config["values"])
-    else:
-        # Default search space if not specified
-        search_space = {
-            "lr_start": tune.loguniform(1e-5, 1e-2),
-            "dp": tune.uniform(0.1, 0.5),
-            "num_fc_neurons": tune.choice([512, 768, 1024]),
-        }
-
-    return search_space
 
 
 # Recipe begins!
@@ -211,7 +168,7 @@ if __name__ == "__main__":
     optim_mode = hparams.get("optim_mode", "max")
     best_config = None
     # Check if hyperparameter optimization is enabled
-    if hparams.get("hpopt_mode") == "ray":
+    if hparams.get("test_only"):
         # Initialize Ray
         ray.init(
             ignore_reinit_error=True,
@@ -328,7 +285,7 @@ if __name__ == "__main__":
     )
 
     brain.evaluate(
-        test_set=datasets["final_test"],
+        test_set=datasets["test"],
         test_loader_kwargs=hparams["test_dataloader_options"]
     )
 

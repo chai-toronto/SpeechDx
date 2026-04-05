@@ -11,7 +11,7 @@ data_folder: ./data/
 slurm_tmpdir: ./tmp/
 #----------------------------------
 # Most of the knobs you should change
-data_params: !include:tasks/ravdess.yaml
+data_params: !include:tasks/mvdr.yaml
 
 encoder_params: !include:encoders/qwen3_voice.yaml
 
@@ -39,7 +39,7 @@ noise_folder: !ref <data_folder>/noise/
 cache_encoder: true
 train_cache_dir: !ref <slurm_tmpdir>/<task>/<model_name>/train
 val_cache_dir: !ref <slurm_tmpdir>/<task>/<model_name>/val
-warm_cache: false
+warm_cache: true
 
 # ----------------------------------
 # DYNAMIC SCRIPT CONFIGURATION (Generic)

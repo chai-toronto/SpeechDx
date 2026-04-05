@@ -6,7 +6,7 @@ dataset: mvdr
 # DYNAMIC SCRIPT CONFIGURATION (Generic)
 # ----------------------------------
 # Path to the file containing the dataset-specific preparation and IO functions
-data_io_script: training.dataio.prep_torgo
+data_io_script: training.dataio.prep_mvdr
 
 # Name of the function to call for manifest generation
 prepare_data_fn: prepare_data

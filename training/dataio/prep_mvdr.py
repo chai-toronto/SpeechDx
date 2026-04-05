@@ -54,29 +54,31 @@ def prepare_data(
     """
     manifest_train_path = Path(manifest_train_path)
     manifest_val_path = Path(manifest_val_path)
-    manifest_test_path = Path(manifest_test_path)
 
     df = pd.read_csv(metadata_path)
 
     # Resolve path to be absolute
     df["path"] = Path(wav_folder).resolve() / df["path"]
 
-    df_test = df[df['split'] == 2]
-    df_train_og = df[df['split'] == 0]
-    df_val_og = df[df['split'] == 1]
+    # split train data into folds, each goes by manifest id
+    folds = stratified_group_kfold_df(df,
+                                      'uid',
+                                      raw_label_key,
+                                      "Participant_ID",
+                                      random_seed=random_seed,
+                                      n_splits=num_fold)
 
     train_dicts = []
-    train_dicts.append(df_train_og.set_index('uid').to_dict(orient='index'))
-    # Append dataset_all to list of datasets
+    valid_dicts = [] # list of folds
+    for train_df, val_df in folds:
+        train_dicts.append(train_df.set_index('uid').to_dict(orient='index'))
+        valid_dicts.append(val_df.set_index('uid').to_dict(orient='index'))
+
+    print("Train og size:", len(train_dicts[-1]))
+    print("Val og size:", len(valid_dicts[-1]))
+
+    # Append the all version
     train_dicts.append(df.set_index('uid').to_dict(orient='index'))
-
-    val = df_val_og.set_index('uid').to_dict(orient='index')
-
-    test = df_test.set_index("uid").to_dict(orient='index')
-
-    print("Train og size:", len(df_train_og))
-    print("Val og size:", len(val))
-    print("Test size:", len(test))
 
     import json
     ensure_dir(manifest_train_path)
@@ -85,11 +87,7 @@ def prepare_data(
 
     ensure_dir(manifest_val_path)
     with open(manifest_val_path, 'w') as f:
-        json.dump(val, f, indent=5, cls=PathEncoder)
-
-    ensure_dir(manifest_test_path)
-    with open(manifest_test_path, 'w') as f:
-        json.dump(test, f, indent=4, cls=PathEncoder)
+        json.dump(valid_dicts, f, indent=5, cls=PathEncoder)
 
     print("Manifests created.")
     print("--- prepare_data finished ---")
@@ -102,22 +100,18 @@ def dataio_prep(hparams):
 
     For a new task, modify the label_pipeline and the output_keys.
     """
+
     # Retrieve the data
     with open(hparams["train_annotation"], "r") as f:
-        train_dicts = json.load(f)
+        train_folds = json.load(f)
 
     with open(hparams["val_annotation"], "r") as f:
-        val = json.load(f)
+        val_folds = json.load(f)
 
-    with open(hparams['test_annotation'], "r") as f:
-        test = json.load(f)
-
-    data_dict = {
-        "train": train_dicts[0],
-        "all": train_dicts[1],
-        "val": val,
-        "test": test
-    }
+    data_dict = {}
+    for i in range(hparams['num_fold']):
+        data_dict[f'train_{i}'] = train_folds[i]
+        data_dict[f'val_{i}'] = val_folds[i]
 
     train_dynamic_items, val_dynamic_items = [], []
     output_keys = ["id", "path"]
@@ -286,13 +280,13 @@ def dataio_prep(hparams):
             val_cache_emb = make_cache_emb(val_cache_dir, warm_cache)
 
             dataset_all_aug = sb.dataio.dataset.DynamicItemDataset(
-                data=data_dict["all"],
+                data=train_folds[-1],
                 dynamic_items=train_dynamic_items + [train_cache_emb],
                 output_keys=output_keys,
             )
 
             dataset_all_no_aug = sb.dataio.dataset.DynamicItemDataset(
-                data=data_dict["all"],
+                data=train_folds[-1],
                 dynamic_items=val_dynamic_items + [val_cache_emb],
                 output_keys=output_keys,
             )
@@ -316,6 +310,7 @@ def dataio_prep(hparams):
         output_keys += output_vars
         output_keys.remove("signal")  # we don't need the raw signal after caching
 
+
     # Define datasets.
     datasets = {}
     for dataset in data_dict:
@@ -324,6 +319,7 @@ def dataio_prep(hparams):
             dynamic_items=train_dynamic_items if "train" in dataset else val_dynamic_items,
             output_keys=output_keys,
         )
+
     return datasets
 
 

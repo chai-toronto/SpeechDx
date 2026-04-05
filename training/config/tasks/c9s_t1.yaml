@@ -35,5 +35,5 @@ snr_high: 7
 speed: !new:builtins.list
   - !new:builtins.range
     - 95 #start
-    - 100 #stop
+    - 105 #stop
     - 1 #step

@@ -64,3 +64,5 @@ def proc_length_vec(*vectors, duration, min_length=100, max_length=1000):
         return *output_embs, new_length
 
     return *raw_embs, duration
+
+
