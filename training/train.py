@@ -150,11 +150,7 @@ if __name__ == "__main__":
                 "manifest_train_path": hparams["train_annotation"],
                 "manifest_val_path": hparams["val_annotation"],
                 "manifest_test_path": hparams["test_annotation"],
-                "ratio": hparams.get("ratio", None),
                 "random_seed": hparams["random_seed"],
-                "raw_label_key": hparams["raw_label_key"],
-                "new_test": hparams["new_test"],
-                "num_fold": hparams["num_fold"],
             },
         )
 

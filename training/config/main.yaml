@@ -62,7 +62,6 @@ label_key: !ref <data_params[label_key]>
 # Original audio and label file paths
 wav_folder: !ref <data_folder>/<dataset>/processed/audio
 metadata_path: !ref <data_folder>/<dataset>/processed/<dataset>.csv
-raw_label_key: !ref <data_params[raw_label_key]>
 
 # Output folder structure
 output_folder: !ref ./exps/<task>/<model_name>-<probe_name>-<experiment_tag>/

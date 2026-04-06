@@ -17,12 +17,8 @@ dataio_prep_fn: dataio_prep
 # Key used in the SpeechBrain batch object for the label
 label_key: label_encoded
 
-raw_label_key: label
 # Data preparation
 skip_prep: False
-new_test: False # Set False to use metadata's test split.
-# Cross Validation
-num_fold: 4 # works from 2 to num. subjects. To be implemented: 0 -> normal split no CV, -1 -> LOSO
 
 num_labels: 8
 

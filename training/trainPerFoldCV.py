@@ -231,7 +231,6 @@ if __name__ == "__main__":
                 "raw_label_key": hparams["raw_label_key"],
                 "new_test": hparams["new_test"],
                 "num_fold": hparams["num_fold"],
-                "no_test": True,  # per-fold CV always uses all data
             },
         )
 
