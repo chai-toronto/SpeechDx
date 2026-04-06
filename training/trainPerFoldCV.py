@@ -230,7 +230,7 @@ if __name__ == "__main__":
                 "random_seed": hparams["random_seed"],
                 "raw_label_key": hparams["raw_label_key"],
                 "new_test": hparams["new_test"],
-                "num_fold": hparams["num_fold"],
+                "num_fold": hparams['data_params']["num_fold"],
             },
         )
 

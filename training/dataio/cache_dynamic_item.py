@@ -77,6 +77,10 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
         self.file_mode = new_file_mode
         self.hdf5file = h5py.File(self.cache_location, new_file_mode)
 
+    def close(self):
+        """Used to initialize another DynamicItem on the same cache"""
+        self.hdf5file.close()
+
     @classmethod
     def cache(cls, cache_location, file_mode="a", num_version=1):
         """Decorator which takes a DynamicItem and creates a CachedHDF5DynamicItem

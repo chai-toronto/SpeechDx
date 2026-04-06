@@ -150,6 +150,7 @@ if __name__ == "__main__":
                 "manifest_train_path": hparams["train_annotation"],
                 "manifest_val_path": hparams["val_annotation"],
                 "manifest_test_path": hparams["test_annotation"],
+                "ratio": hparams['data_params'].get("ratio", None),
                 "random_seed": hparams["random_seed"],
             },
         )

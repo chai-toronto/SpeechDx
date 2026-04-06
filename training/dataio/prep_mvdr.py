@@ -248,6 +248,7 @@ def dataio_prep(hparams):
         num_versions = hparams["data_params"].get("num_aug_ver", 1)
 
         def make_cache_emb(cache_dir, warm, num_ver=1):
+            file_mode = 'a' if warm else 'r'
             if warm:
                 @CachedHDF5DynamicItem.cache(cache_dir, file_mode, num_ver)
                 @sb.utils.data_pipeline.takes("id", "signal")
@@ -274,16 +275,11 @@ def dataio_prep(hparams):
 
             return read_cache
 
-        train_cache_emb = make_cache_emb(train_cache_dir, False, num_versions)
-        val_cache_emb = make_cache_emb(val_cache_dir, False)
-
-        train_dynamic_items.append(train_cache_emb)
-        val_dynamic_items.append(val_cache_emb)
-
-        output_keys += output_vars
-        output_keys.remove("signal")  # we don't need the raw signal after caching
 
         if warm_cache:
+            train_cache_emb = make_cache_emb(train_cache_dir, warm_cache, num_versions)
+            val_cache_emb = make_cache_emb(val_cache_dir, warm_cache)
+
             dataset_all_aug = sb.dataio.dataset.DynamicItemDataset(
                 data=train_folds[-1],
                 dynamic_items=train_dynamic_items,
@@ -303,8 +299,17 @@ def dataio_prep(hparams):
                 print(f"Iterating dataset {i} to warm the cache.")
                 ds.iterate_once()
 
-            train_cache_emb.change_file_mode('r')  # change to read mode
-            val_cache_emb.change_file_mode('r')
+            train_cache_emb.close()
+            val_cache_emb.close()
+
+        train_cache_emb = make_cache_emb(train_cache_dir, False, num_versions)
+        val_cache_emb = make_cache_emb(val_cache_dir, False)
+
+        train_dynamic_items.append(train_cache_emb)
+        val_dynamic_items.append(val_cache_emb)
+
+        output_keys += output_vars
+        output_keys.remove("signal")
 
 
     # Define datasets.
