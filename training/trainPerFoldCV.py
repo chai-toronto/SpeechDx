@@ -50,7 +50,7 @@ def dataio_prep(hparams):
         data_dict[f'train_{i}'] = train_folds[i]
         data_dict[f'val_{i}'] = val_folds[i]
 
-    data_dict['all'] = train_folds[-1]
+    data_dict['all'] = train_folds[0] | val_folds[0] # For cache purpose
 
     datasets = master_dataio_prep(data_dict, hparams)
 

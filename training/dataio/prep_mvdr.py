@@ -52,9 +52,6 @@ def prepare_data(
     print("Train og size:", len(train_dicts[-1]))
     print("Val og size:", len(valid_dicts[-1]))
 
-    # Append the all version
-    train_dicts.append(df.set_index('uid').to_dict(orient='index'))
-
     import json
     ensure_dir(manifest_train_path)
     with open(manifest_train_path, 'w') as f:

@@ -51,7 +51,7 @@ def dataio_prep(hparams):
     """
     # Retrieve the data
     with open(hparams["train_annotation"], "r") as f:
-        train_dicts = json.load(f)
+        train = json.load(f)
 
     with open(hparams["val_annotation"], "r") as f:
         val = json.load(f)
@@ -60,10 +60,10 @@ def dataio_prep(hparams):
         test = json.load(f)
 
     data_dict = {
-        "train": train_dicts[0],
-        "all": train_dicts[1],
+        "train": train,
         "val": val,
-        "test": test
+        "test": test,
+        "all": train | val | test, # for cache warming
     }
 
     datasets = master_dataio_prep(data_dict, hparams)
