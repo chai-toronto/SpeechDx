@@ -1,18 +1,15 @@
-task: emoC
+task: parkC
 
-dataset: ravdess
+dataset: mvdr
 
 # ----------------------------------
 # DYNAMIC SCRIPT CONFIGURATION (Generic)
 # ----------------------------------
 # Path to the file containing the dataset-specific preparation and IO functions
-data_io_script: training.dataio.prep_torgo
+data_io_script: training.dataio.prep_mvdr
 
 # Name of the function to call for manifest generation
 prepare_data_fn: prepare_data
-
-# Name of the function to call for defining the data pipelines
-dataio_prep_fn: dataio_prep
 
 # Key used in the SpeechBrain batch object for the label
 label_key: label_encoded
@@ -20,11 +17,20 @@ label_key: label_encoded
 # Data preparation
 skip_prep: False
 
-num_labels: 8
+# Cross Validation
+num_fold: 5 # works from 2 to num. subjects. To be implemented: 0 -> normal split no CV, -1 -> LOSO
+num_labels: 1
 
-loss: !new:torch.nn.CrossEntropyLoss
+nested: true
+num_outer_fold: 5
 
-# Augmentation
+pos_weight: !new:torch.Tensor # Adjust this based on the imbalance in your dataset
+  data: [1.3]
+
+loss: !new:torch.nn.BCEWithLogitsLoss
+  pos_weight: !ref <pos_weight>
+
+##### Augmentation
 # For all data that can be trained, during training with cached repr, will sample from versions
 num_aug_ver: 3
 snr_low: 0

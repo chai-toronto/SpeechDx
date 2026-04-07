@@ -1,18 +1,17 @@
-task: c9s_t1
+task: null
 
 dataset: c9s_t1
+
+# TODO: separate this into c9s and t1, big one becomes _L_t1
 
 # ----------------------------------
 # DYNAMIC SCRIPT CONFIGURATION (Generic)
 # ----------------------------------
 # Path to the file containing the dataset-specific preparation and IO functions
-data_io_script: training.dataio.prep_torgo
+data_io_script: training.dataio.prep_default
 
 # Name of the function to call for manifest generation
 prepare_data_fn: prepare_data
-
-# Name of the function to call for defining the data pipelines
-dataio_prep_fn: dataio_prep
 
 # Key used in the SpeechBrain batch object for the label
 label_key: label_encoded

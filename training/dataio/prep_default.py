@@ -1,8 +1,13 @@
-from pathlib import Path
+"""
+Preparing the metadata to go into preprocessing pipeline. This is for using with default
+split, label, classic model fitting
+"""
 
+import json
+from pathlib import Path
 import pandas as pd
 
-from training.dataio.stratified_group_k_fold import stratified_group_kfold_df
+from training.dataio.preprocessing import master_dataio_prep
 from training.dataio.utils import ensure_dir, PathEncoder
 
 
@@ -11,9 +16,9 @@ def prepare_data(
         metadata_path,
         manifest_train_path,
         manifest_val_path,
+        manifest_test_path,
+        ratio,
         random_seed,
-        raw_label_key,
-        num_fold,
 ):
     """
     This function is dataset-specific.
@@ -29,31 +34,29 @@ def prepare_data(
     """
     manifest_train_path = Path(manifest_train_path)
     manifest_val_path = Path(manifest_val_path)
+    manifest_test_path = Path(manifest_test_path)
 
     df = pd.read_csv(metadata_path)
 
     # Resolve path to be absolute
     df["path"] = Path(wav_folder).resolve() / df["path"]
 
-    # split train data into folds, each goes by manifest id
-    folds = stratified_group_kfold_df(df,
-                                      'uid',
-                                      raw_label_key,
-                                      "Participant_ID",
-                                      random_seed=random_seed,
-                                      n_splits=num_fold)
+    df_test = df[df['split'] == 2]
+    df_train_og = df[df['split'] == 0]
+    df_val_og = df[df['split'] == 1]
 
     train_dicts = []
-    valid_dicts = [] # list of folds
-    for train_df, val_df in folds:
-        train_dicts.append(train_df.set_index('uid').to_dict(orient='index'))
-        valid_dicts.append(val_df.set_index('uid').to_dict(orient='index'))
-
-    print("Train og size:", len(train_dicts[-1]))
-    print("Val og size:", len(valid_dicts[-1]))
-
-    # Append the all version
+    train_dicts.append(df_train_og.set_index('uid').to_dict(orient='index'))
+    # Append dataset_all to list of datasets
     train_dicts.append(df.set_index('uid').to_dict(orient='index'))
+
+    val = df_val_og.set_index('uid').to_dict(orient='index')
+
+    test = df_test.set_index("uid").to_dict(orient='index')
+
+    print("Train og size:", len(df_train_og))
+    print("Val og size:", len(val))
+    print("Test size:", len(test))
 
     import json
     ensure_dir(manifest_train_path)
@@ -62,10 +65,18 @@ def prepare_data(
 
     ensure_dir(manifest_val_path)
     with open(manifest_val_path, 'w') as f:
-        json.dump(valid_dicts, f, indent=5, cls=PathEncoder)
+        json.dump(val, f, indent=5, cls=PathEncoder)
+
+    ensure_dir(manifest_test_path)
+    with open(manifest_test_path, 'w') as f:
+        json.dump(test, f, indent=4, cls=PathEncoder)
 
     print("Manifests created.")
     print("--- prepare_data finished ---")
+
+
+
+
 
 
 

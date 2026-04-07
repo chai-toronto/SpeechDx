@@ -14,6 +14,7 @@ Authors
 Larry Kieu 2026
 """
 import importlib
+import json
 import shutil
 import sys
 import os
@@ -21,9 +22,10 @@ from pathlib import Path
 
 import numpy as np
 import yaml
-from ray.tune.schedulers import ASHAScheduler
 from ray.tune.search.optuna import OptunaSearch
 from ray.tune.search.searcher import ConcurrencyLimiter
+
+from training.dataio.preprocessing import master_dataio_prep
 
 os.environ["RAY_CHDIR_TO_TRIAL_DIR"] = "0"
 import ray
@@ -34,6 +36,25 @@ import speechbrain as sb
 from hyperpyyaml import load_hyperpyyaml
 from training.brain import DiagnosticsBrain
 from training.hp_utils import parse_hp_search_space
+
+def dataio_prep(hparams):
+    # Retrieve the data
+    with open(hparams["train_annotation"], "r") as f:
+        train_folds = json.load(f)
+
+    with open(hparams["val_annotation"], "r") as f:
+        val_folds = json.load(f)
+
+    data_dict = {}
+    for i in range(hparams['num_fold']):
+        data_dict[f'train_{i}'] = train_folds[i]
+        data_dict[f'val_{i}'] = val_folds[i]
+
+    data_dict['all'] = train_folds[-1]
+
+    datasets = master_dataio_prep(data_dict, hparams)
+
+    return datasets
 
 
 def train_fold_with_ray(config, hparams_file, run_opts, overrides, project_root, fold_idx):
@@ -67,15 +88,9 @@ def train_fold_with_ray(config, hparams_file, run_opts, overrides, project_root,
         overrides=ray_overrides,
     )
 
-    try:
-        data_io_module = importlib.import_module(hparams["data_io_script"])
-    except KeyError:
-        sys.exit("Error: 'data_io_script' path must be defined in the YAML file.")
-
     hparams["warm_cache"] = False
 
-    dataio_prep_fn = getattr(data_io_module, hparams["dataio_prep_fn"])
-    datasets = dataio_prep_fn(hparams)
+    datasets = dataio_prep(hparams)
 
     checkpointer = sb.utils.checkpoints.Checkpointer(
         checkpoints_dir=hparams["save_folder"],
@@ -209,14 +224,15 @@ if __name__ == "__main__":
     with open(hparams_file) as fin:
         hparams = load_hyperpyyaml(fin, overrides)
 
-    # Dynamically load data preparation module
-    try:
-        data_io_module = importlib.import_module(hparams["data_io_script"])
-    except KeyError:
-        sys.exit("Error: 'data_io_script' path must be defined in the YAML file.")
 
     # Data preparation (manifest generation) — must run before dataio_prep
     if not hparams["skip_prep"]:
+        # Dynamically load data preparation module
+        try:
+            data_io_module = importlib.import_module(hparams["data_io_script"])
+        except KeyError:
+            sys.exit("Error: 'data_io_script' path must be defined in the YAML file.")
+
         prepare_data_fn = getattr(data_io_module, hparams["prepare_data_fn"])
         sb.utils.distributed.run_on_main(
             prepare_data_fn,
@@ -225,8 +241,6 @@ if __name__ == "__main__":
                 "metadata_path": hparams["metadata_path"],
                 "manifest_train_path": hparams["train_annotation"],
                 "manifest_val_path": hparams["val_annotation"],
-                "manifest_test_path": hparams["test_annotation"],
-                "ratio": hparams.get("ratio", None),
                 "random_seed": hparams["random_seed"],
                 "raw_label_key": hparams["raw_label_key"],
                 "new_test": hparams["new_test"],
@@ -235,8 +249,7 @@ if __name__ == "__main__":
         )
 
     # Warm cache early so Ray workers can open read-only
-    dataio_prep_fn = getattr(data_io_module, hparams["dataio_prep_fn"])
-    datasets = dataio_prep_fn(hparams)
+    datasets = dataio_prep(hparams)
 
     project_root = str(Path.cwd().resolve())
     search_space = parse_hp_search_space(hparams)

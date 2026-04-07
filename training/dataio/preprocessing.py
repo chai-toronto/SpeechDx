@@ -1,19 +1,8 @@
-"""
-Dataset-specific preparation script and dataio pipelines.
-
-This file contains functions that are unique to the 'CS-Res-L' dataset,
-including manifest generation and label encoding logic.
-
-To adapt to a new dataset, copy this file and modify:
-1. prepare_data (to generate the correct train/valid/test JSON manifest files).
-2. label_pipeline (to handle the specific labels and label-to-index mapping).
-3. The 'output_keys' in dataio_prep (if the label key changes).
-"""
 import json
 import os
 import random
 import warnings
-from pathlib import Path
+from typing import Any
 
 import soundfile as sf
 import librosa
@@ -21,106 +10,15 @@ import speechbrain as sb
 from speechbrain.augment.time_domain import AddReverb, AddNoise, SpeedPerturb
 from speechbrain.utils.data_pipeline import CachedDynamicItem
 import torch
-import pandas as pd
+
 
 from training.dataio.cache_dynamic_item import CachedHDF5DynamicItem
-from training.dataio.stratified_group_k_fold import stratified_group_kfold_df
-from training.dataio.utils import ensure_dir, PathEncoder, locate_bad, proc_length_vec
 
 
-def prepare_data(
-        wav_folder,
-        metadata_path,
-        manifest_train_path,
-        manifest_val_path,
-        manifest_test_path,
-        ratio,
-        random_seed,
-):
-    """
-    This function is dataset-specific.
-    It takes raw data info (like metadata_path and wav_folder) and
-    creates the SpeechBrain manifest JSON files (train, valid, test).
-
-    Replace the body of this function with the logic needed for your
-    specific dataset (e.g., reading a CSV/TSV file and writing JSONs).
-
-    It first takes the test split out of metadata. Then it splits the
-    rest deterministically with seed. Each train manifest now contains
-    k subdict for each fold. Each is like the original format.
-    """
-    manifest_train_path = Path(manifest_train_path)
-    manifest_val_path = Path(manifest_val_path)
-    manifest_test_path = Path(manifest_test_path)
-
-    df = pd.read_csv(metadata_path)
-
-    # Resolve path to be absolute
-    df["path"] = Path(wav_folder).resolve() / df["path"]
-
-    df_test = df[df['split'] == 2]
-    df_train_og = df[df['split'] == 0]
-    df_val_og = df[df['split'] == 1]
-
-    train_dicts = []
-    train_dicts.append(df_train_og.set_index('uid').to_dict(orient='index'))
-    # Append dataset_all to list of datasets
-    train_dicts.append(df.set_index('uid').to_dict(orient='index'))
-
-    val = df_val_og.set_index('uid').to_dict(orient='index')
-
-    test = df_test.set_index("uid").to_dict(orient='index')
-
-    print("Train og size:", len(df_train_og))
-    print("Val og size:", len(val))
-    print("Test size:", len(test))
-
-    import json
-    ensure_dir(manifest_train_path)
-    with open(manifest_train_path, 'w') as f:
-        json.dump(train_dicts, f, indent=5, cls=PathEncoder)
-
-    ensure_dir(manifest_val_path)
-    with open(manifest_val_path, 'w') as f:
-        json.dump(val, f, indent=5, cls=PathEncoder)
-
-    ensure_dir(manifest_test_path)
-    with open(manifest_test_path, 'w') as f:
-        json.dump(test, f, indent=4, cls=PathEncoder)
-
-    print("Manifests created.")
-    print("--- prepare_data finished ---")
-
-
-def dataio_prep(hparams):
-    """
-    This function is dataset-specific.
-    It defines the data processing pipelines and creates the DynamicItemDatasets.
-
-    For a new task, modify the label_pipeline and the output_keys.
-    """
-    # Retrieve the data
-    with open(hparams["train_annotation"], "r") as f:
-        train_dicts = json.load(f)
-
-    with open(hparams["val_annotation"], "r") as f:
-        val = json.load(f)
-
-    with open(hparams['test_annotation'], "r") as f:
-        test = json.load(f)
-
-    data_dict = {
-        "train": train_dicts[0],
-        "all": train_dicts[1],
-        "val": val,
-        "test": test
-    }
-
+def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
     train_dynamic_items, val_dynamic_items = [], []
     output_keys = ["id", "path"]
 
-    # Initialization of the label encoder.
-    label_encoder = sb.dataio.encoder.CategoricalEncoder()
     sample_rate = hparams.get("sample_rate", 16000)
 
     max_samples = hparams.get("max_length", 10e5) * sample_rate  # default to longest
@@ -134,8 +32,8 @@ def dataio_prep(hparams):
 
     noisifier = AddNoise(os.path.join(noise_folder, 'noises.csv'),
                          replacements={'noise_folder': os.path.join(noise_folder, 'audio')},
-                         snr_low= hparams["data_params"]["snr_low"],
-                         snr_high= hparams["data_params"]["snr_high"],
+                         snr_low=hparams["data_params"]["snr_low"],
+                         snr_high=hparams["data_params"]["snr_high"],
                          noise_sample_rate=sample_rate,
                          clean_sample_rate=sample_rate)
 
@@ -148,7 +46,6 @@ def dataio_prep(hparams):
                        reverb_sample_rate=sample_rate,
                        clean_sample_rate=sample_rate,
                        )
-
 
     # 90% to 109% speed perturbation
     perturbator = SpeedPerturb(orig_freq=sample_rate,
@@ -178,6 +75,7 @@ def dataio_prep(hparams):
 
     train_dynamic_items.append(audio_pipeline)
     val_dynamic_items.append(audio_pipeline)
+
     # output_keys.extend(["raw_signal", "duration"])
 
     @sb.utils.data_pipeline.takes("raw_signal")
@@ -265,6 +163,7 @@ def dataio_prep(hparams):
                     else:
                         emb = emb.squeeze(0).cpu()
                     return emb
+
                 return cache_emb
 
             # Relieve dependency of signal onto resolving other dynamic items
@@ -273,7 +172,7 @@ def dataio_prep(hparams):
             @sb.utils.data_pipeline.provides(*output_vars)
             def read_cache(id):
                 warnings.warn("Cache doesn't exist for one or more data points.")
-                pass # never called, expect cache hit
+                pass  # never called, expect cache hit
 
             return read_cache
 
@@ -321,7 +220,3 @@ def dataio_prep(hparams):
             output_keys=output_keys,
         )
     return datasets
-
-
-
-

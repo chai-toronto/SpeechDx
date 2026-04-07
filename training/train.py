@@ -16,19 +16,20 @@ To run with hyperparameter optimization:
 Authors
 --
 Yi Zhu 2025
+Larry Kieu 2026
 """
 import importlib
+import json
 import shutil
 import sys
 import os
-from functools import partial
 from pathlib import Path
 
 import yaml
-from ray.tune.schedulers import ASHAScheduler
 from ray.tune.search.optuna import OptunaSearch
 from ray.tune.search.searcher import ConcurrencyLimiter
-from ray.tune.stopper import TrialPlateauStopper
+
+from training.dataio.preprocessing import master_dataio_prep
 
 os.environ["RAY_CHDIR_TO_TRIAL_DIR"] = "0"
 import ray
@@ -40,6 +41,33 @@ from hyperpyyaml import load_hyperpyyaml
 from training.brain import DiagnosticsBrain
 from training.brains import Brains, DiagnosticsCVBrain
 from training.hp_utils import parse_hp_search_space
+
+def dataio_prep(hparams):
+    """
+    This function is dataset-specific.
+    It defines the data processing pipelines and creates the DynamicItemDatasets.
+
+    For a new task, modify the label_pipeline and the output_keys.
+    """
+    # Retrieve the data
+    with open(hparams["train_annotation"], "r") as f:
+        train_dicts = json.load(f)
+
+    with open(hparams["val_annotation"], "r") as f:
+        val = json.load(f)
+
+    with open(hparams['test_annotation'], "r") as f:
+        test = json.load(f)
+
+    data_dict = {
+        "train": train_dicts[0],
+        "all": train_dicts[1],
+        "val": val,
+        "test": test
+    }
+
+    datasets = master_dataio_prep(data_dict, hparams)
+    return datasets
 
 def train_with_ray(config, hparams_file, run_opts, overrides, project_root):
     """Ray Tune trainable function that wraps the SpeechBrain training loop.
@@ -91,8 +119,8 @@ def train_with_ray(config, hparams_file, run_opts, overrides, project_root):
     hparams["warm_cache"] = False
 
     # Create dataset objects
-    dataio_prep_fn = getattr(data_io_module, hparams["dataio_prep_fn"])
-    datasets = dataio_prep_fn(hparams)
+
+    datasets = dataio_prep(hparams)
 
     # Rebuild checkpointer with trial-specific save_folder
     checkpointer = sb.utils.checkpoints.Checkpointer(
@@ -131,15 +159,15 @@ if __name__ == "__main__":
     with open(hparams_file) as fin:
         hparams = load_hyperpyyaml(fin, overrides)
 
-    # Dynamically load the data preparation module
-    try:
-        data_io_module = importlib.import_module(hparams["data_io_script"])
-    except KeyError:
-        sys.exit("Error: 'data_io_script' path must be defined in the YAML file.")
-
 
     # Data preparation, to be run on only one process
     if not hparams["skip_prep"]:
+        # Dynamically load the data preparation module
+        try:
+            data_io_module = importlib.import_module(hparams["data_io_script"])
+        except KeyError:
+            sys.exit("Error: 'data_io_script' path must be defined in the YAML file.")
+
         prepare_data_fn = getattr(data_io_module, hparams["prepare_data_fn"])
 
         sb.utils.distributed.run_on_main(
@@ -157,8 +185,7 @@ if __name__ == "__main__":
 
     # Warm cache (if True) early so Ray workers can open it read-only;
     # must run before Ray spawns parallel trials
-    dataio_prep_fn = getattr(data_io_module, hparams["dataio_prep_fn"])
-    datasets = dataio_prep_fn(hparams)
+    datasets = dataio_prep(hparams)
 
 
     _project_root = str(Path.cwd().resolve())

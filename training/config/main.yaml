@@ -1,17 +1,17 @@
 File: config/main.yaml
-random_seed: 2025
+random_seed: 2026
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
 model_name: qwen3voice
 probe_name: LTProbe
-experiment_tag: classic_train
+experiment_tag: 1
 
 data_folder: ./data/
 #slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
 slurm_tmpdir: ./tmp/
 #----------------------------------
 # Most of the knobs you should change
-data_params: !include:tasks/ravdess.yaml
+data_params: !include:tasks/ravdess_emoC.yaml
 
 encoder_params: !include:encoders/qwen3_voice.yaml
 
@@ -37,9 +37,9 @@ rir_folder: !ref <data_folder>/rir/
 noise_folder: !ref <data_folder>/noise/
 
 cache_encoder: true
-train_cache_dir: !ref <slurm_tmpdir>/<task>/<model_name>/train
-val_cache_dir: !ref <slurm_tmpdir>/<task>/<model_name>/val
-warm_cache: false
+train_cache_dir: !ref <slurm_tmpdir>/<dataset>/<model_name>/train
+val_cache_dir: !ref <slurm_tmpdir>/<dataset>/<model_name>/val
+warm_cache: true
 
 # ----------------------------------
 # DYNAMIC SCRIPT CONFIGURATION (Generic)
@@ -49,9 +49,6 @@ data_io_script: !ref <data_params[data_io_script]>
 
 # Name of the function to call for manifest generation
 prepare_data_fn: !ref <data_params[prepare_data_fn]>
-
-# Name of the function to call for defining the data pipelines
-dataio_prep_fn: !ref <data_params[dataio_prep_fn]>
 
 # Key used in the SpeechBrain batch object for the label
 label_key: !ref <data_params[label_key]>
@@ -64,21 +61,17 @@ wav_folder: !ref <data_folder>/<dataset>/processed/audio
 metadata_path: !ref <data_folder>/<dataset>/processed/<dataset>.csv
 
 # Output folder structure
-output_folder: !ref ./exps/<task>/<model_name>-<probe_name>-<experiment_tag>/
+output_folder: !ref ./exps/<dataset>_<task>/<model_name>-<probe_name>-<experiment_tag>/
 save_folder: !ref <output_folder>/save
 train_log_dir: !ref <output_folder>/
 
 # Manifest files created by prepare_data_fn
-train_annotation: !ref ./exps/<task>/manifest/train.json
-val_annotation: !ref ./exps/<task>/manifest/valid.json
-test_annotation: !ref ./exps/<task>/manifest/test.json
+train_annotation: !ref ./exps/<dataset>_<task>/manifest/train.json
+val_annotation: !ref ./exps/<dataset>_<task>/manifest/valid.json
+test_annotation: !ref ./exps/<dataset>_<task>/manifest/test.json
 
 # Data preparation
 skip_prep: !ref <data_params[skip_prep]>
-new_test: !ref <data_params[new_test]> # Set False to use metadata's test split. To be implemented
-
-# Cross Validation
-num_fold: !ref <data_params[num_fold]> # works from 2 to num. subjects. To be implemented: 0 -> normal split no CV, -1 -> LOSO
 
 # ----------------------------------
 # MODEL DEFINITION
