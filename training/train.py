@@ -202,7 +202,7 @@ if __name__ == "__main__":
                 "excludes": [
                     "data/", "exps/", "tmp/", ".idea/",
                     "*.DS_Store", "uv.lock", "pyproject.toml",
-                    ".python-version",
+                    ".python-version", "exps_old/"
                 ],
             },
         )

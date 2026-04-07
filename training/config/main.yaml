@@ -39,7 +39,7 @@ noise_folder: !ref <data_folder>/noise/
 cache_encoder: true
 train_cache_dir: !ref <slurm_tmpdir>/<dataset>/<model_name>/train
 val_cache_dir: !ref <slurm_tmpdir>/<dataset>/<model_name>/val
-warm_cache: true
+warm_cache: false
 
 # ----------------------------------
 # DYNAMIC SCRIPT CONFIGURATION (Generic)

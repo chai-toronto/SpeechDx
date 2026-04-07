@@ -128,7 +128,7 @@ def run_fold_hp_optimization(fold_idx, hparams, hparams_file, run_opts, override
             "excludes": [
                 "data/", "exps/", "tmp/", ".idea/",
                 "*.DS_Store", "uv.lock", "pyproject.toml",
-                ".python-version",
+                ".python-version", "exps_old/"
             ],
         },
     )
