@@ -67,7 +67,3 @@ def prepare_data(
     print("Manifests created.")
     print("--- prepare_data finished ---")
 
-
-
-
-

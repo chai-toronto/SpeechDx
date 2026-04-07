@@ -2,12 +2,8 @@
 Preparing the metadata to go into preprocessing pipeline. This is for using with default
 split, label, classic model fitting
 """
-
-import json
 from pathlib import Path
 import pandas as pd
-
-from training.dataio.preprocessing import master_dataio_prep
 from training.dataio.utils import ensure_dir, PathEncoder
 
 
@@ -73,12 +69,3 @@ def prepare_data(
 
     print("Manifests created.")
     print("--- prepare_data finished ---")
-
-
-
-
-
-
-
-
-
