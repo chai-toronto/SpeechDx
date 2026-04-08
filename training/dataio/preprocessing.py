@@ -95,10 +95,6 @@ def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
     @sb.utils.data_pipeline.takes("raw_signal", "duration")
     @sb.utils.data_pipeline.provides("signal", "duration")
     def process_signal(signal, duration):
-        if duration > max_samples:  # randomly crop if too long
-            start = random.randint(0, duration - max_samples)
-            signal = signal[start:start + max_samples]
-
         if duration < min_samples:  # Center pad with silence if too short
             pad_total = min_samples - duration
             pad_left = int(pad_total // 2)
@@ -156,12 +152,29 @@ def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
                 def cache_emb(id, raw_signal):
                     device = next(speech_encoder.parameters()).device
                     with torch.no_grad():
-                        raw_signal = raw_signal.unsqueeze(0).to(device)
-                        emb = speech_encoder(raw_signal)
-                    if speech_encoder.output_hidden_states:
-                        emb = tuple(x.squeeze(0).cpu() for x in emb)
-                    else:
-                        emb = emb.squeeze(0).cpu()
+                        if len(raw_signal) > max_samples:
+                            chunks = list(raw_signal.split(int(max_samples)))
+                            if len(chunks) > 1 and len(chunks[-1]) < min_samples:
+                                chunks = chunks[:-1]
+                            embs = []
+                            for chunk in chunks:
+                                embs.append(speech_encoder(chunk.unsqueeze(0).to(device)))
+                            if speech_encoder.output_hidden_states:
+                                # T dim is always -2
+                                emb = tuple(
+                                    torch.cat([e[i].squeeze(0) for e in embs], dim=-2).cpu()
+                                    for i in range(len(embs[0]))
+                                )
+                            else:
+                                # T dim is always -2
+                                emb = torch.cat([e.squeeze(0) for e in embs], dim=-2).cpu()
+                        else:
+                            raw_signal = raw_signal.unsqueeze(0).to(device)
+                            emb = speech_encoder(raw_signal)
+                            if speech_encoder.output_hidden_states:
+                                emb = tuple(x.squeeze(0).cpu() for x in emb)
+                            else:
+                                emb = emb.squeeze(0).cpu()
                     return emb
 
                 return cache_emb
