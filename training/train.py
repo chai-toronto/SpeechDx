@@ -298,7 +298,9 @@ if __name__ == "__main__":
         with open(best_config_path, "r") as f:
             best_config = yaml.safe_load(f)
 
-    hparams["output_folder"] = os.path.join(hparams["output_folder"], best_config['trial_id'])
+    # Point dir to best trial
+    exp_root = hparams["output_folder"]
+    hparams["output_folder"] = os.path.join(exp_root, best_config['trial_id'])
     hparams["save_folder"] = os.path.join(hparams["save_folder"], best_config['trial_id'])
 
     # Rebuild checkpointer with trial-specific save_folder
@@ -319,6 +321,12 @@ if __name__ == "__main__":
         test_set=datasets["test"],
         test_loader_kwargs=hparams["test_dataloader_options"]
     )
+
+    # Write test results to file
+    results_path = os.path.join(exp_root, "test_results.txt")
+    with open(results_path, "w") as f:
+        for name, score in brain.test_stats.items():
+            f.write(f"{name}: {score}\n")
 
 
 
