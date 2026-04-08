@@ -110,9 +110,9 @@ def to_sb_dict_and_save(df_train: Series | DataFrame | Any,
 
     test = df_test.set_index("uid").to_dict(orient='index')
 
-    print("Train og size:", len(train))
-    print("Val og size:", len(val))
-    print("Test size:", len(test))
+    print("Train og size:", len(train), "| subjects:", df_train["Participant_ID"].nunique())
+    print("Val og size:", len(val), "| subjects:", df_val["Participant_ID"].nunique())
+    print("Test size:", len(test), "| subjects:", df_test["Participant_ID"].nunique())
 
     import json
     ensure_dir(manifest_train_path)

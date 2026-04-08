@@ -3,9 +3,10 @@ random_seed: 2026
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
 model_name: qwen3voice
-probe_name: LTProbe
-experiment_tag: 1
+probe_name: AvgProbe
+experiment_tag: test
 
+ratio: [70, 10, 20]
 data_folder: ./data/
 #slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
 slurm_tmpdir: ./tmp/

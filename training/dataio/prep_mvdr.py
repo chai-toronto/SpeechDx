@@ -43,6 +43,18 @@ def prepare_data(
                                       random_seed=random_seed,
                                       n_splits=num_fold)
 
+    folds = list(folds)
+
+    # Save per-fold split columns to metadata/mvdr/mvdr.csv
+    for i, (train_df, val_df) in enumerate(folds):
+        df.loc[train_df.index, f"split_{i}"] = 0
+        df.loc[val_df.index, f"split_{i}"] = 1
+    out_dir = Path("metadata") / "mvdr"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "mvdr.csv"
+    df.to_csv(out_path, index=False)
+    print(f"Task CSV saved to {out_path} ({len(df)} rows)")
+
     train_dicts = []
     valid_dicts = [] # list of folds
     for train_df, val_df in folds:

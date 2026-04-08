@@ -9,14 +9,9 @@ prepare_data_fn: prepare_nemours_dysC
 label_key: label_encoded
 skip_prep: False
 
-ratio: [75, 10, 15]
 num_labels: 1
 
-pos_weight: !new:torch.Tensor
-  data: [2.7]
-
 loss: !new:torch.nn.BCEWithLogitsLoss
-  pos_weight: !ref <pos_weight>
 
 num_aug_ver: 3
 snr_low: 0

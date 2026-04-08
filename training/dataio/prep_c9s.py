@@ -65,9 +65,10 @@ def prepare_c9s_t2(
     print("Distribution")
     print(df['label'].value_counts())
 
-
-    # Speaker-independent stratified split
-    df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed)
+    # Use included split
+    df_train = df[df["split_t2"] == 0]
+    df_val = df[df["split_t2"] == 1]
+    df_test = df[df["split_t2"] == 2]
 
     save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train,
@@ -125,8 +126,8 @@ AGE_MIDPOINTS = {
 }
 
 C9S_SYMPTOMS = [
-    "drycough", "wetcough", "fever", "headache", "muscleache",
-    "sorethroat", "shortbreath", "tightness", "runnyblockednose", "smelltasteloss",
+    "drycough", "wetcough", "fever", "headache", "muscleache", "dizziness",
+    "sorethroat", "shortbreath", "tightness", "runnyblockednose", "smelltasteloss", "runny"
 ]
 
 
@@ -213,8 +214,6 @@ def prepare_c9s_sympL(
         parts = set(x.strip() for x in s.split(","))
         if "tighness" in parts:
             parts.discard("tighness"); parts.add("tightness")
-        if "runny" in parts:
-            parts.discard("runny"); parts.add("runnyblockednose")
         return [int(sym in parts) for sym in C9S_SYMPTOMS]
 
     df["label"] = df["Symptoms"].apply(encode_symptoms)

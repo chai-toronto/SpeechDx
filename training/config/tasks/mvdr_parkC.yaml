@@ -25,11 +25,7 @@ num_labels: 1
 nested: true
 num_outer_fold: 5
 
-pos_weight: !new:torch.Tensor # Adjust this based on the imbalance in your dataset
-  data: [1.3]
-
 loss: !new:torch.nn.BCEWithLogitsLoss
-  pos_weight: !ref <pos_weight>
 
 ##### Augmentation
 # For all data that can be trained, during training with cached repr, will sample from versions

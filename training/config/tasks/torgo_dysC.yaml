@@ -24,11 +24,7 @@ skip_prep: False
 
 num_labels: 1
 
-pos_weight: !new:torch.Tensor # Adjust this based on the imbalance in your dataset
-  data: [3.0]
-
 loss: !new:torch.nn.BCEWithLogitsLoss
-  pos_weight: !ref <pos_weight>
 
 # Augmentation
 # For all data that can be trained, during training with cached repr, will sample from versions

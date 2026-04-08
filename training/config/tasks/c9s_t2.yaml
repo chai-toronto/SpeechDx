@@ -20,7 +20,6 @@ label_key: label_encoded
 # Data preparation
 skip_prep: False
 
-ratio: [75, 10, 15]
 num_labels: 1
 
 loss: !new:torch.nn.BCEWithLogitsLoss

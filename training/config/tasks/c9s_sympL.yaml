@@ -9,8 +9,7 @@ prepare_data_fn: prepare_c9s_sympL
 label_key: label_encoded
 skip_prep: False
 
-ratio: [75, 10, 15]
-num_labels: 10
+num_labels: 12
 
 loss: !new:torch.nn.BCEWithLogitsLoss
 

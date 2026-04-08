@@ -9,7 +9,6 @@ prepare_data_fn: prepare_avfad_bmiR
 label_key: label_encoded
 skip_prep: False
 
-ratio: [75, 10, 15]
 num_labels: 1
 
 loss: !new:torch.nn.MSELoss
