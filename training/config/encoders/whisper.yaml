@@ -1,0 +1,16 @@
+# Whisper
+# Source: https://arxiv.org/abs/2212.04356
+# Hard limit: 30 seconds (model pads/truncates to exactly 30s)
+
+sample_rate: 16000
+feature_dim: 1280  # 384 tiny, 512 base, 768 small, 1024 medium, 1280 large
+num_layers: 32     # 4 tiny, 6 base, 12 small, 24 medium, 32 large
+layer_dim: 1
+max_length: 30
+min_length: 3
+
+encoder: !new:model.whisper.Whisper
+  ssl_encoder_source: "openai/whisper-base"
+  freeze_encoder: True
+  output_hidden_states: False
+  sample_rate: !ref <sample_rate>

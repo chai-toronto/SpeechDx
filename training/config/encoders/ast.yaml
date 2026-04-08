@@ -1,19 +1,17 @@
-sample_rate: 16000
-feature_dim: 768  # AST hidden size
-max_length: null  # null = try full audio, fallback on OOM
-fallback_max_length: 160000  # 10s @ 16kHz (AST internally limits to ~10s anyway)
-spectrogram_max_length: 1024  # temporal dimension of spectrograms (for AST internal)
-num_layers: 12  # number of transformer layers
-layer_dim: 1
+# AST (Audio Spectrogram Transformer)
+# Source: https://arxiv.org/abs/2104.01778
+# Trained on 10-second AudioSet clips; internally pads/truncates to 10s
 
-# Note: AST has TWO length settings:
-#   - max_length: raw audio samples (for precaching)
-#   - spectrogram_max_length: spectrogram frames (for AST feature extractor)
-# With default settings (hop=10ms), 1024 frames ≈ 10 seconds
+sample_rate: 16000
+feature_dim: 768
+num_layers: 12
+layer_dim: 1
+max_length: 10
+min_length: 3
 
 encoder: !new:model.ast.AST
   ssl_encoder_source: "MIT/ast-finetuned-audioset-10-10-0.4593"
   freeze_encoder: True
   output_hidden_states: False
   sample_rate: !ref <sample_rate>
-  max_length: !ref <spectrogram_max_length>
+  max_length: 1024  # spectrogram frames (~10s with 10ms hop)

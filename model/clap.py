@@ -16,16 +16,27 @@ class CLAP(nn.Module):
     - Uses a Swin Transformer-based architecture (HTSAT)
     - Output hidden_states structure differs from standard transformers
     
+    Truncation modes:
+    - For models with enable_fusion=True (e.g., clap-htsat-fused):
+      Uses "fusion" truncation which creates 4 mel views for long audio
+    - For models with enable_fusion=False (e.g., larger_clap_general):
+      Uses "rand_trunc" truncation which takes a random 10s crop
+    
     Note: CLAP's architecture has 4 main stages with hierarchical structure,
     so num_layers=4 refers to these stages, not individual transformer layers.
     """
     
     def __init__(self, ssl_encoder_source, freeze_encoder, output_hidden_states, sample_rate,
-                 max_length_s=10, *args, **kwargs):
+                 *args, **kwargs):
         super().__init__(*args, **kwargs)
         # CLAP uses its own feature extractor that converts audio to mel-spectrograms
         self.processor = ClapFeatureExtractor.from_pretrained(ssl_encoder_source)
         self.model = ClapAudioModel.from_pretrained(ssl_encoder_source)
+        
+        # Check if model supports fusion
+        self.enable_fusion = self.model.config.enable_fusion
+        # Use appropriate truncation mode based on fusion support
+        self.truncation = "fusion" if self.enable_fusion else "rand_trunc"
         
         if freeze_encoder:
             self.model.requires_grad = False
@@ -36,13 +47,14 @@ class CLAP(nn.Module):
         self.freeze_encoder = freeze_encoder
         self.output_hidden_states = output_hidden_states
         self.sample_rate = sample_rate
-        self.max_length_s = max_length_s
         
         # Update processor's expected sample rate if different
         if self.processor.sampling_rate != sample_rate:
             print(f"Warning: CLAP expects {self.processor.sampling_rate}Hz audio, "
                   f"but sample_rate={sample_rate} was specified. "
                   f"Audio will be processed at {self.processor.sampling_rate}Hz.")
+        
+        print(f"CLAP initialized: enable_fusion={self.enable_fusion}, truncation={self.truncation}")
 
     def forward(self, x, lengths=None):
         """
@@ -66,27 +78,20 @@ class CLAP(nn.Module):
             x_list = [xi.cpu().numpy() for xi in x]
         else:
             x_list = x
-        
-        # Check if audio is longer than max_length_s for fusion feature
-        # This enables the model's built-in feature fusion for long audio
-        is_longer = None
-        if lengths is not None:
-            # Compute actual duration in seconds
-            # Note: lengths are relative (0-1), T is total samples
-            T = x.shape[1] if isinstance(x, torch.Tensor) else len(x_list[0])
-            actual_lengths_s = (lengths * T) / self.processor.sampling_rate
-            is_longer = actual_lengths_s > self.max_length_s
-            is_longer = is_longer.to(x.device if isinstance(x, torch.Tensor) else 'cpu')
             
         # Extract mel-spectrogram features
+        # - truncation="fusion": creates 4 mel views (downsampled full + 3 crops) for long audio
+        # - truncation="rand_trunc": takes random 10s crop for long audio
+        # Feature extractor also computes is_longer flag (True if original > 10s)
         inputs = self.processor(
             x_list,
             sampling_rate=self.processor.sampling_rate,
+            truncation=self.truncation,
             return_tensors="pt"
         )
-        input_features = inputs.input_features.to(
-            x.device if isinstance(x, torch.Tensor) else 'cpu'
-        )
+        device = x.device if isinstance(x, torch.Tensor) else 'cpu'
+        input_features = inputs.input_features.to(device)
+        is_longer = inputs.is_longer.to(device) if self.enable_fusion else None
 
         with (torch.no_grad() if self.freeze_encoder else torch.enable_grad()):
             outputs = self.model(
