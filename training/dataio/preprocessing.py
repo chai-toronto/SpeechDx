@@ -1,6 +1,5 @@
 import json
 import os
-import random
 import warnings
 from typing import Any
 
@@ -116,10 +115,11 @@ def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
     @sb.utils.data_pipeline.takes("label")
     @sb.utils.data_pipeline.provides("label_encoded")
     def label_pipeline(label):
-        """Defines the pipeline to process the input label ('non'/'symptomatic')."""
-        # The key produced here ('label_encoded') must match
-        # the 'label_key' used in train.py and the YAML.
-        label_encoded = label
+        """Defines the pipeline to process the input label."""
+        if isinstance(label, list):
+            label_encoded = torch.tensor(label, dtype=torch.float)
+        else:
+            label_encoded = label
         yield label_encoded
 
     train_dynamic_items.append(label_pipeline)

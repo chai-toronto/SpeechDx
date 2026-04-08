@@ -202,7 +202,7 @@ if __name__ == "__main__":
                 "excludes": [
                     "data/", "exps/", "tmp/", ".idea/",
                     "*.DS_Store", "uv.lock", "pyproject.toml",
-                    ".python-version", "exps_old/"
+                    ".python-version", "exps_old/", "data_zip", "data_extra"
                 ],
             },
         )
@@ -222,8 +222,13 @@ if __name__ == "__main__":
         tune_config = hparams.get("ray_tune_config", {})
 
         # Set up reporter
+        task_type = hparams.get("task_type", "B")
+        if task_type == "R":
+            metric_cols = ["loss", "MAE", "MSE", "R2", "PearsonR"]
+        else:
+            metric_cols = ["F1", "loss", "precision", "recall", "AUROC", "accuracy"]
         reporter = CLIReporter(
-            metric_columns=["F1", "loss", "precision", "recall", "AUROC", "accuracy"],
+            metric_columns=metric_cols,
             max_report_frequency=30,
         )
 

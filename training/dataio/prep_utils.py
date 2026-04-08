@@ -1,39 +1,66 @@
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+import pandas as pd
 from pandas import Series, DataFrame
 from sklearn.model_selection import train_test_split
 
 from training.dataio.utils import ensure_dir, PathEncoder
 
 
-def speaker_stratified_split(df, ratio, random_seed):
+def _make_stratify_key(speaker_df, stratify_cols):
+    """Combine multiple columns into a single stratification key.
+    Falls back to fewer columns if any combination has <2 members."""
+    cols = list(stratify_cols)
+    while cols:
+        key = speaker_df[cols].astype(str).agg("_".join, axis=1)
+        # Check that every stratum has at least 2 members
+        if key.value_counts().min() >= 2:
+            return key
+        # Drop the last column and retry with fewer
+        cols = cols[:-1]
+    # Final fallback: no stratification
+    return None
+
+
+def speaker_stratified_split(df, ratio, random_seed, stratify_cols=None):
     """
     Split a DataFrame into train/val/test with speaker-independent,
-    label-stratified partitioning.
+    stratified partitioning.
 
     Args:
         df: DataFrame with 'Participant_ID' and 'label' columns.
         ratio: List of 3 ints summing to 100, e.g. [75, 10, 15].
         random_seed: Random seed for reproducibility.
+        stratify_cols: List of column names to stratify on (at the speaker level).
+            If None, defaults to ["label"]. Columns must exist in df.
+            For regression tasks, pass a pre-binned column.
 
     Returns:
         (df_train, df_val, df_test)
     """
-    speakers = df.groupby("Participant_ID")["label"].first().reset_index()
+    if stratify_cols is None:
+        stratify_cols = ["label"]
+
+    speakers = df.groupby("Participant_ID")[stratify_cols].first().reset_index()
+    stratify_key = _make_stratify_key(speakers, stratify_cols)
 
     train_val_spk, test_spk = train_test_split(
         speakers["Participant_ID"],
         test_size=ratio[2] / 100,
-        stratify=speakers["label"],
+        stratify=stratify_key,
         random_state=random_seed,
     )
 
     val_relative = ratio[1] / (ratio[0] + ratio[1])
+    remaining = speakers.set_index("Participant_ID").loc[train_val_spk]
+    remaining_key = _make_stratify_key(remaining, stratify_cols)
+
     train_spk, val_spk = train_test_split(
         train_val_spk,
         test_size=val_relative,
-        stratify=speakers.set_index("Participant_ID").loc[train_val_spk, "label"],
+        stratify=remaining_key,
         random_state=random_seed,
     )
 

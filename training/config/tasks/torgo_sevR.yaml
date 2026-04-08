@@ -1,0 +1,26 @@
+task: sevR
+task_type: R
+
+dataset: torgo
+
+data_io_script: training.dataio.prep_torgo
+prepare_data_fn: prepare_torgo_sevR
+
+label_key: label_encoded
+skip_prep: False
+
+num_labels: 1
+
+loss: !new:torch.nn.MSELoss
+
+optim_metric: loss
+optim_mode: min
+
+num_aug_ver: 3
+snr_low: 0
+snr_high: 15
+speed: !new:builtins.list
+  - !new:builtins.range
+    - 90 #start
+    - 110 #stop
+    - 1 #step

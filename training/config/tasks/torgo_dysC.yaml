@@ -1,4 +1,5 @@
 task: dysC
+task_type: B
 
 dataset: torgo
 

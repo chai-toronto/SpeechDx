@@ -1,0 +1,27 @@
+task: depC
+task_type: B
+
+dataset: daic_woz
+
+data_io_script: training.dataio.prep_default
+prepare_data_fn: prepare_data
+
+label_key: label_encoded
+skip_prep: False
+
+num_labels: 1
+
+pos_weight: !new:torch.Tensor
+  data: [2.4]
+
+loss: !new:torch.nn.BCEWithLogitsLoss
+  pos_weight: !ref <pos_weight>
+
+num_aug_ver: 3
+snr_low: 0
+snr_high: 15
+speed: !new:builtins.list
+  - !new:builtins.range
+    - 90 #start
+    - 110 #stop
+    - 1 #step

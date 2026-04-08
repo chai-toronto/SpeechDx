@@ -1,4 +1,5 @@
 task: t1
+task_type: B
 
 dataset: c9s
 
