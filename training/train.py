@@ -180,6 +180,8 @@ if __name__ == "__main__":
                 "manifest_test_path": hparams["test_annotation"],
                 "ratio": hparams['data_params'].get("ratio", None),
                 "random_seed": hparams["random_seed"],
+                "dataset": hparams["dataset"],
+                "task": hparams["task"],
             },
         )
 

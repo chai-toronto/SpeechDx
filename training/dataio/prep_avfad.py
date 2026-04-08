@@ -4,7 +4,7 @@ Speaker-stratified splits on gender + age.
 """
 from pathlib import Path
 import pandas as pd
-from training.dataio.prep_utils import speaker_stratified_split, to_sb_dict_and_save
+from training.dataio.prep_utils import save_task_csv, speaker_stratified_split, to_sb_dict_and_save
 
 
 def _avfad_stratify_cols(df):
@@ -20,7 +20,7 @@ def _avfad_stratify_cols(df):
 def prepare_avfad_pathC(
         wav_folder, metadata_path,
         manifest_train_path, manifest_val_path, manifest_test_path,
-        ratio, random_seed,
+        ratio, random_seed, dataset, task,
 ):
     df = pd.read_csv(metadata_path)
     df["path"] = Path(wav_folder).resolve() / df["path"]
@@ -29,6 +29,7 @@ def prepare_avfad_pathC(
 
     print("Distribution:", df["label"].value_counts().to_dict())
     df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["gender", "age_bin"])
+    save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train, manifest_train_path, df_val, manifest_val_path, df_test, manifest_test_path)
     print("--- prepare_avfad_pathC finished ---")
 
@@ -36,7 +37,7 @@ def prepare_avfad_pathC(
 def prepare_avfad_sexC(
         wav_folder, metadata_path,
         manifest_train_path, manifest_val_path, manifest_test_path,
-        ratio, random_seed,
+        ratio, random_seed, dataset, task,
 ):
     df = pd.read_csv(metadata_path)
     df["path"] = Path(wav_folder).resolve() / df["path"]
@@ -45,6 +46,7 @@ def prepare_avfad_sexC(
 
     print("Distribution:", df["label"].value_counts().to_dict())
     df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["label", "age_bin"])
+    save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train, manifest_train_path, df_val, manifest_val_path, df_test, manifest_test_path)
     print("--- prepare_avfad_sexC finished ---")
 
@@ -52,7 +54,7 @@ def prepare_avfad_sexC(
 def prepare_avfad_smokerC(
         wav_folder, metadata_path,
         manifest_train_path, manifest_val_path, manifest_test_path,
-        ratio, random_seed,
+        ratio, random_seed, dataset, task,
 ):
     df = pd.read_csv(metadata_path)
     df["path"] = Path(wav_folder).resolve() / df["path"]
@@ -62,6 +64,7 @@ def prepare_avfad_smokerC(
 
     print("Distribution:", df["label"].value_counts().to_dict())
     df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["gender", "age_bin"])
+    save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train, manifest_train_path, df_val, manifest_val_path, df_test, manifest_test_path)
     print("--- prepare_avfad_smokerC finished ---")
 
@@ -69,7 +72,7 @@ def prepare_avfad_smokerC(
 def prepare_avfad_ageR(
         wav_folder, metadata_path,
         manifest_train_path, manifest_val_path, manifest_test_path,
-        ratio, random_seed,
+        ratio, random_seed, dataset, task,
 ):
     df = pd.read_csv(metadata_path)
     df["path"] = Path(wav_folder).resolve() / df["path"]
@@ -78,6 +81,7 @@ def prepare_avfad_ageR(
 
     print("Distribution:", df["label"].describe().to_dict())
     df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["gender", "age_bin"])
+    save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train, manifest_train_path, df_val, manifest_val_path, df_test, manifest_test_path)
     print("--- prepare_avfad_ageR finished ---")
 
@@ -85,7 +89,7 @@ def prepare_avfad_ageR(
 def prepare_avfad_bmiR(
         wav_folder, metadata_path,
         manifest_train_path, manifest_val_path, manifest_test_path,
-        ratio, random_seed,
+        ratio, random_seed, dataset, task,
 ):
     df = pd.read_csv(metadata_path)
     df["path"] = Path(wav_folder).resolve() / df["path"]
@@ -97,5 +101,6 @@ def prepare_avfad_bmiR(
 
     print("Distribution:", df["label"].describe().to_dict())
     df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["gender", "age_bin"])
+    save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train, manifest_train_path, df_val, manifest_val_path, df_test, manifest_test_path)
     print("--- prepare_avfad_bmiR finished ---")

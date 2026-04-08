@@ -8,7 +8,7 @@ from typing import Any
 import pandas as pd
 from pandas import DataFrame, Series
 
-from training.dataio.prep_utils import to_sb_dict_and_save
+from training.dataio.prep_utils import save_task_csv, to_sb_dict_and_save
 
 
 def prepare_data(
@@ -19,6 +19,8 @@ def prepare_data(
         manifest_test_path,
         ratio,
         random_seed,
+        dataset,
+        task,
 ):
     """
     This function is dataset-specific.
@@ -41,6 +43,7 @@ def prepare_data(
     df_train = df[df['split'] == 0]
     df_val = df[df['split'] == 1]
 
+    save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train, manifest_train_path, df_val, manifest_val_path, df_test, manifest_test_path)
 
     print("Manifests created.")

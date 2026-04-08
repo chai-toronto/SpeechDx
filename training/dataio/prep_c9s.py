@@ -4,7 +4,7 @@ split, label, classic model fitting
 """
 from pathlib import Path
 import pandas as pd
-from training.dataio.prep_utils import speaker_stratified_split, to_sb_dict_and_save
+from training.dataio.prep_utils import save_task_csv, speaker_stratified_split, to_sb_dict_and_save
 from training.dataio.utils import ensure_dir, PathEncoder
 
 
@@ -16,6 +16,8 @@ def prepare_c9s_t1(
         manifest_test_path,
         ratio,
         random_seed,
+        dataset,
+        task,
 ):
     """
     This function is task-specific.
@@ -31,6 +33,7 @@ def prepare_c9s_t1(
     # Speaker-independent stratified split
     df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed)
 
+    save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train,
                         manifest_train_path,
                         df_val,
@@ -49,6 +52,8 @@ def prepare_c9s_t2(
         manifest_test_path,
         ratio,
         random_seed,
+        dataset,
+        task,
 ):
     df = pd.read_csv(metadata_path)
 
@@ -64,6 +69,7 @@ def prepare_c9s_t2(
     # Speaker-independent stratified split
     df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed)
 
+    save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train,
                         manifest_train_path,
                         df_val,
@@ -83,6 +89,8 @@ def prepare_c9s_L_t1(
         manifest_test_path,
         ratio,
         random_seed,
+        dataset,
+        task,
 ):
     """
     This function is task-specific.
@@ -97,6 +105,7 @@ def prepare_c9s_L_t1(
     # Speaker-independent stratified split
     df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed)
 
+    save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train,
                         manifest_train_path,
                         df_val,
@@ -134,7 +143,7 @@ def _c9s_stratify_cols(df):
 def prepare_c9s_sexC(
         wav_folder, metadata_path,
         manifest_train_path, manifest_val_path, manifest_test_path,
-        ratio, random_seed,
+        ratio, random_seed, dataset, task,
 ):
     df = pd.read_csv(metadata_path)
     df["path"] = Path(wav_folder).resolve() / df["path"]
@@ -143,6 +152,7 @@ def prepare_c9s_sexC(
 
     print("Distribution:", df["label"].value_counts().to_dict())
     df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["label", "age_bin"])
+    save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train, manifest_train_path, df_val, manifest_val_path, df_test, manifest_test_path)
     print("--- prepare_c9s_sexC finished ---")
 
@@ -150,7 +160,7 @@ def prepare_c9s_sexC(
 def prepare_c9s_smokerC(
         wav_folder, metadata_path,
         manifest_train_path, manifest_val_path, manifest_test_path,
-        ratio, random_seed,
+        ratio, random_seed, dataset, task,
 ):
     df = pd.read_csv(metadata_path)
     df["path"] = Path(wav_folder).resolve() / df["path"]
@@ -163,6 +173,7 @@ def prepare_c9s_smokerC(
 
     print("Distribution:", df["label"].value_counts().to_dict())
     df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["gender", "age_bin"])
+    save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train, manifest_train_path, df_val, manifest_val_path, df_test, manifest_test_path)
     print("--- prepare_c9s_smokerC finished ---")
 
@@ -170,7 +181,7 @@ def prepare_c9s_smokerC(
 def prepare_c9s_ageR(
         wav_folder, metadata_path,
         manifest_train_path, manifest_val_path, manifest_test_path,
-        ratio, random_seed,
+        ratio, random_seed, dataset, task,
 ):
     df = pd.read_csv(metadata_path)
     df["path"] = Path(wav_folder).resolve() / df["path"]
@@ -181,6 +192,7 @@ def prepare_c9s_ageR(
 
     print("Distribution:", df["label"].describe().to_dict())
     df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["gender", "age_bin"])
+    save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train, manifest_train_path, df_val, manifest_val_path, df_test, manifest_test_path)
     print("--- prepare_c9s_ageR finished ---")
 
@@ -188,7 +200,7 @@ def prepare_c9s_ageR(
 def prepare_c9s_sympL(
         wav_folder, metadata_path,
         manifest_train_path, manifest_val_path, manifest_test_path,
-        ratio, random_seed,
+        ratio, random_seed, dataset, task,
 ):
     df = pd.read_csv(metadata_path)
     df["path"] = Path(wav_folder).resolve() / df["path"]
@@ -210,5 +222,6 @@ def prepare_c9s_sympL(
 
     print("Samples:", len(df))
     df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["gender", "age_bin"])
+    save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train, manifest_train_path, df_val, manifest_val_path, df_test, manifest_test_path)
     print("--- prepare_c9s_sympL finished ---")

@@ -4,7 +4,7 @@ Speaker-stratified splits on gender + age.
 """
 from pathlib import Path
 import pandas as pd
-from training.dataio.prep_utils import speaker_stratified_split, to_sb_dict_and_save
+from training.dataio.prep_utils import save_task_csv, speaker_stratified_split, to_sb_dict_and_save
 
 COSWARA_SYMPTOM_COLS = [
     "cold", "cough", "fever", "diarrhoea", "loss_of_smell",
@@ -24,7 +24,7 @@ def _coswara_stratify_cols(df):
 def prepare_coswara_covidC(
         wav_folder, metadata_path,
         manifest_train_path, manifest_val_path, manifest_test_path,
-        ratio, random_seed,
+        ratio, random_seed, dataset, task,
 ):
     df = pd.read_csv(metadata_path)
     df["path"] = Path(wav_folder).resolve() / df["path"]
@@ -37,6 +37,7 @@ def prepare_coswara_covidC(
 
     print("Distribution:", df["label"].value_counts().to_dict())
     df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["gender", "age_bin"])
+    save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train, manifest_train_path, df_val, manifest_val_path, df_test, manifest_test_path)
     print("--- prepare_coswara_covidC finished ---")
 
@@ -44,7 +45,7 @@ def prepare_coswara_covidC(
 def prepare_coswara_sympC(
         wav_folder, metadata_path,
         manifest_train_path, manifest_val_path, manifest_test_path,
-        ratio, random_seed,
+        ratio, random_seed, dataset, task,
 ):
     """Binary symptomatic classification: any symptom True -> 1, else 0."""
     df = pd.read_csv(metadata_path)
@@ -61,6 +62,7 @@ def prepare_coswara_sympC(
 
     print("Distribution:", df["label"].value_counts().to_dict())
     df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["gender", "age_bin"])
+    save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train, manifest_train_path, df_val, manifest_val_path, df_test, manifest_test_path)
     print("--- prepare_coswara_sympC finished ---")
 
@@ -68,7 +70,7 @@ def prepare_coswara_sympC(
 def prepare_coswara_sexC(
         wav_folder, metadata_path,
         manifest_train_path, manifest_val_path, manifest_test_path,
-        ratio, random_seed,
+        ratio, random_seed, dataset, task,
 ):
     df = pd.read_csv(metadata_path)
     df["path"] = Path(wav_folder).resolve() / df["path"]
@@ -81,6 +83,7 @@ def prepare_coswara_sexC(
 
     print("Distribution:", df["label"].value_counts().to_dict())
     df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["label", "age_bin"])
+    save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train, manifest_train_path, df_val, manifest_val_path, df_test, manifest_test_path)
     print("--- prepare_coswara_sexC finished ---")
 
@@ -88,7 +91,7 @@ def prepare_coswara_sexC(
 def prepare_coswara_smokerC(
         wav_folder, metadata_path,
         manifest_train_path, manifest_val_path, manifest_test_path,
-        ratio, random_seed,
+        ratio, random_seed, dataset, task,
 ):
     df = pd.read_csv(metadata_path)
     df["path"] = Path(wav_folder).resolve() / df["path"]
@@ -102,6 +105,7 @@ def prepare_coswara_smokerC(
 
     print("Distribution:", df["label"].value_counts().to_dict())
     df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["gender", "age_bin"])
+    save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train, manifest_train_path, df_val, manifest_val_path, df_test, manifest_test_path)
     print("--- prepare_coswara_smokerC finished ---")
 
@@ -109,7 +113,7 @@ def prepare_coswara_smokerC(
 def prepare_coswara_ageR(
         wav_folder, metadata_path,
         manifest_train_path, manifest_val_path, manifest_test_path,
-        ratio, random_seed,
+        ratio, random_seed, dataset, task,
 ):
     df = pd.read_csv(metadata_path)
     df["path"] = Path(wav_folder).resolve() / df["path"]
@@ -122,6 +126,7 @@ def prepare_coswara_ageR(
 
     print("Distribution:", df["label"].describe().to_dict())
     df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["gender", "age_bin"])
+    save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train, manifest_train_path, df_val, manifest_val_path, df_test, manifest_test_path)
     print("--- prepare_coswara_ageR finished ---")
 
@@ -129,7 +134,7 @@ def prepare_coswara_ageR(
 def prepare_coswara_sympL(
         wav_folder, metadata_path,
         manifest_train_path, manifest_val_path, manifest_test_path,
-        ratio, random_seed,
+        ratio, random_seed, dataset, task,
 ):
     """Multi-label symptom classification."""
     df = pd.read_csv(metadata_path)
@@ -151,5 +156,6 @@ def prepare_coswara_sympL(
 
     print("Samples:", len(df))
     df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["gender", "age_bin"])
+    save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train, manifest_train_path, df_val, manifest_val_path, df_test, manifest_test_path)
     print("--- prepare_coswara_sympL finished ---")

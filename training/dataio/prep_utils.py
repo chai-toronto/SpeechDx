@@ -9,6 +9,28 @@ from sklearn.model_selection import train_test_split
 from training.dataio.utils import ensure_dir, PathEncoder
 
 
+def save_task_csv(df_train, df_val, df_test, dataset, task):
+    """Save a combined CSV with updated label and split columns to metadata/<dataset>/<task>.csv.
+
+    Split encoding: 0=train, 1=val, 2=test.
+    """
+    df_train = df_train.copy()
+    df_val = df_val.copy()
+    df_test = df_test.copy()
+
+    df_train["split"] = 0
+    df_val["split"] = 1
+    df_test["split"] = 2
+
+    df_combined = pd.concat([df_train, df_val, df_test], ignore_index=True)
+
+    out_dir = Path("metadata") / dataset
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{task}.csv"
+    df_combined.to_csv(out_path, index=False)
+    print(f"Task CSV saved to {out_path} ({len(df_combined)} rows)")
+
+
 def _make_stratify_key(speaker_df, stratify_cols):
     """Combine multiple columns into a single stratification key.
     Falls back to fewer columns if any combination has <2 members."""
