@@ -8,7 +8,7 @@ from typing import Any
 import pandas as pd
 from pandas import DataFrame, Series
 
-from training.dataio.utils import ensure_dir, PathEncoder
+from training.dataio.prep_utils import to_sb_dict_and_save
 
 
 def prepare_data(

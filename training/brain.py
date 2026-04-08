@@ -6,6 +6,7 @@ from ray import tune
 from speechbrain.utils.epoch_loop import EpochCounter
 from torchmetrics import MetricCollection
 from torchmetrics.classification import Precision, Recall, F1Score, AUROC, Accuracy
+from torchmetrics.regression import MeanAbsoluteError, MeanSquaredError, PearsonCorrCoef, R2Score
 
 
 def unwrap_ddp(module):
@@ -21,26 +22,38 @@ class DiagnosticsBrain(sb.Brain):
         self.cache = None
         self.checkpointer.recover_if_possible()
 
+        # Determine task type: B (binary), C (multiclass), R (regression), L (multilabel)
+        task_type = getattr(self.hparams, "task_type", None)
         num_classes = self.hparams.num_labels
-        if num_classes == 1:
-            num_classes = None
-            average = None
-            ext = ''
-            task = 'binary'
-            self.binary = True
-        else:
-            ext = '_weighted'
-            average = 'weighted'
-            task = 'multiclass'
-            self.binary = False
 
-        self.error_metrics = MetricCollection({
-            f"F1": F1Score(task=task, num_classes=num_classes, average=average),
-            f"precision": Precision(task=task, num_classes=num_classes, average=average),
-            f"recall": Recall(task=task, num_classes=num_classes, average=average),
-            f"accuracy": Accuracy(task=task, num_classes=num_classes, average=average),
-            f"AUROC": AUROC(task=task, num_classes=num_classes, average=average),
-        }).to(self.device)
+        if task_type is None:
+            # Backward compat: infer from num_labels
+            task_type = "B" if num_classes == 1 else "C"
+
+        self.task_type = task_type
+
+        if task_type == "R":
+            metrics = {
+                "MAE": MeanAbsoluteError(),
+                "MSE": MeanSquaredError(),
+                "PearsonR": PearsonCorrCoef(),
+                "R2": R2Score(),
+            }
+        else:
+            task_cfg = {
+                "L": {"task": "multilabel", "num_labels": num_classes, "average": "macro"},
+                "C": {"task": "multiclass", "num_classes": num_classes, "average": "weighted"},
+                "B": {"task": "binary"},
+            }
+            cfg = task_cfg[task_type]
+            metrics = {
+                "F1": F1Score(**cfg),
+                "precision": Precision(**cfg),
+                "recall": Recall(**cfg),
+                "accuracy": Accuracy(**{k: v for k, v in cfg.items() if k != "average"}),
+                "AUROC": AUROC(**cfg),
+            }
+        self.error_metrics = MetricCollection(metrics).to(self.device)
 
         self.model = unwrap_ddp(self.modules.model)
         self.hparams.loss = self.hparams.loss.to(self.device)
@@ -100,15 +113,23 @@ class DiagnosticsBrain(sb.Brain):
         # Dynamically retrieve the label using the 'label_key' from hparams
         label_key = getattr(self.hparams, "label_key", "label_encoded")
         lab = getattr(batch, label_key)
-        lab = lab.to(predictions)
-        lab = lab.float() if self.binary else lab.long()
+        lab = lab.to(predictions.device)
 
-        if self.hparams.num_labels == 1 and lab.dim() == 1:
-            lab = lab.unsqueeze(1)
+        if self.task_type == "C":
+            lab = lab.long()
+        else:
+            lab = lab.float()
+            if lab.dim() == 1 and self.task_type in ("R", "B"):
+                lab = lab.unsqueeze(1)
 
         loss = self.hparams.loss(predictions, lab)
 
-        self.error_metrics.update(predictions, lab)
+        if self.task_type == "R":
+            self.error_metrics.update(predictions.squeeze(), lab.squeeze())
+        elif self.task_type == "L":
+            self.error_metrics.update(predictions, lab.int())
+        else:
+            self.error_metrics.update(predictions, lab)
 
         return loss
 
@@ -132,8 +153,9 @@ class DiagnosticsBrain(sb.Brain):
 
         # At the end of validation...
         if stage == sb.Stage.VALID:
-            optim_metric = getattr(self.hparams, "optim_metric", "F1")
-            optim_mode = getattr(self.hparams, "optim_mode", "max")
+            optim_metric = getattr(self.hparams, "optim_metric", "loss")
+            optim_mode = getattr(self.hparams, "optim_mode", "min")
+
             max_keys, min_keys = [], []
             if optim_mode == "max":
                 max_keys.append(optim_metric)
@@ -168,10 +190,7 @@ class DiagnosticsBrain(sb.Brain):
                 {"Epoch loaded": self.hparams.epoch_counter.current},
                 test_stats=eval_stats,
             )
-            print(eval_stats.keys())
-            for score in eval_stats.values():
-                if isinstance(score, torch.Tensor):
-                    print(score.item())
+            self.test_stats = detensor_dict(eval_stats)
 
 def detensor_dict(d: dict):
     new_d = {}

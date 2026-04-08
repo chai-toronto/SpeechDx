@@ -11,7 +11,7 @@ data_folder: ./data/
 slurm_tmpdir: ./tmp/
 #----------------------------------
 # Most of the knobs you should change
-data_params: !include:tasks/c9s_t1.yaml
+data_params: !include:tasks/c9s_t2.yaml
 
 encoder_params: !include:encoders/qwen3_voice.yaml
 
@@ -32,6 +32,7 @@ training_params: !include:training.yaml
 #----------------------------------
 task: !ref <data_params[task]>
 dataset: !ref <data_params[dataset]>
+task_type: !ref <data_params[task_type]>
 # Noise
 rir_folder: !ref <data_folder>/rir/
 noise_folder: !ref <data_folder>/noise/
