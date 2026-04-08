@@ -18,14 +18,12 @@ encoder_params: !include:encoders/qwen3_voice.yaml
 num_layers: !ref <encoder_params[num_layers]>
 num_labels: !ref <data_params[num_labels]>
 
-dropout: 0.1
-
 probe_params: !include:probes/LTProbe.yaml # Change encover params accordingly
   feature_dim: !ref <encoder_params[feature_dim]>
   num_labels: !ref <num_labels>
   num_layers: !ref <num_layers>
   layer_dim: !ref <encoder_params[layer_dim]>
-  dropout: !ref <dropout>
+
 
 hpopt_params: !include:hpopt.yaml
 training_params: !include:training.yaml
