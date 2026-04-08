@@ -1,18 +1,21 @@
-sample_rate: 48000  # CLAP uses 48kHz by default!
-feature_dim: 768  # CLAP audio encoder hidden size
-max_length_s: 10  # maximum audio length in seconds (CLAP internal)
-max_length: null  # null = try full audio, fallback on OOM
-fallback_max_length: 480000  # 10s @ 48kHz
-num_layers: 4  # CLAP uses hierarchical Swin stages (not standard transformer layers)
-layer_dim: 1
+# CLAP (Contrastive Language-Audio Pretraining) - larger_clap_general variant
+# Source: https://github.com/LAION-AI/CLAP
+# 
+# Audio: 48kHz, max 10s (via random crop for this model)
+# Note: enable_fusion=False for this model, so long audio is randomly cropped
+# For fusion support (4 mel views), use laion/clap-htsat-fused (feature_dim=768)
+#
+# Audio backbone: hidden_size=1024, depths=[2,2,12,2]
 
-# Note: CLAP's default sample rate is 48kHz, not 16kHz!
-# If your audio is 16kHz, the feature extractor will handle resampling,
-# but it's recommended to resample your audio to 48kHz beforehand.
+sample_rate: 48000
+feature_dim: 1024  # audio backbone hidden_size
+num_layers: 4  # hierarchical Swin stages
+layer_dim: 1
+max_length: 10
+min_length: 3
 
 encoder: !new:model.clap.CLAP
-  ssl_encoder_source: "laion/clap-htsat-unfused"
+  ssl_encoder_source: "laion/larger_clap_general"
   freeze_encoder: True
   output_hidden_states: False
   sample_rate: !ref <sample_rate>
-  max_length_s: !ref <max_length_s>
