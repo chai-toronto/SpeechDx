@@ -25,7 +25,7 @@ TASK =[]
 
 PROBE_NAME = "AvgTProbe"
 PROBE_YAML = "AvgTProbe.yaml"
-EXPERIMENT_TAG = "test"
+EXPERIMENT_TAG = "run1"
 
 BASE_CONFIG = Path("training/config/main.yaml")
 TMP_CONFIG = Path("training/config/_tmp_run.yaml")
