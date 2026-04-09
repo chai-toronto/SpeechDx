@@ -30,8 +30,10 @@ def prepare_c9s_t1(
     df = df[df["split_t1"].notna()]
     df['label'] = (df['Symptoms'] != 'None') & (df['Symptoms'].notna())
 
+    df = _c9s_stratify_cols(df)
+
     # Speaker-independent stratified split
-    df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed)
+    df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["label", "gender", "age_bin"])
 
     save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train,
@@ -103,8 +105,10 @@ def prepare_c9s_L_t1(
 
     df['label'] = (df['Symptoms'] != 'None') & (df['Symptoms'].notna())
 
+    df = _c9s_stratify_cols(df)
+
     # Speaker-independent stratified split
-    df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed)
+    df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["label", "gender", "age_bin"])
 
     save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train,
@@ -132,12 +136,12 @@ C9S_SYMPTOMS = [
 
 
 def _c9s_stratify_cols(df):
-    """Add gender + age_bin columns for stratification. Filters to valid rows."""
-    df = df[df["Sex"].isin(["Male", "Female"])].copy()
-    df["gender"] = df["Sex"].map({"Male": "male", "Female": "female"})
+    """Add gender + age_bin columns for stratification. Missing/invalid -> 'unknown' (no row drops)."""
+    df = df.copy()
+    df["gender"] = df["Sex"].map({"Male": "male", "Female": "female"}).fillna("unknown")
     ages = df["Age"].map(AGE_MIDPOINTS)
-    df["age_bin"] = pd.cut(ages, bins=[0, 20, 40, 60, 100], labels=["<20", "20-39", "40-59", "60+"])
-    df = df.dropna(subset=["age_bin"])
+    age_bin = pd.cut(ages, bins=[0, 20, 40, 60, 100], labels=["<20", "20-39", "40-59", "60+"])
+    df["age_bin"] = age_bin.cat.add_categories(["unknown"]).fillna("unknown")
     return df
 
 
@@ -149,7 +153,9 @@ def prepare_c9s_sexC(
     df = pd.read_csv(metadata_path)
     df["path"] = Path(wav_folder).resolve() / df["path"]
     df = _c9s_stratify_cols(df)
-    df["label"] = (df["Sex"] == "Male").astype(int)
+    # Label requires known gender — drop unknown.
+    df = df[df["gender"].isin(["male", "female"])].copy()
+    df["label"] = (df["gender"] == "male").astype(int)
 
     print("Distribution:", df["label"].value_counts().to_dict())
     df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["label", "age_bin"])
@@ -166,14 +172,14 @@ def prepare_c9s_smokerC(
     df = pd.read_csv(metadata_path)
     df["path"] = Path(wav_folder).resolve() / df["path"]
 
-    active = ["1to10", "11to20", "21+", "ecig"]
+    active = ["1to10", "11to20", "21+"]
     df = df[df["Smoking"].isin(active + ["never"])].copy()
     df["label"] = df["Smoking"].isin(active).astype(int)
 
     df = _c9s_stratify_cols(df)
 
     print("Distribution:", df["label"].value_counts().to_dict())
-    df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["gender", "age_bin"])
+    df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["label", "gender", "age_bin"])
     save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train, manifest_train_path, df_val, manifest_val_path, df_test, manifest_test_path)
     print("--- prepare_c9s_smokerC finished ---")
@@ -192,7 +198,8 @@ def prepare_c9s_ageR(
     df = _c9s_stratify_cols(df)
 
     print("Distribution:", df["label"].describe().to_dict())
-    df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["gender", "age_bin"])
+    # label=age (continuous) -> use age_bin as proxy. Order: label_proxy, sex.
+    df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["age_bin", "gender"])
     save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train, manifest_train_path, df_val, manifest_val_path, df_test, manifest_test_path)
     print("--- prepare_c9s_ageR finished ---")

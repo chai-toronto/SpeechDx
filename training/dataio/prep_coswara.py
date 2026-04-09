@@ -13,11 +13,11 @@ COSWARA_SYMPTOM_COLS = [
 
 
 def _coswara_stratify_cols(df):
-    """Add gender + age_bin columns for stratification. Filters to valid rows."""
-    df = df[df["gender"].isin(["male", "female"])].copy()
-    df = df[df["age"].notna()].copy()
-    df["age_bin"] = pd.cut(df["age"], bins=[0, 20, 40, 60, 100], labels=["<20", "20-39", "40-59", "60+"])
-    df = df.dropna(subset=["age_bin"])
+    """Add gender + age_bin columns for stratification. Missing/invalid -> 'unknown' (no row drops)."""
+    df = df.copy()
+    df["gender"] = df["gender"].where(df["gender"].isin(["male", "female"]), "unknown")
+    age_bin = pd.cut(df["age"], bins=[0, 20, 40, 60, 100], labels=["<20", "20-39", "40-59", "60+"])
+    df["age_bin"] = age_bin.cat.add_categories(["unknown"]).fillna("unknown")
     return df
 
 
@@ -74,12 +74,13 @@ def prepare_coswara_sexC(
 ):
     df = pd.read_csv(metadata_path)
     df["path"] = Path(wav_folder).resolve() / df["path"]
+    # Label requires known gender — drop unknown.
     df = df[df["gender"].isin(["male", "female"])].copy()
     df["label"] = (df["gender"] == "male").astype(int)
 
-    df = df[df["age"].notna()].copy()
-    df["age_bin"] = pd.cut(df["age"], bins=[0, 20, 40, 60, 100], labels=["<20", "20-39", "40-59", "60+"])
-    df = df.dropna(subset=["age_bin"])
+    # Age missing/out-of-range -> 'unknown' bin (no row drops for stratification).
+    age_bin = pd.cut(df["age"], bins=[0, 20, 40, 60, 100], labels=["<20", "20-39", "40-59", "60+"])
+    df["age_bin"] = age_bin.cat.add_categories(["unknown"]).fillna("unknown")
 
     print("Distribution:", df["label"].value_counts().to_dict())
     df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["label", "age_bin"])
@@ -126,7 +127,8 @@ def prepare_coswara_ageR(
     df["age_bin"] = pd.cut(df["label"], bins=[0, 20, 40, 60, 100], labels=["<20", "20-39", "40-59", "60+"])
 
     print("Distribution:", df["label"].describe().to_dict())
-    df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["gender", "age_bin"])
+    # label=age (continuous) -> use age_bin as proxy. Order: label_proxy, sex.
+    df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["age_bin", "gender"])
     save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train, manifest_train_path, df_val, manifest_val_path, df_test, manifest_test_path)
     print("--- prepare_coswara_ageR finished ---")
@@ -156,7 +158,7 @@ def prepare_coswara_sympL(
     df = _coswara_stratify_cols(df)
 
     print("Samples:", len(df))
-    df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["label", "gender", "age_bin"])
+    df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["gender", "age_bin"])
     save_task_csv(df_train, df_val, df_test, dataset, task)
     to_sb_dict_and_save(df_train, manifest_train_path, df_val, manifest_val_path, df_test, manifest_test_path)
     print("--- prepare_coswara_sympL finished ---")
