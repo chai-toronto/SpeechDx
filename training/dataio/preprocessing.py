@@ -205,12 +205,19 @@ def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
                 output_keys=output_keys + output_vars,
             )
 
-            warmup_ds = [dataset_all_aug] * num_versions
-            warmup_ds.append(dataset_all_no_aug)
+            all_ids = list(data_dict["all"].keys())
+            train_already_cached = train_cache_emb.is_fully_cached(all_ids)
+            val_already_cached = val_cache_emb.is_fully_cached(all_ids)
 
-            for i, ds in enumerate(warmup_ds):
-                print(f"Iterating dataset {i} to warm the cache.")
-                ds.iterate_once()
+            if train_already_cached and val_already_cached:
+                print("Cache already fully warmed, skipping warmup iterations.")
+            else:
+                warmup_ds = [dataset_all_aug] * num_versions
+                warmup_ds.append(dataset_all_no_aug)
+
+                for i, ds in enumerate(warmup_ds):
+                    print(f"Iterating dataset {i} to warm the cache.")
+                    ds.iterate_once()
 
             train_cache_emb.close()
             val_cache_emb.close()

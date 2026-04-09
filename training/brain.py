@@ -129,7 +129,7 @@ class DiagnosticsBrain(sb.Brain):
         loss = self.hparams.loss(predictions, lab)
 
         if self.task_type == "R":
-            self.error_metrics.update(predictions.squeeze(), lab.squeeze())
+            self.error_metrics.update(predictions.squeeze(-1), lab.squeeze(-1))
         elif self.task_type == "L":
             self.error_metrics.update(predictions, lab.int())
         else:

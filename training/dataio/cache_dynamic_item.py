@@ -53,6 +53,21 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
         """Return the HDF5 key for a specific version of uid."""
         return f"{uid}/v{version}"
 
+    def is_fully_cached(self, ids):
+        """Check if all ids have all versions cached.
+
+        Arguments
+        ---------
+        ids : iterable
+            Collection of uid strings to check.
+
+        Returns
+        -------
+        bool
+            True if every uid has all versions cached.
+        """
+        return all(self._is_cached(uid) for uid in ids)
+
     def _is_cached(self, uid):
         """Test whether all versions of uid are cached."""
         return self._version_key(uid, self.num_version - 1) in self.hdf5file

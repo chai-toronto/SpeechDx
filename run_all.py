@@ -92,7 +92,7 @@ def make_config(model_name: str, encoder_yaml: str, task_yaml: str, config_id: s
 
 
 def run_one(task_stem: str, model_name: str, encoder_yaml: str, device: str | None,
-            config_id: str = "", dataset_lock: threading.Lock | None = None) -> tuple[str, bool, float]:
+            config_id: str = "", dataset_lock: threading.Lock = None) -> tuple[str, bool, float]:
     """Run a single training job. Returns (label, success, elapsed_seconds).
     Acquires dataset_lock to prevent concurrent jobs on the same dataset."""
     label = f"{task_stem} × {model_name}"
