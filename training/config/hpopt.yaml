@@ -10,7 +10,7 @@ hp_search_seed: 2026  # Seed for reproducible HP sampling (set to null for rando
 
 # Ray Tune specific configuration
 ray_tune_config:
-  num_samples: 1  # Number of trial runs
+  num_samples: 5  # Number of trial runs
   resources_per_trial:
     cpu: 8   # CPUs per trial
     gpu: 0

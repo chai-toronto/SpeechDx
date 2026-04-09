@@ -4,7 +4,7 @@ __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
 model_name: qwen3voice
 probe_name: AvgTProbe
-experiment_tag: test
+experiment_tag: run1
 
 data_folder: ./data/
 #slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]

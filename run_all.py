@@ -21,7 +21,7 @@ ENCODERS = {
     # "w2v2": "w2v2.yaml",
 }
 
-TASK =['ravdess_emoC', 'coswara_ageR', 'coswara_sympL', 'coswara_sexC']
+TASK =[]
 
 PROBE_NAME = "AvgTProbe"
 PROBE_YAML = "AvgTProbe.yaml"

@@ -1,5 +1,5 @@
 num_workers: 0 # 22 Change when on HPC, this is for DataLoader
-batch_size: 2
+batch_size: 16
 persistent_workers: False
 progressbar: True
 test_only: False
@@ -8,7 +8,7 @@ eval_precision: fp32
 skip_nonfinite_grads: True
 nonfinite_patience: 10
 grad_accumulation_factor: 1
-number_of_epochs: 1
+number_of_epochs: 50
 # Ray will override these during and after hyperparameter optimization
 lr_s: 1e-4
 l2: 0.01
