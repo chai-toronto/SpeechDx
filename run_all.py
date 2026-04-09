@@ -4,7 +4,9 @@
 import argparse
 import re
 import subprocess
+import threading
 import time
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -89,34 +91,39 @@ def make_config(model_name: str, encoder_yaml: str, task_yaml: str, config_id: s
     return config_path
 
 
-def run_one(task_stem: str, model_name: str, encoder_yaml: str, device: str | None, config_id: str = "") -> tuple[str, bool, float]:
-    """Run a single training job. Returns (label, success, elapsed_seconds)."""
+def run_one(task_stem: str, model_name: str, encoder_yaml: str, device: str | None,
+            config_id: str = "", dataset_lock: threading.Lock | None = None) -> tuple[str, bool, float]:
+    """Run a single training job. Returns (label, success, elapsed_seconds).
+    Acquires dataset_lock to prevent concurrent jobs on the same dataset."""
     label = f"{task_stem} × {model_name}"
-    task_yaml = f"{task_stem}.yaml"
-    config_path = make_config(model_name, encoder_yaml, task_yaml, config_id)
+    lock = dataset_lock or threading.Lock()
 
-    cmd = get_train_command(task_stem).split()
-    cmd.append(str(config_path))
-    if device:
-        cmd.append(f"--device={device}")
+    with lock:
+        task_yaml = f"{task_stem}.yaml"
+        config_path = make_config(model_name, encoder_yaml, task_yaml, config_id)
 
-    print(f"\n{'='*60}")
-    print(f"  Running: {label}")
-    print(f"  Command: {' '.join(cmd)}")
-    print(f"{'='*60}")
+        cmd = get_train_command(task_stem).split()
+        cmd.append(str(config_path))
+        if device:
+            cmd.append(f"--device={device}")
 
-    start = time.time()
-    try:
-        subprocess.run(cmd, check=True)
-        elapsed = time.time() - start
-        print(f"  ✓ {label} completed in {elapsed/60:.1f} min")
-        return label, True, elapsed
-    except subprocess.CalledProcessError as e:
-        elapsed = time.time() - start
-        print(f"  ✗ {label} FAILED (exit code {e.returncode}) after {elapsed/60:.1f} min")
-        return label, False, elapsed
-    finally:
-        config_path.unlink(missing_ok=True)
+        print(f"\n{'='*60}")
+        print(f"  Running: {label}")
+        print(f"  Command: {' '.join(cmd)}")
+        print(f"{'='*60}")
+
+        start = time.time()
+        try:
+            subprocess.run(cmd, check=True)
+            elapsed = time.time() - start
+            print(f"  ✓ {label} completed in {elapsed/60:.1f} min")
+            return label, True, elapsed
+        except subprocess.CalledProcessError as e:
+            elapsed = time.time() - start
+            print(f"  ✗ {label} FAILED (exit code {e.returncode}) after {elapsed/60:.1f} min")
+            return label, False, elapsed
+        finally:
+            config_path.unlink(missing_ok=True)
 
 
 def cmd_status(args: argparse.Namespace) -> None:
@@ -147,8 +154,9 @@ def cmd_run(args: argparse.Namespace) -> None:
     skipped, completed, failed = 0, 0, []
     max_parallel = args.parallel
 
-    # Collect jobs to run
+    # Collect jobs to run, with per-dataset locks to prevent concurrent same-dataset jobs
     jobs = []
+    dataset_locks: dict[str, threading.Lock] = defaultdict(threading.Lock)
     for task_stem in tasks:
         dataset, task = get_task_info(task_stem)
         for model_name, encoder_yaml in ENCODERS.items():
@@ -157,14 +165,15 @@ def cmd_run(args: argparse.Namespace) -> None:
                 print(f"SKIP (done): {task_stem} × {model_name}")
                 skipped += 1
                 continue
-            jobs.append((task_stem, model_name, encoder_yaml))
+            jobs.append((task_stem, model_name, encoder_yaml, dataset))
 
-    print(f"\n{len(jobs)} jobs to run ({max_parallel} parallel workers)\n")
+    print(f"\n{len(jobs)} jobs to run ({max_parallel} parallel workers)")
+    print(f"  (same-dataset tasks run sequentially to avoid conflicts)\n")
 
     with ThreadPoolExecutor(max_workers=max_parallel) as pool:
         futures = {
-            pool.submit(run_one, task_stem, model_name, encoder_yaml, args.device, f"_{i}"): f"{task_stem} × {model_name}"
-            for i, (task_stem, model_name, encoder_yaml) in enumerate(jobs)
+            pool.submit(run_one, task_stem, model_name, encoder_yaml, args.device, f"_{i}", dataset_locks[dataset]): f"{task_stem} × {model_name}"
+            for i, (task_stem, model_name, encoder_yaml, dataset) in enumerate(jobs)
         }
         for future in as_completed(futures):
             label, success, elapsed = future.result()
