@@ -203,8 +203,8 @@ if __name__ == "__main__":
             runtime_env={
                 "excludes": [
                     "data/", "exps/", "tmp/", ".idea/",
-                    "*.DS_Store", "uv.lock", "pyproject.toml",
-                    ".python-version", "exps_old/", "data_zip", "data_extra"
+                "*.DS_Store", "uv.lock", "pyproject.toml",
+                ".python-version", "exps_old/", "data_extra/", "data_zip/", "metadata/"
                 ],
             },
         )

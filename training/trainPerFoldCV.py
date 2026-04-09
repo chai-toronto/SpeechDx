@@ -128,7 +128,7 @@ def run_fold_hp_optimization(fold_idx, hparams, hparams_file, run_opts, override
             "excludes": [
                 "data/", "exps/", "tmp/", ".idea/",
                 "*.DS_Store", "uv.lock", "pyproject.toml",
-                ".python-version", "exps_old/"
+                ".python-version", "exps_old/", "data_extra/", "data_zip/", "metadata/"
             ],
         },
     )
@@ -308,7 +308,7 @@ if __name__ == "__main__":
         print(f"  Fold {i}: {val}")
 
     # Save summary
-    summary_path = os.path.join(hparams["output_folder"], "fold_summary.yaml")
+    summary_path = os.path.join(hparams["output_folder"], "test_results.yaml")
     fold_detail = {
         f"fold_{i}": {
             "best_config": all_best_configs[i],

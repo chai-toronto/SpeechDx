@@ -113,6 +113,10 @@ class DiagnosticsBrain(sb.Brain):
         # Dynamically retrieve the label using the 'label_key' from hparams
         label_key = getattr(self.hparams, "label_key", "label_encoded")
         lab = getattr(batch, label_key)
+        # SpeechBrain wraps variable-length labels (e.g. multi-label lists)
+        # in PaddedData; unwrap to the underlying tensor before moving device.
+        if hasattr(lab, "data"):
+            lab = lab.data
         lab = lab.to(predictions.device)
 
         if self.task_type == "C":
