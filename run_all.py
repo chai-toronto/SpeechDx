@@ -4,7 +4,6 @@
 import argparse
 import re
 import subprocess
-import threading
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -21,7 +20,7 @@ ENCODERS = {
     # "w2v2": "w2v2.yaml",
 }
 
-TASK =[]
+TASK = []
 
 PROBE_NAME = "AvgTProbe"
 PROBE_YAML = "AvgTProbe.yaml"
@@ -91,39 +90,35 @@ def make_config(model_name: str, encoder_yaml: str, task_yaml: str, config_id: s
     return config_path
 
 
-def run_one(task_stem: str, model_name: str, encoder_yaml: str, device: str | None,
-            config_id: str = "", dataset_lock: threading.Lock = None) -> tuple[str, bool, float]:
-    """Run a single training job. Returns (label, success, elapsed_seconds).
-    Acquires dataset_lock to prevent concurrent jobs on the same dataset."""
+def run_one(task_stem: str, model_name: str, encoder_yaml: str, device=None,
+            config_id: str = "") -> tuple[str, bool, float]:
+    """Run a single training job. Returns (label, success, elapsed_seconds)."""
     label = f"{task_stem} × {model_name}"
-    lock = dataset_lock or threading.Lock()
+    task_yaml = f"{task_stem}.yaml"
+    config_path = make_config(model_name, encoder_yaml, task_yaml, config_id)
 
-    with lock:
-        task_yaml = f"{task_stem}.yaml"
-        config_path = make_config(model_name, encoder_yaml, task_yaml, config_id)
+    cmd = get_train_command(task_stem).split()
+    cmd.append(str(config_path))
+    if device:
+        cmd.append(f"--device={device}")
 
-        cmd = get_train_command(task_stem).split()
-        cmd.append(str(config_path))
-        if device:
-            cmd.append(f"--device={device}")
+    print(f"\n{'='*60}")
+    print(f"  Running: {label}")
+    print(f"  Command: {' '.join(cmd)}")
+    print(f"{'='*60}", flush=True)
 
-        print(f"\n{'='*60}")
-        print(f"  Running: {label}")
-        print(f"  Command: {' '.join(cmd)}")
-        print(f"{'='*60}")
-
-        start = time.time()
-        try:
-            subprocess.run(cmd, check=True)
-            elapsed = time.time() - start
-            print(f"  ✓ {label} completed in {elapsed/60:.1f} min")
-            return label, True, elapsed
-        except subprocess.CalledProcessError as e:
-            elapsed = time.time() - start
-            print(f"  ✗ {label} FAILED (exit code {e.returncode}) after {elapsed/60:.1f} min")
-            return label, False, elapsed
-        finally:
-            config_path.unlink(missing_ok=True)
+    start = time.time()
+    try:
+        subprocess.run(cmd, check=True)
+        elapsed = time.time() - start
+        print(f"  ✓ {label} completed in {elapsed/60:.1f} min", flush=True)
+        return label, True, elapsed
+    except subprocess.CalledProcessError as e:
+        elapsed = time.time() - start
+        print(f"  ✗ {label} FAILED (exit code {e.returncode}) after {elapsed/60:.1f} min", flush=True)
+        return label, False, elapsed
+    finally:
+        config_path.unlink(missing_ok=True)
 
 
 def cmd_status(args: argparse.Namespace) -> None:
@@ -149,14 +144,23 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(f"\nSummary: {complete}/{total} complete, {incomplete} remaining")
 
 
+def run_dataset_queue(dataset, queue, device, start_idx):
+    """Run all tasks for one dataset sequentially. Called from its own thread."""
+    results = []
+    for i, (task_stem, model_name, encoder_yaml) in enumerate(queue):
+        label, success, elapsed = run_one(
+            task_stem, model_name, encoder_yaml, device, f"_{start_idx + i}"
+        )
+        results.append((label, success, elapsed))
+    return results
+
+
 def cmd_run(args: argparse.Namespace) -> None:
     tasks = discover_tasks()
     skipped, completed, failed = 0, 0, []
-    max_parallel = args.parallel
 
-    # Collect jobs to run, with per-dataset locks to prevent concurrent same-dataset jobs
-    jobs = []
-    dataset_locks: dict[str, threading.Lock] = defaultdict(threading.Lock)
+    # Group jobs by dataset — each group runs sequentially, groups run in parallel
+    dataset_queues = defaultdict(list)
     for task_stem in tasks:
         dataset, task = get_task_info(task_stem)
         for model_name, encoder_yaml in ENCODERS.items():
@@ -165,22 +169,31 @@ def cmd_run(args: argparse.Namespace) -> None:
                 print(f"SKIP (done): {task_stem} × {model_name}")
                 skipped += 1
                 continue
-            jobs.append((task_stem, model_name, encoder_yaml, dataset))
+            dataset_queues[dataset].append((task_stem, model_name, encoder_yaml))
 
-    print(f"\n{len(jobs)} jobs to run ({max_parallel} parallel workers)")
-    print(f"  (same-dataset tasks run sequentially to avoid conflicts)\n")
+    total_jobs = sum(len(q) for q in dataset_queues.values())
+    print(f"\n{total_jobs} jobs across {len(dataset_queues)} datasets")
+    for ds, q in dataset_queues.items():
+        print(f"  {ds}: {len(q)} tasks")
+    print()
 
-    with ThreadPoolExecutor(max_workers=max_parallel) as pool:
-        futures = {
-            pool.submit(run_one, task_stem, model_name, encoder_yaml, args.device, f"_{i}", dataset_locks[dataset]): f"{task_stem} × {model_name}"
-            for i, (task_stem, model_name, encoder_yaml, dataset) in enumerate(jobs)
-        }
+    # One thread per dataset, each runs its tasks sequentially
+    # Cap workers to avoid GPU OOM when many datasets run concurrently
+    max_workers = min(len(dataset_queues), args.max_workers)
+    print(f"Running with {max_workers} concurrent dataset workers\n")
+    idx = 0
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {}
+        for dataset, queue in dataset_queues.items():
+            futures[pool.submit(run_dataset_queue, dataset, queue, args.device, idx)] = dataset
+            idx += len(queue)
+
         for future in as_completed(futures):
-            label, success, elapsed = future.result()
-            if success:
-                completed += 1
-            else:
-                failed.append(label)
+            for label, success, elapsed in future.result():
+                if success:
+                    completed += 1
+                else:
+                    failed.append(label)
 
     # Summary
     print(f"\n{'='*60}")
@@ -200,7 +213,7 @@ def main() -> None:
 
     run_parser = sub.add_parser("run", help="Execute all incomplete runs")
     run_parser.add_argument("--device", type=str, default=None, help="Device override (e.g. cuda:0)")
-    run_parser.add_argument("--parallel", "-j", type=int, default=4, help="Max parallel jobs (default: 4)")
+    run_parser.add_argument("--max-workers", "-j", type=int, default=4, help="Max concurrent dataset workers (default: 4)")
 
     args = parser.parse_args()
     if args.command == "status":

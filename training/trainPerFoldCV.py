@@ -122,6 +122,9 @@ def run_fold_hp_optimization(fold_idx, hparams, hparams_file, run_opts, override
     optim_metric = hparams.get("optim_metric", "F1")
     optim_mode = hparams.get("optim_mode", "max")
 
+    tune_config = hparams.get("ray_tune_config", {})
+    resources_per_trial = tune_config.get("resources_per_trial", {"cpu": 1, "gpu": 0})
+
     ray.init(
         ignore_reinit_error=True,
         runtime_env={
@@ -141,8 +144,6 @@ def run_fold_hp_optimization(fold_idx, hparams, hparams_file, run_opts, override
         project_root=project_root,
         fold_idx=fold_idx,
     )
-
-    tune_config = hparams.get("ray_tune_config", {})
 
     reporter = CLIReporter(
         metric_columns=["F1", "loss", "precision", "recall", "AUROC", "accuracy"],
@@ -166,7 +167,6 @@ def run_fold_hp_optimization(fold_idx, hparams, hparams_file, run_opts, override
         num_results=hparams.get("grace_period", 5),
     )
 
-    resources_per_trial = tune_config.get("resources_per_trial", {"cpu": 1, "gpu": 0})
     storage_path = (Path(hparams["output_folder"]) / "ray_results" / f"fold_{fold_idx}").resolve()
 
     if hparams.get("continue_exp", False):

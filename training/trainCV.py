@@ -167,9 +167,6 @@ if __name__ == "__main__":
             overrides=overrides,
         )
 
-        # Configure Ray Tune
-        tune_config = hparams.get("ray_tune_config", {})
-
         # Set up reporter
         reporter = CLIReporter(
             metric_columns=["F1", "loss", "precision", "recall", "roc", "sens", "accuracy"],

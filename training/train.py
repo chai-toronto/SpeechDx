@@ -198,6 +198,8 @@ if __name__ == "__main__":
     # Check if hyperparameter optimization is enabled
     if not hparams.get("test_only"):
         # Initialize Ray
+        tune_config = hparams.get("ray_tune_config", {})
+        resources_per_trial = tune_config.get("resources_per_trial", {"cpu": 1, "gpu": 0})
         ray.init(
             ignore_reinit_error=True,
             runtime_env={
@@ -219,9 +221,6 @@ if __name__ == "__main__":
             overrides=overrides,
             project_root=_project_root,
         )
-
-        # Configure Ray Tune
-        tune_config = hparams.get("ray_tune_config", {})
 
         # Set up reporter
         task_type = hparams.get("task_type", "B")
@@ -250,8 +249,6 @@ if __name__ == "__main__":
             grace_period=hparams['hpopt_params']['limit_warmup'],
             num_results=hparams['grace_period'] # correct order, semantics from SB
         )
-
-        resources_per_trial = tune_config.get("resources_per_trial", {"cpu": 1, "gpu": 0})
 
         storage_path = (Path(hparams["output_folder"]) / "results").resolve()
 
