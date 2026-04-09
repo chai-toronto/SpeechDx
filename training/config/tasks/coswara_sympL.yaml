@@ -9,7 +9,7 @@ prepare_data_fn: prepare_coswara_sympL
 label_key: label_encoded
 skip_prep: False
 
-num_labels: 9
+num_labels: 10
 
 loss: !new:torch.nn.BCEWithLogitsLoss
 
