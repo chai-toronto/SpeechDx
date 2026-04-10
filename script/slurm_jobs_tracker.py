@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Track queued and running SLURM jobs by job name.
+"""Track queued, running, and finished SLURM jobs by job name.
 
 The tracker polls ``squeue`` and keeps one tracked run id per job name,
 recording the current status and time left for each name. Queued jobs are
-included alongside running jobs. By default it refreshes every 10 minutes
-and writes the latest snapshot to JSON.
+included alongside running jobs. Jobs that disappear from ``squeue`` after
+being tracked are marked as done. By default it refreshes every 10 minutes and
+writes the latest snapshot to JSON.
 """
 
 from __future__ import annotations
@@ -117,7 +118,19 @@ def choose_active_job(jobs_for_name: list[dict[str, str]]) -> tuple[dict[str, st
     return chosen, duplicates
 
 
-def build_snapshot(user: str | None) -> dict[str, object]:
+def read_previous_snapshot(output_path: Path) -> dict[str, object]:
+    if not output_path.exists():
+        return {}
+    try:
+        loaded = json.loads(output_path.read_text())
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(loaded, dict):
+        return {}
+    return loaded
+
+
+def build_snapshot(user: str | None, previous_snapshot: dict[str, object] | None = None) -> dict[str, object]:
     jobs = query_slurm_jobs(user)
     jobs_by_name: dict[str, list[dict[str, str]]] = {}
     for job in jobs:
@@ -125,6 +138,7 @@ def build_snapshot(user: str | None) -> dict[str, object]:
 
     tracked_jobs: dict[str, dict[str, object]] = {}
     duplicate_names: list[str] = []
+    now = utc_now_iso()
     for name in sorted(jobs_by_name):
         chosen, duplicates = choose_active_job(jobs_by_name[name])
         tracked_jobs[name] = {
@@ -133,19 +147,38 @@ def build_snapshot(user: str | None) -> dict[str, object]:
             "time_left": chosen["time_left"],
             "elapsed": chosen["elapsed"],
             "start_time": chosen["start_time"],
+            "last_seen_utc": now,
         }
         if duplicates:
             duplicate_names.append(name)
             tracked_jobs[name]["other_active_run_ids"] = duplicates
 
+    if previous_snapshot:
+        previous_jobs = previous_snapshot.get("jobs_by_name", {})
+        if isinstance(previous_jobs, dict):
+            for name, record in previous_jobs.items():
+                if name in tracked_jobs or not isinstance(record, dict):
+                    continue
+                done_record = dict(record)
+                done_record["status"] = "DONE"
+                done_record["time_left"] = "0:00"
+                done_record["done_at_utc"] = done_record.get("done_at_utc", now)
+                done_record.pop("other_active_run_ids", None)
+                tracked_jobs[str(name)] = done_record
+
     return {
-        "updated_at_utc": utc_now_iso(),
+        "updated_at_utc": now,
         "user": user,
         "job_count": len(jobs),
         "tracked_name_count": len(tracked_jobs),
+        "done_name_count": sum(
+            1
+            for record in tracked_jobs.values()
+            if isinstance(record, dict) and record.get("status") == "DONE"
+        ),
         "duplicate_name_count": len(duplicate_names),
         "duplicate_names": duplicate_names,
-        "jobs_by_name": tracked_jobs,
+        "jobs_by_name": dict(sorted(tracked_jobs.items())),
     }
 
 
@@ -159,7 +192,7 @@ def format_table(snapshot: dict[str, object]) -> str:
     assert isinstance(jobs_by_name, dict)
 
     if not jobs_by_name:
-        return "No active SLURM jobs found."
+        return "No tracked SLURM jobs found."
 
     headers = ("job_name", "run_id", "status", "time_left")
     rows = []
@@ -200,7 +233,8 @@ def format_table(snapshot: dict[str, object]) -> str:
 
 
 def refresh(user: str | None, output_path: Path) -> None:
-    snapshot = build_snapshot(user)
+    previous_snapshot = read_previous_snapshot(output_path)
+    snapshot = build_snapshot(user, previous_snapshot)
     write_snapshot(snapshot, output_path)
     print(f"[{snapshot['updated_at_utc']}] wrote {output_path}")
     print(format_table(snapshot))
