@@ -4,8 +4,9 @@
 The tracker polls ``squeue`` and keeps one tracked run id per job name,
 recording the current status and time left for each name. Queued jobs are
 included alongside running jobs. Jobs that disappear from ``squeue`` after
-being tracked are marked as done. By default it refreshes every 10 minutes and
-writes the latest snapshot to JSON.
+being tracked are marked with their final ``sacct`` status when available, or
+``DONE`` otherwise. By default it refreshes every 10 minutes and writes the
+latest snapshot to JSON.
 """
 
 from __future__ import annotations
@@ -103,6 +104,41 @@ def query_slurm_jobs(user: str | None) -> list[dict[str, str]]:
     return jobs
 
 
+def query_final_job_status(job_id: str) -> str | None:
+    command = [
+        "sacct",
+        "--noheader",
+        "--parsable2",
+        f"--jobs={job_id}",
+        "--format=JobIDRaw,State",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return None
+
+    if result.returncode != 0:
+        return None
+
+    base_job_id = job_id.split("_", maxsplit=1)[0]
+    for raw_line in result.stdout.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split("|")
+        if len(parts) < 2:
+            continue
+        sacct_job_id, state = parts[0].strip(), parts[1].strip()
+        if sacct_job_id == job_id or sacct_job_id == base_job_id:
+            return state.split(maxsplit=1)[0]
+    return None
+
+
 def choose_active_job(jobs_for_name: list[dict[str, str]]) -> tuple[dict[str, str], list[str]]:
     def sort_key(job: dict[str, str]) -> tuple[int, int]:
         status_priority = 0 if job["status"] == "RUNNING" else 1
@@ -160,7 +196,9 @@ def build_snapshot(user: str | None, previous_snapshot: dict[str, object] | None
                 if name in tracked_jobs or not isinstance(record, dict):
                     continue
                 done_record = dict(record)
-                done_record["status"] = "DONE"
+                run_id = str(done_record.get("run_id", ""))
+                final_status = query_final_job_status(run_id) if run_id else None
+                done_record["status"] = final_status or "DONE"
                 done_record["time_left"] = "0:00"
                 done_record["done_at_utc"] = done_record.get("done_at_utc", now)
                 done_record.pop("other_active_run_ids", None)
@@ -174,7 +212,8 @@ def build_snapshot(user: str | None, previous_snapshot: dict[str, object] | None
         "done_name_count": sum(
             1
             for record in tracked_jobs.values()
-            if isinstance(record, dict) and record.get("status") == "DONE"
+            if isinstance(record, dict)
+            and record.get("status") not in {"PENDING", "RUNNING", "SUSPENDED", "CONFIGURING"}
         ),
         "duplicate_name_count": len(duplicate_names),
         "duplicate_names": duplicate_names,
