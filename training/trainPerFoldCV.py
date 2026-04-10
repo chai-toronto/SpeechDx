@@ -125,16 +125,7 @@ def run_fold_hp_optimization(fold_idx, hparams, hparams_file, run_opts, override
     tune_config = hparams.get("ray_tune_config", {})
     resources_per_trial = tune_config.get("resources_per_trial", {"cpu": 1, "gpu": 0})
 
-    ray.init(
-        ignore_reinit_error=True,
-        runtime_env={
-            "excludes": [
-                "data/", "exps/", "tmp/", ".idea/",
-                "*.DS_Store", "uv.lock", "pyproject.toml",
-                ".python-version", "exps_old/", "data_extra/", "data_zip/", "metadata/"
-            ],
-        },
-    )
+    ray.init(ignore_reinit_error=True)
 
     trainable = tune.with_parameters(
         train_fold_with_ray,

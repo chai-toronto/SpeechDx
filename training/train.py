@@ -211,16 +211,7 @@ if __name__ == "__main__":
         # Initialize Ray
         tune_config = hparams.get("ray_tune_config", {})
         resources_per_trial = tune_config.get("resources_per_trial", {"cpu": 1, "gpu": 0})
-        ray.init(
-            ignore_reinit_error=True,
-            runtime_env={
-                "excludes": [
-                    "data/", "exps/", "tmp/", ".idea/",
-                "*.DS_Store", "uv.lock", "pyproject.toml",
-                ".python-version", "exps_old/", "data_extra/", "data_zip/", "metadata/"
-                ],
-            },
-        )
+        ray.init(ignore_reinit_error=True)
 
         # Parse search space
         search_space = parse_hp_search_space(hparams)
