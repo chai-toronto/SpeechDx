@@ -207,16 +207,31 @@ def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
 
             all_ids = list(data_dict["all"].keys())
 
-            warmup_ds = [(dataset_all_aug, train_cache_emb, "train")] * num_versions
-            warmup_ds.append((dataset_all_no_aug, val_cache_emb, "val"))
+            # One warmup pass per version slot to write. Train writes v0..v{N-1};
+            # val has a single version (v0).
+            warmup_ds = [
+                (dataset_all_aug, train_cache_emb, "train", v) for v in range(num_versions)
+            ]
+            warmup_ds.append((dataset_all_no_aug, val_cache_emb, "val", 0))
 
             try:
-                for i, (ds, cache, kind) in enumerate(warmup_ds):
-                    if cache.is_fully_cached(all_ids):
-                        print(f"Iteration {i} ({kind}): cache already fully warmed, skipping.")
+                for i, (ds, cache, kind, version) in enumerate(warmup_ds):
+                    # Refine the id list every iteration so we only warm what's
+                    # still missing for this version slot — this lets us resume
+                    # a partially-warmed cache without redoing work.
+                    uncached = cache.uncached_ids(all_ids, version)
+                    if not uncached:
+                        print(
+                            f"Iteration {i} ({kind} v{version}): "
+                            f"cache already fully warmed, skipping."
+                        )
                         continue
-                    print(f"Iterating dataset {i} ({kind}) to warm the cache.")
-                    ds.iterate_once()
+                    print(
+                        f"Iterating dataset {i} ({kind} v{version}) to warm the cache "
+                        f"({len(uncached)}/{len(all_ids)} uncached)."
+                    )
+                    subset = sb.dataio.dataset.FilteredSortedDynamicItemDataset(ds, uncached)
+                    subset.iterate_once()
             finally:
                 # Always close so HDF5 flushes its object header to disk,
                 # even on SIGTERM/exception. Prevents corrupt-cache resume bugs.

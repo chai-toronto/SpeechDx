@@ -68,6 +68,24 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
         """
         return all(self._is_cached(uid) for uid in ids)
 
+    def uncached_ids(self, ids, version):
+        """Return ids whose given version slot is not yet cached.
+
+        Arguments
+        ---------
+        ids : iterable
+            Collection of uid strings to check.
+        version : int
+            Version index to check (0-based).
+
+        Returns
+        -------
+        list
+            Subset of ``ids`` whose ``v{version}`` key is missing from
+            the HDF5 file, preserving input order.
+        """
+        return [uid for uid in ids if self._version_key(uid, version) not in self.hdf5file]
+
     def _is_cached(self, uid):
         """Test whether all versions of uid are cached."""
         return self._version_key(uid, self.num_version - 1) in self.hdf5file
