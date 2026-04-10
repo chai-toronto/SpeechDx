@@ -210,15 +210,18 @@ def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
             warmup_ds = [(dataset_all_aug, train_cache_emb, "train")] * num_versions
             warmup_ds.append((dataset_all_no_aug, val_cache_emb, "val"))
 
-            for i, (ds, cache, kind) in enumerate(warmup_ds):
-                if cache.is_fully_cached(all_ids):
-                    print(f"Iteration {i} ({kind}): cache already fully warmed, skipping.")
-                    continue
-                print(f"Iterating dataset {i} ({kind}) to warm the cache.")
-                ds.iterate_once()
-
-            train_cache_emb.close()
-            val_cache_emb.close()
+            try:
+                for i, (ds, cache, kind) in enumerate(warmup_ds):
+                    if cache.is_fully_cached(all_ids):
+                        print(f"Iteration {i} ({kind}): cache already fully warmed, skipping.")
+                        continue
+                    print(f"Iterating dataset {i} ({kind}) to warm the cache.")
+                    ds.iterate_once()
+            finally:
+                # Always close so HDF5 flushes its object header to disk,
+                # even on SIGTERM/exception. Prevents corrupt-cache resume bugs.
+                train_cache_emb.close()
+                val_cache_emb.close()
 
         train_cache_emb = make_cache_emb(train_cache_dir, False, num_versions)
         val_cache_emb = make_cache_emb(val_cache_dir, False)

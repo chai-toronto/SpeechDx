@@ -148,6 +148,11 @@ def train_with_ray(config, hparams_file, run_opts, overrides, project_root):
 
 # Recipe begins!
 if __name__ == "__main__":
+    # Convert SLURM SIGTERM into SystemExit so try/finally cleanup runs
+    # (lets HDF5 cache files close cleanly instead of leaving corrupt headers).
+    import signal
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+
     # Reading command line arguments
     hparams_file, run_opts, overrides = sb.parse_arguments(sys.argv[1:])
 

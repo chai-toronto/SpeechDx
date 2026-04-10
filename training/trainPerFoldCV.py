@@ -215,6 +215,11 @@ def run_fold_hp_optimization(fold_idx, hparams, hparams_file, run_opts, override
 
 # Recipe begins!
 if __name__ == "__main__":
+    # Convert SLURM SIGTERM into SystemExit so try/finally cleanup runs
+    # (lets HDF5 cache files close cleanly instead of leaving corrupt headers).
+    import signal
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+
     hparams_file, run_opts, overrides = sb.parse_arguments(sys.argv[1:])
 
     if os.environ.get("WORLD_SIZE"):
