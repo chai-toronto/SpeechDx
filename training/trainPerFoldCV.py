@@ -193,8 +193,19 @@ def run_fold_hp_optimization(fold_idx, hparams, hparams_file, run_opts, override
     best_trial = analysis.get_best_trial(metric=optim_metric, mode=optim_mode, scope="all")
     best_config = analysis.get_best_config(metric=optim_metric, mode=optim_mode, scope="all")
 
-    # Get the metrics from the best-performing epoch, not just the last one
-    df = best_trial.dataframe(metric=optim_metric, mode=optim_mode)
+    # Get the metrics from the best-performing epoch, not just the last one.
+    # Match by trial_id because best_trial.local_path may point to a Ray
+    # session artifacts dir, while trial_dataframes is keyed by the persistent
+    # storage logdir.
+    df = None
+    for logdir, trial_df in analysis.trial_dataframes.items():
+        if best_trial.trial_id in logdir:
+            df = trial_df
+            break
+    if df is None:
+        raise KeyError(
+            f"Could not find trial dataframe for best trial {best_trial.trial_id}"
+        )
     if optim_mode == "min":
         best_row = df.loc[df[optim_metric].idxmin()]
     else:
