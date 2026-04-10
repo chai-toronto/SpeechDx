@@ -229,6 +229,12 @@ if __name__ == "__main__":
     with open(hparams_file) as fin:
         hparams = load_hyperpyyaml(fin, overrides)
 
+    # Wipe output_folder unless continuing a previous experiment
+    if not hparams.get("continue_exp", False):
+        output_folder = Path(hparams["output_folder"])
+        if output_folder.exists():
+            print(f"Wiping output_folder: {output_folder}")
+            shutil.rmtree(output_folder)
 
     # Data preparation (manifest generation) — must run before dataio_prep
     if not hparams["skip_prep"]:
