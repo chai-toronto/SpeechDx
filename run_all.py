@@ -24,7 +24,7 @@ ENCODERS = {
     "emotion2vec": "emotion2vec.yaml",
     "hubert": "hubert.yaml",
     "mms": "mms.yaml",
-    "opera_gt": "opera_gt.yaml",
+    # "opera_gt": "opera_gt.yaml",
     "w2v2": "w2v2.yaml",
     "wavjepa": "wavjepa.yaml",
     "whisper": "whisper.yaml",
