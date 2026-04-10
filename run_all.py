@@ -2,12 +2,15 @@
 """Run training across all task × encoder combinations with skip-checking and timing."""
 
 import argparse
+import csv
 import re
 import subprocess
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+
+import yaml
 
 # ─── Global configuration ──────────────────────────────────────────────
 # Encoders: model_name -> encoder YAML filename
@@ -61,8 +64,8 @@ def get_task_info(task_stem: str) -> tuple[str, str]:
     return dataset_m.group(1), task_m.group(1)
 
 
-def get_output_folder(dataset: str, task: str, model_name: str) -> Path:
-    return Path(f"./exps/{dataset}_{task}/{model_name}-{PROBE_NAME}-{EXPERIMENT_TAG}")
+def get_output_folder(dataset: str, task: str, model_name: str, tag: str = EXPERIMENT_TAG) -> Path:
+    return Path(f"./exps/{dataset}_{task}/{model_name}-{PROBE_NAME}-{tag}")
 
 
 def get_train_command(task_stem: str) -> str:
@@ -131,6 +134,116 @@ def run_one(task_stem: str, model_name: str, encoder_yaml: str, device=None,
         return label, False, elapsed
     finally:
         config_path.unlink(missing_ok=True)
+
+
+# ─── Result parsing ────────────────────────────────────────────────────
+CLASSIFICATION_METRICS = ["AUROC", "F1", "accuracy"]
+REGRESSION_METRICS = ["MAE", "MSE", "PearsonR", "R2"]
+# filename -> list of metric keys that belong in that CSV
+CSV_LAYOUT = {
+    "AUC": "AUROC",
+    "F1": "F1",
+    "Acc": "accuracy",
+    "MAE": "MAE",
+    "MSE": "MSE",
+    "PearsonR": "PearsonR",
+    "R2": "R2",
+}
+
+
+def parse_results_txt(path: Path) -> dict[str, float]:
+    """Parse 'key: value' lines from a test_results.txt file."""
+    metrics = {}
+    for line in path.read_text().splitlines():
+        if ":" not in line:
+            continue
+        key, _, val = line.partition(":")
+        try:
+            metrics[key.strip()] = float(val.strip())
+        except ValueError:
+            pass
+    return metrics
+
+
+def parse_results_yaml(path: Path) -> dict[str, float]:
+    """Parse test_results.yaml (trainPerFoldCV) — take summary means."""
+    data = yaml.safe_load(path.read_text())
+    summary = data.get("summary", {}) if isinstance(data, dict) else {}
+    return {k: float(v["mean"]) for k, v in summary.items()
+            if isinstance(v, dict) and "mean" in v}
+
+
+def load_metrics(output_folder: Path, task_stem: str) -> dict[str, float] | None:
+    results_file = output_folder / get_results_file(task_stem)
+    if not results_file.exists():
+        return None
+    if results_file.suffix == ".yaml":
+        return parse_results_yaml(results_file)
+    return parse_results_txt(results_file)
+
+
+def cmd_summary(args: argparse.Namespace) -> None:
+    tasks = discover_tasks()
+    encoders = list(ENCODERS.keys())
+
+    # metric_key -> {task_stem: {encoder: value}}
+    matrices: dict[str, dict[str, dict[str, float]]] = {
+        k: defaultdict(dict) for k in CSV_LAYOUT.values()
+    }
+    # Track which tasks are regression (have any regression metric)
+    regression_tasks: set[str] = set()
+    classification_tasks: set[str] = set()
+    found, missing = 0, 0
+
+    for task_stem in tasks:
+        dataset, task = get_task_info(task_stem)
+        for model_name in encoders:
+            folder = get_output_folder(dataset, task, model_name, args.tag)
+            metrics = load_metrics(folder, task_stem)
+            if metrics is None:
+                missing += 1
+                continue
+            found += 1
+            if any(k in metrics for k in REGRESSION_METRICS):
+                regression_tasks.add(task_stem)
+            if any(k in metrics for k in CLASSIFICATION_METRICS):
+                classification_tasks.add(task_stem)
+            for metric_key in CSV_LAYOUT.values():
+                if metric_key in metrics:
+                    matrices[metric_key][task_stem][model_name] = metrics[metric_key]
+
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    written = []
+    for csv_name, metric_key in CSV_LAYOUT.items():
+        data = matrices[metric_key]
+        if not data:
+            continue
+        # Classification CSVs → only classification tasks; regression → only regression tasks
+        if metric_key in REGRESSION_METRICS:
+            task_rows = sorted(t for t in data if t in regression_tasks)
+        else:
+            task_rows = sorted(t for t in data if t in classification_tasks)
+        if not task_rows:
+            continue
+
+        csv_path = out_dir / f"{csv_name}.csv"
+        with csv_path.open("w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["task", *encoders])
+            for task_stem in task_rows:
+                row = [task_stem]
+                for enc in encoders:
+                    val = data[task_stem].get(enc, "")
+                    row.append(f"{val:.4f}" if isinstance(val, float) else "")
+                writer.writerow(row)
+        written.append(csv_path)
+
+    print(f"\nParsed {found} result files, {missing} missing")
+    print(f"Wrote {len(written)} CSV(s) to {out_dir}/")
+    for p in written:
+        print(f"  {p}")
 
 
 def cmd_status(args: argparse.Namespace) -> None:
@@ -229,6 +342,12 @@ def main() -> None:
 
     sub.add_parser("status", help="Show completion status of all runs")
 
+    summary_parser = sub.add_parser("summary", help="Collect results into per-metric CSVs")
+    summary_parser.add_argument("--out-dir", type=str, default="exps/_summary",
+                                help="Directory to write metric CSVs (default: exps/_summary)")
+    summary_parser.add_argument("--tag", type=str, default=EXPERIMENT_TAG,
+                                help=f"Experiment tag to scan (default: {EXPERIMENT_TAG})")
+
     run_parser = sub.add_parser("run", help="Execute all incomplete runs")
     run_parser.add_argument("--device", type=str, default=None, help="Device override (e.g. cuda:0)")
     run_parser.add_argument("--max-workers", "-j", type=int, default=3, help="Max concurrent dataset workers (default: 3)")
@@ -241,6 +360,8 @@ def main() -> None:
         cmd_status(args)
     elif args.command == "run":
         cmd_run(args)
+    elif args.command == "summary":
+        cmd_summary(args)
 
 
 if __name__ == "__main__":
