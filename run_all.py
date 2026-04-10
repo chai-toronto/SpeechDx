@@ -14,13 +14,21 @@ from pathlib import Path
 # Edit this dict to change which encoders are run.
 ENCODERS = {
     "qwen3voice": "qwen3_voice.yaml",
-    # "wavlm": "wavlm.yaml",
-    # "whisper": "whisper.yaml",
-    # "hubert": "hubert.yaml",
-    # "w2v2": "w2v2.yaml",
+    "wavlm": "wavlm.yaml",
+    "ast": "ast.yaml",
+    "audiomae": "audiomae.yaml",
+    # "clap": "clap.yaml",  # reserved, run later (needs -j 1 due to 48kHz memory)
+    "emotion2vec": "emotion2vec.yaml",
+    "hubert": "hubert.yaml",
+    "mms": "mms.yaml",
+    "opera_gt": "opera_gt.yaml",
+    "w2v2": "w2v2.yaml",
+    "wavjepa": "wavjepa.yaml",
+    "whisper": "whisper.yaml",
 }
 
 TASK = []
+EXCLUDE_DATASETS = {"daic_woz", "edaic"}  # long-form interview audio, OOMs during cache warm
 
 PROBE_NAME = "AvgTProbe"
 PROBE_YAML = "AvgTProbe.yaml"
@@ -34,10 +42,13 @@ TASKS_DIR = Path("training/config/tasks")
 
 def discover_tasks() -> list[str]:
     """Auto-scan training/config/tasks/*.yaml and return sorted list of stems.
-    Override with TASK env var (comma-separated) if set."""
+    Override with TASK env var (comma-separated) if set. Datasets listed in
+    EXCLUDE_DATASETS are filtered out."""
     if TASK:
-        return TASK
-    return sorted(p.stem for p in TASKS_DIR.glob("*.yaml"))
+        stems = TASK
+    else:
+        stems = sorted(p.stem for p in TASKS_DIR.glob("*.yaml"))
+    return [s for s in stems if get_task_info(s)[0] not in EXCLUDE_DATASETS]
 
 
 def get_task_info(task_stem: str) -> tuple[str, str]:
@@ -85,7 +96,8 @@ def make_config(model_name: str, encoder_yaml: str, task_yaml: str, config_id: s
         text = re.sub(pattern, replacement, text, flags=re.MULTILINE)
     # Remove chunk_at line entirely
     text = re.sub(r"^chunk_at:.*\n?", "", text, flags=re.MULTILINE)
-    config_path = Path(f"training/config/_tmp_run{config_id}.yaml")
+    # Include model name in path so concurrent jobs (different encoders) don't clash
+    config_path = Path(f"training/config/_tmp_run_{model_name}{config_id}.yaml")
     config_path.write_text(text)
     return config_path
 
@@ -159,11 +171,17 @@ def cmd_run(args: argparse.Namespace) -> None:
     tasks = discover_tasks()
     skipped, completed, failed = 0, 0, []
 
+    # Filter encoders by --encoder flag (default: all)
+    if args.encoder:
+        encoders = {args.encoder: ENCODERS[args.encoder]}
+    else:
+        encoders = ENCODERS
+
     # Group jobs by dataset — each group runs sequentially, groups run in parallel
     dataset_queues = defaultdict(list)
     for task_stem in tasks:
         dataset, task = get_task_info(task_stem)
-        for model_name, encoder_yaml in ENCODERS.items():
+        for model_name, encoder_yaml in encoders.items():
             folder = get_output_folder(dataset, task, model_name)
             if is_complete(folder, task_stem):
                 print(f"SKIP (done): {task_stem} × {model_name}")
@@ -213,7 +231,10 @@ def main() -> None:
 
     run_parser = sub.add_parser("run", help="Execute all incomplete runs")
     run_parser.add_argument("--device", type=str, default=None, help="Device override (e.g. cuda:0)")
-    run_parser.add_argument("--max-workers", "-j", type=int, default=4, help="Max concurrent dataset workers (default: 4)")
+    run_parser.add_argument("--max-workers", "-j", type=int, default=3, help="Max concurrent dataset workers (default: 3)")
+    run_parser.add_argument("--encoder", type=str, default=None,
+                            choices=list(ENCODERS.keys()),
+                            help="Run only this encoder (default: all in ENCODERS dict)")
 
     args = parser.parse_args()
     if args.command == "status":

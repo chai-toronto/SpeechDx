@@ -10,7 +10,7 @@ max_length: 30
 min_length: 3
 
 encoder: !new:model.whisper.Whisper
-  ssl_encoder_source: "openai/whisper-base"
+  ssl_encoder_source: "openai/whisper-large-v3"
   freeze_encoder: True
   output_hidden_states: False
   sample_rate: !ref <sample_rate>

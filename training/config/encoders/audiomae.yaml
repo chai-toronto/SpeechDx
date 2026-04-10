@@ -13,5 +13,3 @@ encoder: !new:model.audiomae.AudioMAE
   ssl_encoder_source: "hance-ai/audiomae"
   freeze_encoder: True
   output_hidden_states: False
-  sample_rate: !ref <sample_rate>
-  max_length_s: !ref <max_length>

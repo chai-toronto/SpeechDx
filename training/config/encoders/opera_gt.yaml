@@ -21,6 +21,7 @@ input_sec: 8
 num_layers: 1  # Single output embedding (CLS token)
 layer_dim: 1
 max_length: null  # null = try full audio, fallback on OOM
+min_length: 0
 fallback_max_length: 128000  # 8s @ 16kHz (OPERA uses 8s internally)
 
 encoder: !new:model.opera.OPERA

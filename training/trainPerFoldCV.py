@@ -46,7 +46,7 @@ def dataio_prep(hparams):
         val_folds = json.load(f)
 
     data_dict = {}
-    for i in range(hparams['num_fold']):
+    for i in range(hparams['data_params']['num_fold']):
         data_dict[f'train_{i}'] = train_folds[i]
         data_dict[f'val_{i}'] = val_folds[i]
 
@@ -243,7 +243,6 @@ if __name__ == "__main__":
                 "manifest_val_path": hparams["val_annotation"],
                 "random_seed": hparams["random_seed"],
                 "raw_label_key": hparams['data_params']["raw_label_key"],
-                "new_test": hparams["new_test"],
                 "num_fold": hparams['data_params']["num_fold"],
             },
         )
@@ -253,7 +252,7 @@ if __name__ == "__main__":
 
     project_root = str(Path.cwd().resolve())
     search_space = parse_hp_search_space(hparams)
-    num_folds = hparams["num_fold"]
+    num_folds = hparams['data_params']["num_fold"]
 
     optim_metric = hparams.get("optim_metric", "F1")
 
