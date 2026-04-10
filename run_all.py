@@ -250,23 +250,38 @@ def cmd_status(args: argparse.Namespace) -> None:
     tasks = discover_tasks()
     complete, incomplete = 0, 0
 
-    print(f"{'Task':<30} {'Encoder':<25} {'Status'}")
-    print("-" * 70)
-
+    encoders = list(ENCODERS.keys())
+    rows = []
     for task_stem in tasks:
         dataset, task = get_task_info(task_stem)
-        for model_name in ENCODERS:
+        row = [task_stem]
+        for model_name in encoders:
             folder = get_output_folder(dataset, task, model_name)
             if is_complete(folder, task_stem):
-                status = "COMPLETE"
+                row.append("☑")
                 complete += 1
             else:
-                status = "INCOMPLETE"
+                row.append("☐")
                 incomplete += 1
-            print(f"{task_stem:<30} {model_name:<25} {status}")
+        rows.append(row)
+
+    headers = ["task", *encoders]
+    widths = [len(header) for header in headers]
+    for row in rows:
+        for idx, cell in enumerate(row):
+            widths[idx] = max(widths[idx], len(cell))
+
+    def format_row(row: list[str]) -> str:
+        return " | ".join(cell.ljust(widths[idx]) for idx, cell in enumerate(row))
+
+    print(format_row(headers))
+    print("-+-".join("-" * width for width in widths))
+    for row in rows:
+        print(format_row(row))
 
     total = complete + incomplete
-    print(f"\nSummary: {complete}/{total} complete, {incomplete} remaining")
+    print(f"\nLegend: ☑ complete, ☐ incomplete")
+    print(f"Summary: {complete}/{total} complete, {incomplete} remaining")
 
 
 def run_dataset_queue(dataset, queue, device, start_idx):

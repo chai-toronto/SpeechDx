@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Track active SLURM jobs by job name.
+"""Track queued and running SLURM jobs by job name.
 
-The tracker polls ``squeue`` and keeps one active run id per job name,
-recording the current status and time left for each name. By default it
-refreshes every 10 minutes and writes the latest snapshot to JSON.
+The tracker polls ``squeue`` and keeps one tracked run id per job name,
+recording the current status and time left for each name. Queued jobs are
+included alongside running jobs. By default it refreshes every 10 minutes
+and writes the latest snapshot to JSON.
 """
 
 from __future__ import annotations
