@@ -5,8 +5,8 @@ The tracker polls ``squeue`` and keeps one tracked run id per job name,
 recording the current status and time left for each name. Queued jobs are
 included alongside running jobs. Jobs that disappear from ``squeue`` after
 being tracked are marked with their final ``sacct`` status when available, or
-``DONE`` otherwise. By default it refreshes every 10 minutes and writes the
-latest snapshot to JSON.
+``DONE`` otherwise during the current tracker run. By default it refreshes
+every 10 minutes and writes the latest snapshot to JSON.
 """
 
 from __future__ import annotations
@@ -154,18 +154,6 @@ def choose_active_job(jobs_for_name: list[dict[str, str]]) -> tuple[dict[str, st
     return chosen, duplicates
 
 
-def read_previous_snapshot(output_path: Path) -> dict[str, object]:
-    if not output_path.exists():
-        return {}
-    try:
-        loaded = json.loads(output_path.read_text())
-    except json.JSONDecodeError:
-        return {}
-    if not isinstance(loaded, dict):
-        return {}
-    return loaded
-
-
 def build_snapshot(user: str | None, previous_snapshot: dict[str, object] | None = None) -> dict[str, object]:
     jobs = query_slurm_jobs(user)
     jobs_by_name: dict[str, list[dict[str, str]]] = {}
@@ -271,13 +259,17 @@ def format_table(snapshot: dict[str, object]) -> str:
     return "\n".join(lines)
 
 
-def refresh(user: str | None, output_path: Path) -> None:
-    previous_snapshot = read_previous_snapshot(output_path)
+def refresh(
+    user: str | None,
+    output_path: Path,
+    previous_snapshot: dict[str, object] | None = None,
+) -> dict[str, object]:
     snapshot = build_snapshot(user, previous_snapshot)
     write_snapshot(snapshot, output_path)
     print(f"[{snapshot['updated_at_utc']}] wrote {output_path}")
     print(format_table(snapshot))
     sys.stdout.flush()
+    return snapshot
 
 
 def main() -> int:
@@ -285,9 +277,10 @@ def main() -> int:
     if args.interval_seconds <= 0:
         raise SystemExit("--interval-seconds must be a positive integer.")
 
+    previous_snapshot = None
     try:
         while True:
-            refresh(args.user, args.output)
+            previous_snapshot = refresh(args.user, args.output, previous_snapshot)
             if args.once:
                 return 0
             time.sleep(args.interval_seconds)
