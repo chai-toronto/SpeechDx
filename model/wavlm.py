@@ -18,7 +18,12 @@ class WavLM(nn.Module):
         self.sample_rate = sample_rate
 
     def forward(self, x, lengths=None):
-        input_values = self.processor(x, sampling_rate=self.sample_rate, return_tensors="pt").input_values[0]
+        # Convert to list of numpy arrays for proper batch handling
+        if isinstance(x, torch.Tensor):
+            x_list = [xi.cpu().numpy() for xi in x]
+        else:
+            x_list = x
+        input_values = self.processor(x_list, sampling_rate=self.sample_rate, return_tensors="pt", padding=True).input_values
         input_values = input_values.to(device=x.device, dtype=x.dtype)
 
         mask = None
