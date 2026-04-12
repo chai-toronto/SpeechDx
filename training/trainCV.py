@@ -180,7 +180,7 @@ if __name__ == "__main__":
 
         search_alg = ConcurrencyLimiter(
             optuna_search,
-            max_concurrent=hparams.get("max_concurrent_trials", 4)
+            max_concurrent=hparams.get("max_concurrent_trials", 1)
         )
 
         scheduler = ASHAScheduler(

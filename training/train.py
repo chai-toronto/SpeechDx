@@ -40,7 +40,52 @@ import speechbrain as sb
 from hyperpyyaml import load_hyperpyyaml
 from training.brain import DiagnosticsBrain
 from training.brains import Brains, DiagnosticsCVBrain
+from training.config_fork import fork_trial_config
 from training.hp_utils import parse_hp_search_space
+
+
+def _as_override_dict(overrides):
+    """Normalize SB's overrides (YAML string or dict or None) to a dict."""
+    if overrides is None or overrides == "":
+        return {}
+    if isinstance(overrides, dict):
+        return dict(overrides)
+    return yaml.safe_load(overrides) or {}
+
+
+#: Top-level source paths in ``main.yaml`` whose absolute values get stamped
+#: into each trial's forked config. Derived paths (``save_folder``,
+#: ``wav_folder``, ``train_cache_dir``, ...) are deliberately excluded —
+#: they use ``!ref <source_key>/...`` in the yaml, so stamping the source is
+#: enough for the chain to resolve to an absolute value automatically. In
+#: particular, stamping ``save_folder`` here would shadow the
+#: ``!ref <output_folder>/save`` chain and break per-trial nesting.
+_PATH_STAMP_KEYS = (
+    "data_folder",
+    "slurm_tmpdir",
+    "output_folder",
+    "train_annotation",
+    "val_annotation",
+    "test_annotation",
+)
+
+
+def _collect_resolved_paths(hparams, project_root):
+    """Pre-resolve top-level source paths to absolute strings.
+
+    These get stamped into the forked main.yaml so Ray workers never see a
+    relative path (they may run from a different CWD). Only SOURCE keys
+    (:data:`_PATH_STAMP_KEYS`) are resolved — derived paths reach the worker
+    via the yaml's ``!ref`` chains.
+    """
+    resolved = {}
+    for key in _PATH_STAMP_KEYS:
+        val = hparams.get(key)
+        if not isinstance(val, str):
+            continue
+        p = Path(val)
+        resolved[key] = str(p if p.is_absolute() else (project_root / p).resolve())
+    return resolved
 
 def dataio_prep(hparams):
     """
@@ -69,44 +114,47 @@ def dataio_prep(hparams):
     datasets = master_dataio_prep(data_dict, hparams)
     return datasets
 
-def train_with_ray(config, hparams_file, run_opts, overrides, project_root):
+def train_with_ray(config, hparams_file, run_opts, overrides, resolved_paths):
     """Ray Tune trainable function that wraps the SpeechBrain training loop.
 
+    Each trial forks the config tree into ``<trial_dir>/config/`` on first
+    invocation and then loads hparams from the fork with no overrides. On
+    resume the existing fork is reused verbatim, so edits to the base
+    ``training/config/*.yaml`` between runs never leak into a resumed trial.
+
     Args:
-        config: Dict containing hyperparameters from Ray Tune
-        hparams_file: Path to the yaml hyperparameter file
-        run_opts: SpeechBrain run options
-        overrides: Command line overrides (dict or string)
-        project_root: Absolute path to the project root directory
+        config: Hyperparameter sample from Ray Tune (lr_s, l2, ...).
+        hparams_file: Path to the source main yaml (only read on first call).
+        run_opts: SpeechBrain run options.
+        overrides: Command-line overrides (YAML string or dict).
+        resolved_paths: Dict of top-level path-like hparams pre-resolved to
+            absolute strings by the main process.
     """
-    # Update overrides with Ray Tune config
-    ray_overrides = overrides.copy() if overrides else {}
+    trial_id = tune.get_context().get_trial_id() or "default"
+    trial_dir = Path(resolved_paths["output_folder"]) / trial_id
+
+    # Assemble the full stamp set for the forked main.yaml:
+    # absolute paths → Ray sample → CLI overrides → trial-specific keys.
+    fork_overrides = {}
+    fork_overrides.update(resolved_paths)
+    fork_overrides.update(_as_override_dict(overrides))
     for key, value in config.items():
         print(f"Ray Tune override: {key} = {value}")
-        ray_overrides[key] = value
+        fork_overrides[key] = value
+    fork_overrides["output_folder"] = str(trial_dir)
+    fork_overrides["warm_cache"] = False
 
-    # Load hyperparameters with Ray Tune config overrides
-    with open(hparams_file) as fin:
-        hparams = load_hyperpyyaml(fin, ray_overrides)
-
-    # Resolve relative paths against project root for Ray workers
-    root = Path(project_root)
-    for key, val in hparams.items():
-        if isinstance(val, str) and not Path(val).is_absolute() and (
-                key.endswith("_dir") or key.endswith("_folder")
-                or key.endswith("_path") or key.endswith("_annotation")
-        ):
-            hparams[key] = str(root / val)
-
-    # Create experiment directory with trial-specific folder
-    trial_id = tune.get_context().get_trial_id() or "default"
-    hparams["output_folder"] = os.path.join(hparams["output_folder"], trial_id)
-    hparams["save_folder"] = os.path.join(hparams["save_folder"], trial_id)
+    forked_yaml = fork_trial_config(
+        base_yaml=Path(hparams_file),
+        trial_dir=trial_dir,
+        overrides=fork_overrides,
+    )
+    with open(forked_yaml) as fin:
+        hparams = load_hyperpyyaml(fin)
 
     sb.create_experiment_directory(
         experiment_directory=hparams["output_folder"],
-        hyperparams_to_save=hparams_file,
-        overrides=ray_overrides,
+        hyperparams_to_save=str(forked_yaml),
     )
 
     # Dynamically load the data preparation module
@@ -114,11 +162,6 @@ def train_with_ray(config, hparams_file, run_opts, overrides, project_root):
         data_io_module = importlib.import_module(hparams["data_io_script"])
     except KeyError:
         sys.exit("Error: 'data_io_script' path must be defined in the YAML file.")
-
-    # Cache should already be warmed by the main process; open read-only here
-    hparams["warm_cache"] = False
-
-    # Create dataset objects
 
     datasets = dataio_prep(hparams)
 
@@ -201,7 +244,9 @@ if __name__ == "__main__":
     datasets = dataio_prep(hparams)
 
 
-    _project_root = str(Path.cwd().resolve())
+    _project_root = Path.cwd().resolve()
+    resolved_paths = _collect_resolved_paths(hparams, _project_root)
+    base_output_folder = resolved_paths["output_folder"]
 
     optim_metric = hparams.get("optim_metric", "F1")
     optim_mode = hparams.get("optim_mode", "max")
@@ -218,10 +263,10 @@ if __name__ == "__main__":
 
         trainable = tune.with_parameters(
             train_with_ray,
-            hparams_file=hparams_file,
+            hparams_file=str(hparams_file),
             run_opts=run_opts,
             overrides=overrides,
-            project_root=_project_root,
+            resolved_paths=resolved_paths,
         )
 
         # Set up reporter
@@ -242,7 +287,7 @@ if __name__ == "__main__":
 
         search_alg = ConcurrencyLimiter(
             optuna_search,
-            max_concurrent=hparams.get("max_concurrent_trials", 4)
+            max_concurrent=hparams.get("max_concurrent_trials", 1)
         )
 
         stopper = tune.stopper.TrialPlateauStopper(
@@ -252,7 +297,7 @@ if __name__ == "__main__":
             num_results=hparams['grace_period'] # correct order, semantics from SB
         )
 
-        storage_path = (Path(hparams["output_folder"]) / "results").resolve()
+        storage_path = Path(base_output_folder) / "results"
 
         if hparams["continue_exp"]:
             print(f"Continuing hyperparameter optimization from {storage_path}")
@@ -284,7 +329,7 @@ if __name__ == "__main__":
         best_config["trial_id"] = trial_id
 
         # Save best config
-        best_config_path = os.path.join(hparams["output_folder"], "best_hparams.yaml")
+        best_config_path = os.path.join(base_output_folder, "best_hparams.yaml")
         with open(best_config_path, "w") as f:
             yaml.dump(best_config, f)
 
@@ -293,16 +338,23 @@ if __name__ == "__main__":
     if best_config is None:
         # Try to load best config
         print("Loading best configs")
-        best_config_path = os.path.join(hparams["output_folder"], "best_hparams.yaml")
+        best_config_path = os.path.join(base_output_folder, "best_hparams.yaml")
         assert os.path.exists(best_config_path), "Cant find best config"
 
         with open(best_config_path, "r") as f:
             best_config = yaml.safe_load(f)
 
-    # Point dir to best trial
-    exp_root = hparams["output_folder"]
-    hparams["output_folder"] = os.path.join(exp_root, best_config['trial_id'])
-    hparams["save_folder"] = os.path.join(hparams["save_folder"], best_config['trial_id'])
+    # Re-load the best trial's forked config. This gives the final-test brain
+    # the exact same hparams the winning trial was trained under — no drift
+    # from edits to the base training/config/*.yaml between HP opt and eval.
+    best_trial_dir = Path(base_output_folder) / best_config["trial_id"]
+    best_forked_yaml = best_trial_dir / "config" / "main.yaml"
+    with open(best_forked_yaml) as fin:
+        hparams = load_hyperpyyaml(fin)
+
+    # Reuse main-process ``datasets`` — manifests and dataloader options are
+    # identical across trials; only lr_s/l2 changed, so the cached dataset
+    # pipeline is still valid for test evaluation.
 
     # Rebuild checkpointer with trial-specific save_folder
     checkpointer = sb.utils.checkpoints.Checkpointer(
@@ -324,7 +376,7 @@ if __name__ == "__main__":
     )
 
     # Write test results to file
-    results_path = os.path.join(exp_root, "test_results.txt")
+    results_path = os.path.join(base_output_folder, "test_results.txt")
     with open(results_path, "w") as f:
         for name, score in brain.test_stats.items():
             f.write(f"{name}: {score}\n")

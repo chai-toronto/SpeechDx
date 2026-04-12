@@ -13,7 +13,7 @@
 # Output: 768-dim embeddings at 50Hz (20ms stride)
 
 sample_rate: 16000
-feature_dim: 768
+feature_dim: 1024  # 768 for base/plus_base/plus_seed, 1024 for plus_large
 num_layers: 1  # FunASR API only exposes final output
 layer_dim: 1
 max_length: 10e5

@@ -31,7 +31,7 @@ ENCODERS = {
 }
 
 TASK = []
-EXCLUDE_DATASETS = {"daic_woz", "edaic"}  # long-form interview audio, OOMs during cache warm
+EXCLUDE_DATASETS = {"daic_woz", "edaic", "c9s"}  # long-form interview audio, OOMs during cache warm
 
 PROBE_NAME = "AvgTProbe"
 PROBE_YAML = "AvgTProbe.yaml"
@@ -299,9 +299,9 @@ def cmd_run(args: argparse.Namespace) -> None:
     tasks = discover_tasks()
     skipped, completed, failed = 0, 0, []
 
-    # Filter encoders by --encoder flag (default: all)
+    # Filter encoders by --encoder flag (default: all). Repeatable.
     if args.encoder:
-        encoders = {args.encoder: ENCODERS[args.encoder]}
+        encoders = {e: ENCODERS[e] for e in args.encoder}
     else:
         encoders = ENCODERS
 
@@ -367,8 +367,9 @@ def main() -> None:
     run_parser.add_argument("--device", type=str, default=None, help="Device override (e.g. cuda:0)")
     run_parser.add_argument("--max-workers", "-j", type=int, default=3, help="Max concurrent dataset workers (default: 3)")
     run_parser.add_argument("--encoder", type=str, default=None,
+                            action="append",
                             choices=list(ENCODERS.keys()),
-                            help="Run only this encoder (default: all in ENCODERS dict)")
+                            help="Run only this encoder (repeatable; default: all in ENCODERS dict)")
 
     args = parser.parse_args()
     if args.command == "status":

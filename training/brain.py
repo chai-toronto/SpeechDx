@@ -3,7 +3,6 @@ from pathlib import Path
 import torch
 import speechbrain as sb
 from ray import tune
-from speechbrain.utils.epoch_loop import EpochCounter
 from torchmetrics import MetricCollection
 from torchmetrics.classification import Precision, Recall, F1Score, AUROC, Accuracy
 from torchmetrics.regression import MeanAbsoluteError, MeanSquaredError, PearsonCorrCoef, R2Score
@@ -20,6 +19,22 @@ class DiagnosticsBrain(sb.Brain):
     def __init__(self, ray_optim=False, **kwargs):
         super().__init__(**kwargs)
         self.cache = None
+        # Gates `tune.report(...)` vs. stopper-counter update in on_stage_end.
+        # Other ray-tune-specific config (plain EpochCounter instead of the
+        # stopper variant, trial-specific save_folder) is now baked into the
+        # forked main.yaml by training.config_fork.
+        self.ray_optim = ray_optim
+
+        # Re-register `counter` via add_recoverable (singular) so it lands in
+        # optional_recoverables too. SB's YAML constructor uses add_recoverables
+        # (plural) which only updates self.recoverables, causing KeyError in
+        # _call_load_hooks when a paramfile is missing on resume.
+        if "counter" in self.checkpointer.recoverables:
+            self.checkpointer.add_recoverable(
+                "counter",
+                self.checkpointer.recoverables["counter"],
+                optional_load=True,
+            )
         self.checkpointer.recover_if_possible()
 
         # Determine task type: B (binary), C (multiclass), R (regression), L (multilabel)
@@ -57,13 +72,6 @@ class DiagnosticsBrain(sb.Brain):
 
         self.model = unwrap_ddp(self.modules.model)
         self.hparams.loss = self.hparams.loss.to(self.device)
-
-        self.ray_optim = ray_optim
-        if self.ray_optim:
-            # Disable internal early stopping — Ray Tune handles trial stopping
-            self.hparams.epoch_counter = EpochCounter(
-                limit=self.hparams.number_of_epochs
-            )
 
 
     def compute_forward(self, batch, stage):

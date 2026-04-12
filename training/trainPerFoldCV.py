@@ -35,7 +35,9 @@ from ray.tune import CLIReporter
 import speechbrain as sb
 from hyperpyyaml import load_hyperpyyaml
 from training.brain import DiagnosticsBrain
+from training.config_fork import fork_trial_config
 from training.hp_utils import parse_hp_search_space
+from training.train import _as_override_dict, _collect_resolved_paths
 
 def dataio_prep(hparams):
     # Retrieve the data
@@ -57,38 +59,36 @@ def dataio_prep(hparams):
     return datasets
 
 
-def train_fold_with_ray(config, hparams_file, run_opts, overrides, project_root, fold_idx):
+def train_fold_with_ray(config, hparams_file, run_opts, overrides, resolved_paths, fold_idx):
     """Ray Tune trainable for a single fold.
 
-    Same as train.py's train_with_ray but uses fold-specific datasets.
+    Same fork-based flow as train.py's ``train_with_ray`` but the trial dir
+    nests under ``fold_<idx>/`` so each fold's HP optimization is isolated.
     """
-    ray_overrides = overrides.copy() if overrides else {}
-    for key, value in config.items():
-        ray_overrides[key] = value
-
-    with open(hparams_file) as fin:
-        hparams = load_hyperpyyaml(fin, ray_overrides)
-
-    # Resolve relative paths for Ray workers
-    root = Path(project_root)
-    for key, val in hparams.items():
-        if isinstance(val, str) and not Path(val).is_absolute() and (
-            key.endswith("_dir") or key.endswith("_folder")
-            or key.endswith("_path") or key.endswith("_annotation")
-        ):
-            hparams[key] = str(root / val)
-
     trial_id = tune.get_context().get_trial_id() or "default"
-    hparams["output_folder"] = os.path.join(hparams["output_folder"], f"fold_{fold_idx}", trial_id)
-    hparams["save_folder"] = os.path.join(hparams["save_folder"], f"fold_{fold_idx}", trial_id)
+    trial_dir = Path(resolved_paths["output_folder"]) / f"fold_{fold_idx}" / trial_id
+
+    fork_overrides = {}
+    fork_overrides.update(resolved_paths)
+    fork_overrides.update(_as_override_dict(overrides))
+    for key, value in config.items():
+        print(f"Ray Tune override: {key} = {value}")
+        fork_overrides[key] = value
+    fork_overrides["output_folder"] = str(trial_dir)
+    fork_overrides["warm_cache"] = False
+
+    forked_yaml = fork_trial_config(
+        base_yaml=Path(hparams_file),
+        trial_dir=trial_dir,
+        overrides=fork_overrides,
+    )
+    with open(forked_yaml) as fin:
+        hparams = load_hyperpyyaml(fin)
 
     sb.create_experiment_directory(
         experiment_directory=hparams["output_folder"],
-        hyperparams_to_save=hparams_file,
-        overrides=ray_overrides,
+        hyperparams_to_save=str(forked_yaml),
     )
-
-    hparams["warm_cache"] = False
 
     datasets = dataio_prep(hparams)
 
@@ -116,7 +116,7 @@ def train_fold_with_ray(config, hparams_file, run_opts, overrides, project_root,
 
 
 def run_fold_hp_optimization(fold_idx, hparams, hparams_file, run_opts, overrides,
-                             project_root, search_space):
+                             resolved_paths, search_space):
     """Run a complete HP optimization for one fold. Returns (best_config, best_metrics)."""
 
     optim_metric = hparams.get("optim_metric", "F1")
@@ -129,10 +129,10 @@ def run_fold_hp_optimization(fold_idx, hparams, hparams_file, run_opts, override
 
     trainable = tune.with_parameters(
         train_fold_with_ray,
-        hparams_file=hparams_file,
+        hparams_file=str(hparams_file),
         run_opts=run_opts,
         overrides=overrides,
-        project_root=project_root,
+        resolved_paths=resolved_paths,
         fold_idx=fold_idx,
     )
 
@@ -148,7 +148,7 @@ def run_fold_hp_optimization(fold_idx, hparams, hparams_file, run_opts, override
 
     search_alg = ConcurrencyLimiter(
         optuna_search,
-        max_concurrent=hparams.get("max_concurrent_trials", 4),
+        max_concurrent=hparams.get("max_concurrent_trials", 1),
     )
 
     stopper = tune.stopper.TrialPlateauStopper(
@@ -158,7 +158,7 @@ def run_fold_hp_optimization(fold_idx, hparams, hparams_file, run_opts, override
         num_results=hparams.get("grace_period", 5),
     )
 
-    storage_path = (Path(hparams["output_folder"]) / "ray_results" / f"fold_{fold_idx}").resolve()
+    storage_path = Path(resolved_paths["output_folder"]) / "ray_results" / f"fold_{fold_idx}"
 
     if hparams.get("continue_exp", False):
         print(f"Fold {fold_idx}: Continuing HP optimization from {storage_path}")
@@ -207,7 +207,7 @@ def run_fold_hp_optimization(fold_idx, hparams, hparams_file, run_opts, override
     print(f"Fold {fold_idx} best {optim_metric}: {best_metrics.get(optim_metric, 'N/A')}")
 
     # Save per-fold best config
-    fold_config_path = os.path.join(hparams["output_folder"], f"best_hparams_fold_{fold_idx}.yaml")
+    fold_config_path = os.path.join(resolved_paths["output_folder"], f"best_hparams_fold_{fold_idx}.yaml")
     with open(fold_config_path, "w") as f:
         yaml.dump(best_config, f)
 
@@ -263,7 +263,8 @@ if __name__ == "__main__":
     # Warm cache early so Ray workers can open read-only
     datasets = dataio_prep(hparams)
 
-    project_root = str(Path.cwd().resolve())
+    _project_root = Path.cwd().resolve()
+    resolved_paths = _collect_resolved_paths(hparams, _project_root)
     search_space = parse_hp_search_space(hparams)
     num_folds = hparams['data_params']["num_fold"]
 
@@ -287,7 +288,7 @@ if __name__ == "__main__":
             hparams_file=hparams_file,
             run_opts=run_opts,
             overrides=overrides,
-            project_root=project_root,
+            resolved_paths=resolved_paths,
             search_space=search_space,
         )
 
@@ -320,7 +321,7 @@ if __name__ == "__main__":
         print(f"  Fold {i}: {val}")
 
     # Save summary
-    summary_path = os.path.join(hparams["output_folder"], "test_results.yaml")
+    summary_path = os.path.join(resolved_paths["output_folder"], "test_results.yaml")
     fold_detail = {
         f"fold_{i}": {
             "best_config": all_best_configs[i],

@@ -1,6 +1,6 @@
 # HP Optimizer
 # Enable Ray Tune hyperparameter optimization
-continue_exp: False  # Continue previous experiment if available (i.e., environment is the same)
+continue_exp: True  # Continue previous experiment if available (i.e., environment is the same)
 optim_metric: 'loss'
 optim_mode: 'min'  # 'min' or 'max' depending on the metric
 max_concurrent_trials: 1  # Number of concurrent trials to run
