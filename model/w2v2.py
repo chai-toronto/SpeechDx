@@ -29,9 +29,15 @@ class Wav2Vec2(nn.Module):
 
         Note: processor already normalizes the input waveform.
         """
-        feature = self.processor(x,
+        # Convert to list of numpy arrays for proper batch handling
+        if isinstance(x, torch.Tensor):
+            x_list = [xi.cpu().numpy() for xi in x]
+        else:
+            x_list = x
+        feature = self.processor(x_list,
                             return_tensors="pt",
-                            sampling_rate=self.sample_rate).input_values[0]
+                            sampling_rate=self.sample_rate,
+                            padding=True).input_values
         x = feature.to(x.device, dtype=x.dtype)
 
         mask = None
