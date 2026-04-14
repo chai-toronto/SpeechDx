@@ -121,6 +121,45 @@ def prepare_c9s_L_t1(
     print("Manifests created.")
     print("--- prepare_data finished ---")
 
+def prepare_c9s_L_t2(
+        wav_folder,
+        metadata_path,
+        manifest_train_path,
+        manifest_val_path,
+        manifest_test_path,
+        ratio,
+        random_seed,
+        dataset,
+        task,
+):
+    """
+    This function is task-specific.
+    """
+    df = pd.read_csv(metadata_path)
+
+    # Resolve path to be absolute
+    df["path"] = Path(wav_folder).resolve() / df["path"]
+
+    positive_values = {'last14', 'positiveLast14', 'yes'}
+    df = df[df['Covid-Tested'].isin(positive_values | {'negativeNever'})].copy()
+    df['label'] = df['Covid-Tested'].isin(positive_values).astype(int)
+
+    df = _c9s_stratify_cols(df)
+
+    # Speaker-independent stratified split
+    df_train, df_val, df_test = speaker_stratified_split(df, ratio, random_seed, stratify_cols=["label", "gender", "age_bin"])
+
+    save_task_csv(df_train, df_val, df_test, dataset, task)
+    to_sb_dict_and_save(df_train,
+                        manifest_train_path,
+                        df_val,
+                        manifest_val_path,
+                        df_test,
+                        manifest_test_path)
+
+    print("Manifests created.")
+    print("--- prepare_data finished ---")
+
 
 # ---- Helpers ----
 AGE_MIDPOINTS = {

@@ -20,11 +20,11 @@ ENCODERS = {
     "wavlm": "wavlm.yaml",
     "ast": "ast.yaml",
     "audiomae": "audiomae.yaml",
-    # "clap": "clap.yaml",  # reserved, run later (needs -j 1 due to 48kHz memory)
+    "clap": "clap.yaml",  # reserved, run later (needs -j 1 due to 48kHz memory)
     "emotion2vec": "emotion2vec.yaml",
     "hubert": "hubert.yaml",
     "mms": "mms.yaml",
-    # "opera_gt": "opera_gt.yaml",
+    "opera_gt": "opera_gt.yaml",
     "w2v2": "w2v2.yaml",
     "wavjepa": "wavjepa.yaml",
     "whisper": "whisper.yaml",

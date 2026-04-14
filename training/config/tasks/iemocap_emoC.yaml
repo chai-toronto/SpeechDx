@@ -1,0 +1,29 @@
+task: emoC
+task_type: C
+
+dataset: iemocap
+
+# ----------------------------------
+# DYNAMIC SCRIPT CONFIGURATION (Generic)
+# ----------------------------------
+data_io_script: training.dataio.prep_iemocap
+
+prepare_data_fn: prepare_iemocap_emoC
+
+label_key: label_encoded
+
+skip_prep: False
+
+num_labels: 10
+
+loss: !new:torch.nn.CrossEntropyLoss
+
+# Augmentation
+num_aug_ver: 3
+snr_low: 0
+snr_high: 15
+speed: !new:builtins.list
+  - !new:builtins.range
+    - 90 #start
+    - 110 #stop
+    - 1 #step
