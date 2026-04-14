@@ -31,7 +31,7 @@ ENCODERS = {
 }
 
 TASK = []
-EXCLUDE_DATASETS = {"daic_woz", "edaic", "c9s"}  # long-form interview audio, OOMs during cache warm
+EXCLUDE_DATASETS = {"daic_woz", "edaic"}  # long-form interview audio, OOMs during cache warm
 
 PROBE_NAME = "AvgTProbe"
 PROBE_YAML = "AvgTProbe.yaml"
