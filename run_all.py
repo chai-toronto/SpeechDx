@@ -3,6 +3,7 @@
 
 import argparse
 import csv
+import os
 import re
 import subprocess
 import time
@@ -43,15 +44,24 @@ TASKS_DIR = Path("training/config/tasks")
 # ────────────────────────────────────────────────────────────────────────
 
 
-def discover_tasks() -> list[str]:
+def discover_tasks(datasets: list[str] | None = None) -> list[str]:
     """Auto-scan training/config/tasks/*.yaml and return sorted list of stems.
     Override with TASK env var (comma-separated) if set. Datasets listed in
-    EXCLUDE_DATASETS are filtered out."""
+    EXCLUDE_DATASETS are filtered out. If `datasets` is given, keep only those."""
     if TASK:
         stems = TASK
     else:
         stems = sorted(p.stem for p in TASKS_DIR.glob("*.yaml"))
-    return [s for s in stems if get_task_info(s)[0] not in EXCLUDE_DATASETS]
+    allowed = set(datasets) if datasets else None
+    out = []
+    for s in stems:
+        ds = get_task_info(s)[0]
+        if ds in EXCLUDE_DATASETS:
+            continue
+        if allowed is not None and ds not in allowed:
+            continue
+        out.append(s)
+    return out
 
 
 def get_task_info(task_stem: str) -> tuple[str, str]:
@@ -99,8 +109,10 @@ def make_config(model_name: str, encoder_yaml: str, task_yaml: str, config_id: s
         text = re.sub(pattern, replacement, text, flags=re.MULTILINE)
     # Remove chunk_at line entirely
     text = re.sub(r"^chunk_at:.*\n?", "", text, flags=re.MULTILINE)
-    # Include model name in path so concurrent jobs (different encoders) don't clash
-    config_path = Path(f"training/config/_tmp_run_{model_name}{config_id}.yaml")
+    # Include model name + SLURM job id so concurrent jobs (same encoder, different
+    # datasets) don't overwrite/delete each other's temp config.
+    job_suffix = f"_job{os.environ['SLURM_JOB_ID']}" if os.environ.get("SLURM_JOB_ID") else ""
+    config_path = Path(f"training/config/_tmp_run_{model_name}{job_suffix}{config_id}.yaml")
     config_path.write_text(text)
     return config_path
 
@@ -296,7 +308,7 @@ def run_dataset_queue(dataset, queue, device, start_idx):
 
 
 def cmd_run(args: argparse.Namespace) -> None:
-    tasks = discover_tasks()
+    tasks = discover_tasks(args.dataset)
     skipped, completed, failed = 0, 0, []
 
     # Filter encoders by --encoder flag (default: all). Repeatable.
@@ -370,6 +382,9 @@ def main() -> None:
                             action="append",
                             choices=list(ENCODERS.keys()),
                             help="Run only this encoder (repeatable; default: all in ENCODERS dict)")
+    run_parser.add_argument("--dataset", type=str, default=None,
+                            action="append",
+                            help="Run only tasks whose dataset field matches (repeatable; default: all datasets)")
 
     args = parser.parse_args()
     if args.command == "status":
