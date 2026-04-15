@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import numpy as np
@@ -50,9 +51,17 @@ class Emotion2Vec(nn.Module):
         # Initialize device - will be set properly on first forward pass
         self._device = None
         
+        # Check if model is cached locally to avoid ModelScope server check
+        local_cache_path = os.path.expanduser(f"~/.cache/modelscope/hub/models/{model_id}")
+        if os.path.isdir(local_cache_path) and os.path.exists(os.path.join(local_cache_path, "model.pt")):
+            # Use local path directly to avoid network check
+            model_path = local_cache_path
+        else:
+            model_path = model_id
+        
         # Load the model via FunASR (disable update check for speed)
         self.model = FunASRAutoModel(
-            model=model_id,
+            model=model_path,
             disable_update=True,
         )
         
@@ -63,6 +72,11 @@ class Emotion2Vec(nn.Module):
         # emotion2vec outputs 768-dim (base) or 1024-dim (plus_large) embeddings
         # Actual dim will be determined at runtime from model output
         self.feature_dim = None  # Set after first forward pass
+        
+        # FunASR's AutoModel is not a proper nn.Module submodule, so parameters()
+        # would be empty. Add a dummy parameter so next(parameters()).device works
+        # in training pipelines that detect device this way.
+        self._dummy_param = nn.Parameter(torch.empty(0), requires_grad=False)
         
     def forward(self, x, lengths=None):
         """
