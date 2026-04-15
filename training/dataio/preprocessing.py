@@ -3,6 +3,9 @@ import os
 import warnings
 from typing import Any
 
+# # Disable HDF5 file locking to allow multiple processes to access cache
+# os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
+
 import soundfile as sf
 import librosa
 import speechbrain as sb
@@ -232,20 +235,30 @@ def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
                     )
                     subset = sb.dataio.dataset.FilteredSortedDynamicItemDataset(ds, uncached)
                     subset.iterate_once()
+
+                train_dynamic_items.append(train_cache_emb)
+                val_dynamic_items.append(val_cache_emb)
             finally:
                 # Always close so HDF5 flushes its object header to disk,
                 # even on SIGTERM/exception. Prevents corrupt-cache resume bugs.
                 train_cache_emb.close()
                 val_cache_emb.close()
 
-        train_cache_emb = make_cache_emb(train_cache_dir, False, num_versions)
-        val_cache_emb = make_cache_emb(val_cache_dir, False)
+            # Update output_keys even when warming - datasets need correct structure
+            output_keys += output_vars
+            output_keys.remove("signal")
+        else:
+            train_cache_emb = make_cache_emb(train_cache_dir, False, num_versions)
+            val_cache_emb = make_cache_emb(val_cache_dir, False)
 
-        train_dynamic_items.append(train_cache_emb)
-        val_dynamic_items.append(val_cache_emb)
+            train_dynamic_items.append(train_cache_emb)
+            val_dynamic_items.append(val_cache_emb)
 
-        output_keys += output_vars
-        output_keys.remove("signal")
+            output_keys += output_vars
+            output_keys.remove("signal")
+    # else:
+    #     train_cache_emb = None
+    #     val_cache_emb = None
 
     # Define datasets.
     datasets = {}

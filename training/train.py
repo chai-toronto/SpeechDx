@@ -111,7 +111,9 @@ def dataio_prep(hparams):
         "all": train | val | test, # for cache warming
     }
 
+    # datasets, cache_handles = master_dataio_prep(data_dict, hparams)
     datasets = master_dataio_prep(data_dict, hparams)
+    # return datasets, cache_handles
     return datasets
 
 def train_with_ray(config, hparams_file, run_opts, overrides, resolved_paths):
@@ -163,7 +165,7 @@ def train_with_ray(config, hparams_file, run_opts, overrides, resolved_paths):
     except KeyError:
         sys.exit("Error: 'data_io_script' path must be defined in the YAML file.")
 
-    datasets = dataio_prep(hparams)
+    datasets = dataio_prep(hparams)  # Ray trials keep their cache handles open
 
     # Rebuild checkpointer with trial-specific save_folder
     checkpointer = sb.utils.checkpoints.Checkpointer(
@@ -242,7 +244,6 @@ if __name__ == "__main__":
     # Warm cache (if True) early so Ray workers can open it read-only;
     # must run before Ray spawns parallel trials
     datasets = dataio_prep(hparams)
-
 
     _project_root = Path.cwd().resolve()
     resolved_paths = _collect_resolved_paths(hparams, _project_root)
@@ -370,6 +371,8 @@ if __name__ == "__main__":
         checkpointer=checkpointer,
     )
 
+    hparams["warm_cache"] = False
+    datasets = dataio_prep(hparams)
     brain.evaluate(
         test_set=datasets["test"],
         test_loader_kwargs=hparams["test_dataloader_options"]
