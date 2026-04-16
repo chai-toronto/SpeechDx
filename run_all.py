@@ -3,9 +3,13 @@
 
 import argparse
 import csv
+import importlib
+import inspect
+import json
 import os
 import re
 import subprocess
+import threading
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -95,6 +99,115 @@ def get_output_folder(dataset: str, task: str, model_name: str, tag: str = EXPER
     return Path(f"./exps/{dataset}_{task}/{model_name}-{PROBE_NAME}-{tag}")
 
 
+# ─── Task metadata (manifests, num_aug_ver) ─────────────────────────────
+_task_yaml_cache: dict[str, dict] = {}
+_task_ids_cache: dict[str, frozenset[str]] = {}
+_main_yaml_cache: dict | None = None
+
+
+class _TolerantLoader(yaml.SafeLoader):
+    """SafeLoader that ignores hyperpyyaml tags (!new:, !ref, !include:, !apply:, !name:)."""
+
+
+def _ignore_unknown(loader, tag_suffix, node):
+    if isinstance(node, yaml.ScalarNode):
+        return loader.construct_scalar(node)
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node, deep=True)
+    if isinstance(node, yaml.MappingNode):
+        return loader.construct_mapping(node, deep=True)
+    return None
+
+
+_TolerantLoader.add_multi_constructor("!", _ignore_unknown)
+_TolerantLoader.add_multi_constructor("tag:", _ignore_unknown)
+
+
+def _load_main_yaml() -> dict:
+    global _main_yaml_cache
+    if _main_yaml_cache is None:
+        _main_yaml_cache = yaml.load(BASE_CONFIG.read_text(), Loader=_TolerantLoader) or {}
+    return _main_yaml_cache
+
+
+def _load_task_yaml(task_stem: str) -> dict:
+    if task_stem not in _task_yaml_cache:
+        _task_yaml_cache[task_stem] = yaml.load(
+            (TASKS_DIR / f"{task_stem}.yaml").read_text(), Loader=_TolerantLoader
+        ) or {}
+    return _task_yaml_cache[task_stem]
+
+
+def manifest_paths(task_stem: str) -> tuple[Path, Path, Path]:
+    dataset, task = get_task_info(task_stem)
+    base = Path(f"./exps/{dataset}_{task}/manifest")
+    return base / "train.json", base / "valid.json", base / "test.json"
+
+
+def task_num_ver(task_stem: str) -> int:
+    return int(_load_task_yaml(task_stem).get("num_aug_ver", 1))
+
+
+def task_ids(task_stem: str) -> frozenset[str]:
+    if task_stem in _task_ids_cache:
+        return _task_ids_cache[task_stem]
+    ids: set[str] = set()
+    for p in manifest_paths(task_stem):
+        if p.exists():
+            with p.open() as f:
+                ids |= set(json.load(f).keys())
+    frozen = frozenset(ids)
+    _task_ids_cache[task_stem] = frozen
+    return frozen
+
+
+def task_weight(task_stem: str) -> int:
+    """Sort key: run biggest cache-writers first so readers unlock sooner."""
+    return task_num_ver(task_stem) * len(task_ids(task_stem))
+
+
+def ensure_manifest(task_stem: str) -> None:
+    """Call the task's prepare_data_fn if manifest files are missing.
+
+    Different prep_*.py modules take slightly different kwargs (e.g. mvdr
+    takes `num_fold` and `raw_label_key` instead of `ratio`/`manifest_test_path`),
+    so we build a superset kwargs dict and filter to the function's actual
+    signature.
+    """
+    tr, va, te = manifest_paths(task_stem)
+    # Heuristic: most tasks produce all 3; CV tasks produce only train+valid.
+    # Call prep only if train or valid is missing.
+    if tr.exists() and va.exists():
+        return
+    tcfg = _load_task_yaml(task_stem)
+    mcfg = _load_main_yaml()
+    dataset, task = tcfg["dataset"], tcfg["task"]
+    data_folder = mcfg.get("data_folder", "./data/")
+
+    module = importlib.import_module(tcfg["data_io_script"])
+    fn = getattr(module, tcfg["prepare_data_fn"])
+    print(f"Preparing manifests for {task_stem} …", flush=True)
+    tr.parent.mkdir(parents=True, exist_ok=True)
+
+    all_kwargs = {
+        "wav_folder": f"{data_folder}/{dataset}/processed/audio",
+        "metadata_path": f"{data_folder}/{dataset}/processed/{dataset}.csv",
+        "manifest_train_path": str(tr),
+        "manifest_val_path": str(va),
+        "manifest_test_path": str(te),
+        "ratio": mcfg.get("ratio"),
+        "random_seed": mcfg.get("random_seed"),
+        "dataset": dataset,
+        "task": task,
+        "raw_label_key": tcfg.get("raw_label_key"),
+        "num_fold": tcfg.get("num_fold"),
+    }
+    sig = inspect.signature(fn)
+    kwargs = {k: v for k, v in all_kwargs.items() if k in sig.parameters}
+    fn(**kwargs)
+    _task_ids_cache.pop(task_stem, None)  # force re-read from fresh manifests
+
+
 def get_train_command(task_stem: str) -> str:
     """mvdr tasks use trainPerFoldCV; everything else uses train."""
     if task_stem.startswith("mvdr"):
@@ -113,7 +226,8 @@ def is_complete(output_folder: Path, task_stem: str) -> bool:
     return (output_folder / get_results_file(task_stem)).exists()
 
 
-def make_config(model_name: str, encoder_yaml: str, task_yaml: str, config_id: str = "") -> Path:
+def make_config(model_name: str, encoder_yaml: str, task_yaml: str, config_id: str = "",
+                warm_cache_override: bool | None = None) -> Path:
     text = BASE_CONFIG.read_text()
     subs = [
         (r"^model_name:.*$", f"model_name: {model_name}"),
@@ -122,6 +236,8 @@ def make_config(model_name: str, encoder_yaml: str, task_yaml: str, config_id: s
         (r"^probe_params: !include:.*$", f"probe_params: !include:probes/{PROBE_YAML}"),
         (r"^data_params: !include:.*$", f"data_params: !include:tasks/{task_yaml}"),
     ]
+    if warm_cache_override is not None:
+        subs.append((r"^warm_cache:.*$", f"warm_cache: {str(warm_cache_override).lower()}"))
     for pattern, replacement in subs:
         text = re.sub(pattern, replacement, text, flags=re.MULTILINE)
     # Remove chunk_at line entirely
@@ -135,11 +251,13 @@ def make_config(model_name: str, encoder_yaml: str, task_yaml: str, config_id: s
 
 
 def run_one(task_stem: str, model_name: str, encoder_yaml: str, device=None,
-            config_id: str = "") -> tuple[str, bool, float]:
+            config_id: str = "",
+            warm_cache_override: bool | None = None) -> tuple[str, bool, float]:
     """Run a single training job. Returns (label, success, elapsed_seconds)."""
     label = f"{task_stem} × {model_name}"
     task_yaml = f"{task_stem}.yaml"
-    config_path = make_config(model_name, encoder_yaml, task_yaml, config_id)
+    config_path = make_config(model_name, encoder_yaml, task_yaml, config_id,
+                              warm_cache_override=warm_cache_override)
 
     cmd = get_train_command(task_stem).split()
     cmd.append(str(config_path))
@@ -334,15 +452,11 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(f"Summary: {complete}/{total} complete, {incomplete} remaining")
 
 
-def run_dataset_queue(dataset, queue, device, start_idx):
-    """Run all tasks for one dataset sequentially. Called from its own thread."""
-    results = []
-    for i, (task_stem, model_name, encoder_yaml) in enumerate(queue):
-        label, success, elapsed = run_one(
-            task_stem, model_name, encoder_yaml, device, f"_{start_idx + i}"
-        )
-        results.append((label, success, elapsed))
-    return results
+def _needed_keys(task_stem: str) -> set[tuple[str, int]]:
+    """Cache keys a task's warmup would need: (id, version) for each id × version."""
+    ids = task_ids(task_stem)
+    num_ver = task_num_ver(task_stem)
+    return {(uid, v) for uid in ids for v in range(num_ver)}
 
 
 def cmd_run(args: argparse.Namespace) -> None:
@@ -355,8 +469,10 @@ def cmd_run(args: argparse.Namespace) -> None:
     else:
         encoders = ENCODERS
 
-    # Group jobs by dataset — each group runs sequentially, groups run in parallel
-    dataset_queues = defaultdict(list)
+    # Collect pending jobs + track all tasks (pending + completed per encoder)
+    # so we can seed the written-key state from completed tasks.
+    pending: list[tuple[str, str, str]] = []  # (task_stem, model_name, encoder_yaml)
+    completed_by_ds_enc: dict[tuple[str, str], list[str]] = defaultdict(list)
     for task_stem in tasks:
         dataset, task = get_task_info(task_stem)
         for model_name, encoder_yaml in encoders.items():
@@ -364,32 +480,103 @@ def cmd_run(args: argparse.Namespace) -> None:
             if is_complete(folder, task_stem):
                 print(f"SKIP (done): {task_stem} × {model_name}")
                 skipped += 1
+                completed_by_ds_enc[(dataset, model_name)].append(task_stem)
                 continue
-            dataset_queues[dataset].append((task_stem, model_name, encoder_yaml))
+            pending.append((task_stem, model_name, encoder_yaml))
 
-    total_jobs = sum(len(q) for q in dataset_queues.values())
-    print(f"\n{total_jobs} jobs across {len(dataset_queues)} datasets")
-    for ds, q in dataset_queues.items():
-        print(f"  {ds}: {len(q)} tasks")
+    # Pre-generate manifests for every task we intend to run, so the writer/reader
+    # classification has accurate ID sets before dispatch. prepare_data_fn is
+    # deterministic + cheap; skips if manifests already exist.
+    needed_tasks = {ts for ts, _, _ in pending}
+    # Also ensure manifests for completed tasks we'll use for seeding the written set.
+    needed_tasks |= {ts for lst in completed_by_ds_enc.values() for ts in lst}
+    for ts in sorted(needed_tasks):
+        try:
+            ensure_manifest(ts)
+        except Exception as e:
+            print(f"⚠ prepare_data for {ts} failed: {e}", flush=True)
+
+    # Seed per-(dataset, encoder) written-key sets from completed tasks.
+    written: dict[tuple[str, str], set[tuple[str, int]]] = defaultdict(set)
+    for (ds, enc), tlist in completed_by_ds_enc.items():
+        for ts in tlist:
+            try:
+                written[(ds, enc)] |= _needed_keys(ts)
+            except Exception:
+                pass  # missing manifest; best-effort seeding
+
+    total_jobs = len(pending)
+    print(f"\n{total_jobs} pending jobs")
     print()
 
-    # One thread per dataset, each runs its tasks sequentially
-    # Cap workers to avoid GPU OOM when many datasets run concurrently
-    max_workers = min(len(dataset_queues), args.max_workers)
-    print(f"Running with {max_workers} concurrent dataset workers\n")
-    idx = 0
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {}
-        for dataset, queue in dataset_queues.items():
-            futures[pool.submit(run_dataset_queue, dataset, queue, args.device, idx)] = dataset
-            idx += len(queue)
+    # Sort pending jobs so biggest cache-writers go first (more readers unlock sooner).
+    pending.sort(key=lambda j: -task_weight(j[0]))
 
+    max_workers = max(1, args.max_workers)
+    print(f"Running with up to {max_workers} concurrent workers\n")
+
+    # Per-(dataset, encoder) lock: held only by writer tasks. Readers run free.
+    # Pre-create so concurrent lookups all resolve to the same Lock instance.
+    ds_enc_locks: dict[tuple[str, str], threading.Lock] = {}
+    for ts, mn, _ in pending:
+        ds = get_task_info(ts)[0]
+        ds_enc_locks.setdefault((ds, mn), threading.Lock())
+    written_lock = threading.Lock()  # guards `written` mutations
+
+    def dispatch(job: tuple[str, str, str], idx: int) -> tuple[str, bool, float]:
+        task_stem, model_name, encoder_yaml = job
+        dataset, _ = get_task_info(task_stem)
+        key = (dataset, model_name)
+        try:
+            needed = _needed_keys(task_stem)
+        except Exception:
+            needed = None  # unknown → treat as writer
+
+        # Reader check (under written_lock to see up-to-date state).
+        is_reader = False
+        if needed is not None:
+            with written_lock:
+                is_reader = needed.issubset(written[key])
+
+        if is_reader:
+            return run_one(task_stem, model_name, encoder_yaml, args.device,
+                           f"_{idx}", warm_cache_override=False)
+
+        # Writer path — acquire per-(dataset, encoder) lock. Release early if the
+        # re-check shows a concurrent writer satisfied our keys (run as reader).
+        ds_lock = ds_enc_locks[key]
+        ds_lock.acquire()
+        released = False
+        try:
+            if needed is not None:
+                with written_lock:
+                    satisfied = needed.issubset(written[key])
+            else:
+                satisfied = False
+            if satisfied:
+                ds_lock.release()
+                released = True
+                return run_one(task_stem, model_name, encoder_yaml, args.device,
+                               f"_{idx}", warm_cache_override=False)
+            result = run_one(task_stem, model_name, encoder_yaml, args.device,
+                             f"_{idx}", warm_cache_override=None)
+            _, success, _ = result
+            if success and needed is not None:
+                with written_lock:
+                    written[key] |= needed
+            return result
+        finally:
+            if not released:
+                ds_lock.release()
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [pool.submit(dispatch, job, i) for i, job in enumerate(pending)]
         for future in as_completed(futures):
-            for label, success, elapsed in future.result():
-                if success:
-                    completed += 1
-                else:
-                    failed.append(label)
+            label, success, _ = future.result()
+            if success:
+                completed += 1
+            else:
+                failed.append(label)
 
     # Summary
     print(f"\n{'='*60}")
@@ -415,7 +602,7 @@ def main() -> None:
 
     run_parser = sub.add_parser("run", help="Execute all incomplete runs")
     run_parser.add_argument("--device", type=str, default=None, help="Device override (e.g. cuda:0)")
-    run_parser.add_argument("--max-workers", "-j", type=int, default=3, help="Max concurrent dataset workers (default: 3)")
+    run_parser.add_argument("--max-workers", "-j", type=int, default=3, help="Max concurrent tasks (default: 3). Writer tasks still serialize per (dataset, encoder).")
     run_parser.add_argument("--encoder", type=str, default=None,
                             action="append",
                             choices=list(ENCODERS.keys()),
