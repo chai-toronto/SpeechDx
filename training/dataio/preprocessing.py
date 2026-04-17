@@ -187,8 +187,18 @@ def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
             @sb.utils.data_pipeline.takes("id")
             @sb.utils.data_pipeline.provides(*output_vars)
             def read_cache(id):
-                warnings.warn("Cache doesn't exist for one or more data points.")
-                pass  # never called, expect cache hit
+                # Reached only when _is_cached(id) is False — i.e. the v{num_ver-1}
+                # slot is missing. Typically means num_aug_ver in the current fork
+                # exceeds the cache's actual fill depth (e.g. cache warmed under an
+                # older num_aug_ver, or a stale fork after the task yaml changed).
+                # The parent CachedDynamicItem would otherwise call _cache(None, id)
+                # → h5py.create_dataset(key, data=None) → inscrutable TypeError.
+                raise RuntimeError(
+                    f"Cache miss for id={id!r} at {cache_dir} with num_ver={num_ver}. "
+                    f"Expected v{num_ver - 1} to exist. Re-warm the cache "
+                    f"(set warm_cache: True) or check that the trial fork's "
+                    f"num_aug_ver matches what was used to build the cache."
+                )
 
             return read_cache
 

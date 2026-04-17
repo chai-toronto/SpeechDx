@@ -41,7 +41,24 @@ EXPERIMENT_TAG = "run1"
 BASE_CONFIG = Path("training/config/main.yaml")
 TMP_CONFIG = Path("training/config/_tmp_run.yaml")
 TASKS_DIR = Path("training/config/tasks")
+ENCODERS_DIR = Path("training/config/encoders")
 # ────────────────────────────────────────────────────────────────────────
+
+
+def discover_all_tasks() -> list[str]:
+    """Every task yaml stem under TASKS_DIR, no EXCLUDE filter, no TASK override."""
+    return sorted(p.stem for p in TASKS_DIR.glob("*.yaml"))
+
+
+def discover_all_encoders() -> dict[str, str]:
+    """Every encoder yaml directly under ENCODERS_DIR (skipping _*.yaml partials),
+    mapped stem -> output-folder name. Uses ENCODERS for folder overrides
+    (e.g. qwen3_voice -> qwen3voice); otherwise stem is the folder name."""
+    stem_to_yaml = {p.stem: p.name for p in ENCODERS_DIR.glob("*.yaml")
+                    if not p.stem.startswith("_")}
+    yaml_to_folder = {v: k for k, v in ENCODERS.items()}
+    return {stem: yaml_to_folder.get(yaml_name, stem)
+            for stem, yaml_name in sorted(stem_to_yaml.items())}
 
 
 def discover_tasks(datasets: list[str] | None = None) -> list[str]:
@@ -251,6 +268,27 @@ def cmd_summary(args: argparse.Namespace) -> None:
                     row.append(f"{val:.4f}" if isinstance(val, float) else "")
                 writer.writerow(row)
         written.append(csv_path)
+
+    # Completion matrix — non-exclusion: every task yaml × every encoder yaml
+    all_tasks = discover_all_tasks()
+    all_encoders = discover_all_encoders()  # stem -> folder_name
+    comp_path = out_dir / "completion.csv"
+    totals = {stem: 0 for stem in all_encoders}
+    with comp_path.open("w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["task", *all_encoders.keys()])
+        for task_stem in all_tasks:
+            dataset, task = get_task_info(task_stem)
+            row = [task_stem]
+            for stem, folder_name in all_encoders.items():
+                folder = get_output_folder(dataset, task, folder_name, args.tag)
+                done = is_complete(folder, task_stem)
+                row.append("1" if done else "0")
+                if done:
+                    totals[stem] += 1
+            writer.writerow(row)
+        writer.writerow(["TOTAL", *(str(totals[s]) for s in all_encoders)])
+    written.append(comp_path)
 
     print(f"\nParsed {found} result files, {missing} missing")
     print(f"Wrote {len(written)} CSV(s) to {out_dir}/")

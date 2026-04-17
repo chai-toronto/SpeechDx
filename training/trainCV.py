@@ -214,7 +214,7 @@ if __name__ == "__main__":
 
         if hparams["continue_exp"]:
             print(f"Continuing hyperparameter optimization from {storage_path}")
-            resume="AUTO"
+            resume="AUTO+RESTART_ERRORED"
         else:
             resume=False
             if storage_path.exists():

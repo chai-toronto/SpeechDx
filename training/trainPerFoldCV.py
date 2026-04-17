@@ -162,7 +162,7 @@ def run_fold_hp_optimization(fold_idx, hparams, hparams_file, run_opts, override
 
     if hparams.get("continue_exp", False):
         print(f"Fold {fold_idx}: Continuing HP optimization from {storage_path}")
-        resume = "AUTO"
+        resume = "AUTO+RESTART_ERRORED"
     else:
         resume = False
         if storage_path.exists():
@@ -238,8 +238,14 @@ if __name__ == "__main__":
             print(f"Wiping output_folder: {output_folder}")
             shutil.rmtree(output_folder)
 
-    # Data preparation (manifest generation) — must run before dataio_prep
-    if not hparams["skip_prep"]:
+    # Data preparation (manifest generation) — must run before dataio_prep.
+    # Also skip if manifests already exist — avoids concurrent jobs racing
+    # on the same manifest writes.
+    manifests_exist = all(
+        Path(hparams[k]).exists()
+        for k in ("train_annotation", "val_annotation")
+    )
+    if not hparams["skip_prep"] and not manifests_exist:
         # Dynamically load data preparation module
         try:
             data_io_module = importlib.import_module(hparams["data_io_script"])

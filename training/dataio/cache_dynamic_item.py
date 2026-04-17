@@ -38,7 +38,8 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
         self.cache_location /= "cache.hdf5"
         self.num_version = num_version
         print(f"Opening HDF5 cache at {self.cache_location} with mode {file_mode}")
-        self.hdf5file = h5py.File(self.cache_location, file_mode)
+        open_kwargs = {"locking": False} if file_mode == "r" else {}
+        self.hdf5file = h5py.File(self.cache_location, file_mode, **open_kwargs)
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -47,7 +48,8 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
 
     def __setstate__(self, state):
         self.__dict__.update(state)
-        self.hdf5file = h5py.File(self.cache_location, self.file_mode)
+        open_kwargs = {"locking": False} if self.file_mode == "r" else {}
+        self.hdf5file = h5py.File(self.cache_location, self.file_mode, **open_kwargs)
 
     def _version_key(self, uid, version):
         """Return the HDF5 key for a specific version of uid."""

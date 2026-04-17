@@ -14,9 +14,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import select
 import subprocess
 import sys
+import termios
 import time
+import tty
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -221,7 +224,7 @@ def format_table(snapshot: dict[str, object]) -> str:
     if not jobs_by_name:
         return "No tracked SLURM jobs found."
 
-    headers = ("job_name", "run_id", "status", "time_left")
+    headers = ("job_name", "run_id", "status", "elapsed", "time_left")
     rows = []
     for name, record in jobs_by_name.items():
         assert isinstance(record, dict)
@@ -230,6 +233,7 @@ def format_table(snapshot: dict[str, object]) -> str:
                 name,
                 str(record["run_id"]),
                 str(record["status"]),
+                str(record.get("elapsed", "")),
                 str(record["time_left"]),
             )
         )
@@ -272,6 +276,27 @@ def refresh(
     return snapshot
 
 
+def wait_for_key(timeout: float) -> str | None:
+    """Wait up to *timeout* seconds for a keypress. Returns the key or None."""
+    if not sys.stdin.isatty():
+        time.sleep(timeout)
+        return None
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            ready, _, _ = select.select([sys.stdin], [], [], min(remaining, 0.5))
+            if ready:
+                return sys.stdin.read(1)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+
 def main() -> int:
     args = build_parser().parse_args()
     if args.interval_seconds <= 0:
@@ -283,7 +308,16 @@ def main() -> int:
             previous_snapshot = refresh(args.user, args.output, previous_snapshot)
             if args.once:
                 return 0
-            time.sleep(args.interval_seconds)
+            print(f"\nNext refresh in {args.interval_seconds}s  [R]efresh now  [C]lear & restart  [Q]uit")
+            sys.stdout.flush()
+            key = wait_for_key(args.interval_seconds)
+            if key in ("q", "Q"):
+                print("\nTracker stopped.")
+                return 0
+            if key in ("c", "C"):
+                previous_snapshot = None
+                print("\n--- Reset: cleared previous state ---\n")
+                sys.stdout.flush()
     except KeyboardInterrupt:
         print("\nTracker stopped.")
         return 0

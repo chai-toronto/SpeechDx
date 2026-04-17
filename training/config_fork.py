@@ -12,6 +12,15 @@ Why:
      main.yaml, so any edits to ``training/config/*.yaml`` between runs would
      silently leak into resumed trials. With a frozen on-disk fork, resume is
      drift-proof: the fork is authoritative and never regenerated.
+
+CAVEAT — editing a task yaml does NOT propagate to existing trial forks.
+If you change ``training/config/tasks/<task>.yaml`` (e.g. drop ``num_aug_ver``
+from 3 → 1), every pre-existing ``<exp>/<trial_id>/config/tasks/<task>.yaml``
+still carries the old value. For in-flight HPOs this can desync the fork from
+the shared on-disk cache (``tmp/<dataset>/<encoder>/...``) and produce an
+inscrutable ``h5py.create_dataset(..., data=None)`` TypeError when a fork's
+``num_aug_ver`` exceeds the cache's fill depth. Wipe the affected trial dirs
+(or the whole ``<exp>/results/`` HPO state) after editing a task yaml.
 """
 from __future__ import annotations
 

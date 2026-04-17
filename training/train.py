@@ -216,8 +216,14 @@ if __name__ == "__main__":
             print(f"Wiping output_folder: {output_folder}")
             shutil.rmtree(output_folder)
 
-    # Data preparation, to be run on only one process
-    if not hparams["skip_prep"]:
+    # Data preparation, to be run on only one process.
+    # Also skip if all manifests already exist — avoids concurrent jobs
+    # racing on the same manifest writes.
+    manifests_exist = all(
+        Path(hparams[k]).exists()
+        for k in ("train_annotation", "val_annotation", "test_annotation")
+    )
+    if not hparams["skip_prep"] and not manifests_exist:
         # Dynamically load the data preparation module
         try:
             data_io_module = importlib.import_module(hparams["data_io_script"])
@@ -302,7 +308,7 @@ if __name__ == "__main__":
 
         if hparams["continue_exp"]:
             print(f"Continuing hyperparameter optimization from {storage_path}")
-            resume="AUTO"
+            resume="AUTO+RESTART_ERRORED"
         else:
             resume=False
             if storage_path.exists():
