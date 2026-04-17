@@ -31,6 +31,47 @@ def save_task_csv(df_train, df_val, df_test, dataset, task):
     print(f"Task CSV saved to {out_path} ({len(df_combined)} rows)")
 
 
+def save_kfold_task_csv(df, folds, dataset, task):
+    """Save a CSV with per-fold split columns to metadata/<dataset>/<task>.csv."""
+    df = df.copy()
+    for i, (train_df, val_df) in enumerate(folds):
+        df.loc[train_df.index, f"split_{i}"] = 0
+        df.loc[val_df.index, f"split_{i}"] = 1
+
+    out_dir = Path("metadata") / dataset
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{task}.csv"
+    df.to_csv(out_path, index=False)
+    print(f"Task CSV saved to {out_path} ({len(df)} rows)")
+
+
+def to_sb_kfold_dict_and_save(folds, manifest_train_path, manifest_val_path):
+    """Convert k-fold splits to SpeechBrain manifests (list of dicts per fold)."""
+    import json
+
+    train_dicts = []
+    valid_dicts = []
+    for train_df, val_df in folds:
+        train_dicts.append(train_df.set_index('uid').to_dict(orient='index'))
+        valid_dicts.append(val_df.set_index('uid').to_dict(orient='index'))
+
+    print("Train og size:", len(train_dicts[-1]))
+    print("Val og size:", len(valid_dicts[-1]))
+
+    manifest_train_path = Path(manifest_train_path)
+    manifest_val_path = Path(manifest_val_path)
+
+    ensure_dir(manifest_train_path)
+    with open(manifest_train_path, 'w') as f:
+        json.dump(train_dicts, f, indent=5, cls=PathEncoder)
+
+    ensure_dir(manifest_val_path)
+    with open(manifest_val_path, 'w') as f:
+        json.dump(valid_dicts, f, indent=5, cls=PathEncoder)
+
+    print("Manifests created.")
+
+
 def _make_stratify_key(speaker_df, stratify_cols):
     """Combine multiple columns into a single stratification key.
     Falls back to fewer columns if any combination has <2 members."""

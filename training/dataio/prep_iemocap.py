@@ -9,7 +9,7 @@ from training.dataio.prep_utils import save_task_csv, to_sb_dict_and_save
 
 
 IEMOCAP_EMOTIONS = [
-    "neu", "fru", "ang", "sad", "hap", "exc", "sur", "fea", "dis", "oth",
+    "neu", "fru", "ang", "sad", "hap", "exc", "sur", "fea", "dis", "oth", "xxx",
 ]
 IEMOCAP_EMO_TO_IDX = {emo: i for i, emo in enumerate(IEMOCAP_EMOTIONS)}
 
@@ -19,7 +19,7 @@ def prepare_iemocap_emoC(
         manifest_train_path, manifest_val_path, manifest_test_path,
         ratio, random_seed, dataset, task,
 ):
-    """Multiclass emotion classification. Excludes 'xxx'. Uses session-based split."""
+    """Multiclass emotion classification. Uses session-based split."""
     df = pd.read_csv(metadata_path)
     df["path"] = Path(wav_folder).resolve() / df["path"]
 

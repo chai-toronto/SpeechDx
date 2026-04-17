@@ -1,5 +1,5 @@
-task: parkC
-task_type: B
+task: hyC
+task_type: C
 
 dataset: mvdr
 
@@ -14,19 +14,19 @@ prepare_data_fn: prepare_data
 
 # Key used in the SpeechBrain batch object for the label
 label_key: label_encoded
-raw_label_key: label
+raw_label_key: hy_rating
 
 # Data preparation
 skip_prep: False
 
 # Cross Validation
 num_fold: 5 # works from 2 to num. subjects. To be implemented: 0 -> normal split no CV, -1 -> LOSO
-num_labels: 1
+num_labels: 5
 
 nested: true
 num_outer_fold: 5
 
-loss: !new:torch.nn.BCEWithLogitsLoss
+loss: !new:torch.nn.CrossEntropyLoss
 
 ##### Augmentation
 # For all data that can be trained, during training with cached repr, will sample from versions

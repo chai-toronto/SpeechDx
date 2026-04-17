@@ -263,6 +263,8 @@ if __name__ == "__main__":
                 "random_seed": hparams["random_seed"],
                 "raw_label_key": hparams['data_params']["raw_label_key"],
                 "num_fold": hparams['data_params']["num_fold"],
+                "dataset": hparams["dataset"],
+                "task": hparams["task"],
             },
         )
 
