@@ -14,7 +14,7 @@ label_key: label_encoded
 
 skip_prep: False
 
-num_labels: 11
+num_labels: 4
 
 loss: !new:torch.nn.CrossEntropyLoss
 

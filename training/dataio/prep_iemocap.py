@@ -8,10 +8,10 @@ import pandas as pd
 from training.dataio.prep_utils import save_task_csv, to_sb_dict_and_save
 
 
-IEMOCAP_EMOTIONS = [
-    "neu", "fru", "ang", "sad", "hap", "exc", "sur", "fea", "dis", "oth", "xxx",
-]
-IEMOCAP_EMO_TO_IDX = {emo: i for i, emo in enumerate(IEMOCAP_EMOTIONS)}
+IEMOCAP_EMOTIONS = {
+    "neu": 0, "fru": 1, "ang": 1, "sad": 2, "hap": 3, "exc":3,
+
+}
 
 
 def prepare_iemocap_emoC(
@@ -23,8 +23,8 @@ def prepare_iemocap_emoC(
     df = pd.read_csv(metadata_path)
     df["path"] = Path(wav_folder).resolve() / df["path"]
 
-    df = df[df["label"].isin(IEMOCAP_EMOTIONS)].copy()
-    df["label"] = df["label"].map(IEMOCAP_EMO_TO_IDX).astype(int)
+    df = df[df["label"].isin(IEMOCAP_EMOTIONS.keys())].copy()
+    df["label"] = df["label"].map(IEMOCAP_EMOTIONS).astype(int)
 
     df_train = df[df["split"] == 0]
     df_val = df[df["split"] == 1]
