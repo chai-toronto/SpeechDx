@@ -42,6 +42,7 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
         self.hdf5file = h5py.File(self.cache_location, file_mode, **open_kwargs)
 
     def __getstate__(self):
+        self.hdf5file.close()
         state = self.__dict__.copy()
         del state["hdf5file"]
         return state
