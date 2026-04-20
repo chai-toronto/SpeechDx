@@ -159,12 +159,6 @@ def train_with_ray(config, hparams_file, run_opts, overrides, resolved_paths):
         hyperparams_to_save=str(forked_yaml),
     )
 
-    # Dynamically load the data preparation module
-    try:
-        data_io_module = importlib.import_module(hparams["data_io_script"])
-    except KeyError:
-        sys.exit("Error: 'data_io_script' path must be defined in the YAML file.")
-
     datasets = dataio_prep(hparams)  # Ray trials keep their cache handles open
 
     # Rebuild checkpointer with trial-specific save_folder
