@@ -2,6 +2,7 @@
 Preparing the metadata to go into preprocessing pipeline. This is for using with default
 split, label, classic model fitting
 """
+import json
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,9 @@ def prepare_data(
 
     # Resolve path to be absolute
     df["path"] = Path(wav_folder).resolve() / df["path"]
+
+    if "boundaries" in df.columns:
+        df["boundaries"] = df["boundaries"].apply(json.loads)
 
     df_test = df[df['split'] == 2]
     df_train = df[df['split'] == 0]

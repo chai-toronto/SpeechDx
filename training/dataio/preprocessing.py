@@ -55,7 +55,7 @@ def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
 
     # Define audio pipeline
     @sb.utils.data_pipeline.takes("path")
-    @sb.utils.data_pipeline.provides("raw_signal", "duration")
+    @sb.utils.data_pipeline.provides("signal", "raw_duration")
     def audio_pipeline(file_path):
         """Load the signal, resample, and pass it and its length."""
 
@@ -78,10 +78,8 @@ def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
     train_dynamic_items.append(audio_pipeline)
     val_dynamic_items.append(audio_pipeline)
 
-    # output_keys.extend(["raw_signal", "duration"])
-
-    @sb.utils.data_pipeline.takes("raw_signal")
-    @sb.utils.data_pipeline.provides("raw_signal", "duration")
+    @sb.utils.data_pipeline.takes("signal")
+    @sb.utils.data_pipeline.provides("signal", "duration")
     def augment(raw_signal):
         raw_signal = raw_signal.unsqueeze(0)  # add batch dimension for augmentations
         raw_signal = perturbator(raw_signal)
@@ -94,21 +92,13 @@ def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
     # Notice we only augment the training data, not validation or test.
     train_dynamic_items.append(augment)
 
-    # Handling too short or too long data.
-    @sb.utils.data_pipeline.takes("raw_signal", "duration")
+    # Val/test don't go through augment, so provide a duration that mirrors raw_duration.
+    @sb.utils.data_pipeline.takes("signal")
     @sb.utils.data_pipeline.provides("signal", "duration")
-    def process_signal(signal, duration):
-        if duration < min_samples:  # Center pad with silence if too short
-            pad_total = min_samples - duration
-            pad_left = int(pad_total // 2)
-            pad_right = int(pad_total - pad_left)
-            signal = torch.nn.functional.pad(signal, (pad_left, pad_right), value=0.0)
-        duration = len(signal)
-        return signal, duration
+    def passthrough_duration(signal):
+        return signal, signal.shape[0]
 
-    train_dynamic_items.append(process_signal)
-    val_dynamic_items.append(process_signal)
-    output_keys += ["signal"]
+    val_dynamic_items.append(passthrough_duration)
 
     # Define label pipeline
     @sb.utils.data_pipeline.takes("label")
@@ -125,7 +115,81 @@ def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
     val_dynamic_items.append(label_pipeline)
     output_keys.append("label_encoded")
 
+    # Handling too short data.
+    @sb.utils.data_pipeline.takes("signal", "duration")
+    @sb.utils.data_pipeline.provides("signal", "duration")
+    def process_signal(signal, duration):
+        if duration < min_samples:  # Center pad with silence if too short
+            pad_total = min_samples - duration
+            pad_left = int(pad_total // 2)
+            pad_right = int(pad_total - pad_left)
+            signal = torch.nn.functional.pad(signal, (pad_left, pad_right), value=0.0)
+        duration = len(signal)
+        return signal, duration
+
+    train_dynamic_items.append(process_signal)
+    val_dynamic_items.append(process_signal)
+    output_keys += ["signal"]
+
     if hparams["cache_encoder"]:
+        # Audio can be split based on given boundary first. Boundary is a list of splits in seconds from metadata.
+        split_by_boundary = hparams["data_params"].get("split_by_boundary", False)
+        if split_by_boundary:
+            # No need to handle too short audio anymore.
+            train_dynamic_items.pop(-1)
+            val_dynamic_items.pop(-1)
+
+        split_fn_takes = ["signal"] if not split_by_boundary else ["signal", "boundaries", "raw_duration", "duration"]
+
+        def split_by_boundaries(signal, boundaries, raw_duration, duration):
+            # Boundaries are in seconds relative to the raw (pre-perturb) audio.
+            # Map to sample indices in the (possibly speed-perturbed) signal by
+            # scaling with the actual/raw length ratio.
+            scale = duration / raw_duration
+            chunks, prev = [], 0
+            for b in boundaries:
+                end = int(round(b * sample_rate * scale))
+                chunks.append(signal[prev:end])
+                prev = end
+            return chunks
+
+        def chunk_signal(signal):
+            if len(signal) > max_samples:
+                chunks = list(signal.split(int(max_samples)))
+                if len(chunks) > 1 and len(chunks[-1]) < min_samples:
+                    chunks = chunks[:-1]
+            else:
+                chunks = [signal]
+
+            padded = []
+            for c in chunks:
+                if len(c) < min_samples:
+                    pad_total = min_samples - len(c)
+                    pad_left = int(pad_total // 2)
+                    pad_right = int(pad_total - pad_left)
+                    c = torch.nn.functional.pad(c, (pad_left, pad_right), value=0.0)
+                padded.append(c)
+            return padded
+
+        @sb.utils.data_pipeline.takes(*split_fn_takes)
+        @sb.utils.data_pipeline.provides("signals")
+        def split_signal(signal, boundaries=None, raw_duration=None, duration=None):
+            """
+            Cut by boundaries (if any), then chunk any piece longer than max_samples
+            and center-pad any piece shorter than min_samples.
+            """
+            if boundaries is not None:
+                pieces = split_by_boundaries(signal, boundaries, raw_duration, duration)
+            else:
+                pieces = [signal]
+            signals = []
+            for p in pieces:
+                signals.extend(chunk_signal(p))
+            return signals
+
+        train_dynamic_items.append(split_signal)
+        val_dynamic_items.append(split_signal)
+
         speech_encoder = hparams["encoder"]
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         speech_encoder = speech_encoder.to(device)
@@ -150,34 +214,26 @@ def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
             file_mode = 'a' if warm else 'r'
             if warm:
                 @CachedHDF5DynamicItem.cache(cache_dir, file_mode, num_ver)
-                @sb.utils.data_pipeline.takes("id", "signal")
+                @sb.utils.data_pipeline.takes("id", "signals")
                 @sb.utils.data_pipeline.provides(*output_vars)
-                def cache_emb(id, raw_signal):
+                def cache_emb(id, raw_signals):
                     device = next(speech_encoder.parameters()).device
                     with torch.no_grad():
-                        if len(raw_signal) > max_samples:
-                            chunks = list(raw_signal.split(int(max_samples)))
-                            if len(chunks) > 1 and len(chunks[-1]) < min_samples:
-                                chunks = chunks[:-1]
-                            embs = []
-                            for chunk in chunks:
-                                embs.append(speech_encoder(chunk.unsqueeze(0).to(device)))
-                            if speech_encoder.output_hidden_states:
-                                # T dim is always -2
-                                emb = tuple(
-                                    torch.cat([e[i].squeeze(0) for e in embs], dim=-2).cpu()
-                                    for i in range(len(embs[0]))
-                                )
-                            else:
-                                # T dim is always -2
-                                emb = torch.cat([e.squeeze(0) for e in embs], dim=-2).cpu()
+                        embs = []
+                        for chunk in raw_signals:
+                            embs.append(speech_encoder(chunk.unsqueeze(0).to(device)))
+                        if speech_encoder.output_hidden_states:
+                            # T dim is always -2
+                            n_layers = len(embs[0])
+                            emb = []
+                            for i in range(n_layers):
+                                layer_chunks = [e[i].squeeze(0) for e in embs]
+                                layer_emb = torch.cat(layer_chunks, dim=-2).cpu()
+                                emb.append(layer_emb)
+                            emb = tuple(emb)
                         else:
-                            raw_signal = raw_signal.unsqueeze(0).to(device)
-                            emb = speech_encoder(raw_signal)
-                            if speech_encoder.output_hidden_states:
-                                emb = tuple(x.squeeze(0).cpu() for x in emb)
-                            else:
-                                emb = emb.squeeze(0).cpu()
+                            # T dim is always -2
+                            emb = torch.cat([e.squeeze(0) for e in embs], dim=-2).cpu()
                     return emb
 
                 return cache_emb
@@ -266,10 +322,8 @@ def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
 
             output_keys += output_vars
             output_keys.remove("signal")
-    # else:
-    #     train_cache_emb = None
-    #     val_cache_emb = None
 
+    # TODO: if not use cache, Random Crop
     # Define datasets.
     datasets = {}
     for dataset in data_dict:

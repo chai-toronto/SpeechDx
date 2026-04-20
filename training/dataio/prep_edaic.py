@@ -2,6 +2,7 @@
 Preparing the metadata for EDAIC dataset tasks.
 Uses official split column.
 """
+import json
 from pathlib import Path
 import pandas as pd
 from training.dataio.prep_utils import to_sb_dict_and_save
@@ -16,6 +17,8 @@ def prepare_edaic_phqR(
     df = pd.read_csv(metadata_path)
     df["path"] = Path(wav_folder).resolve() / df["path"]
     df["label"] = df["PHQ_Score"].astype(float)
+    if "boundaries" in df.columns:
+        df["boundaries"] = df["boundaries"].apply(json.loads)
 
     # Use official split
     df_train = df[df["split"] == 0]

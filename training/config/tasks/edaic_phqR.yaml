@@ -13,6 +13,8 @@ num_labels: 1
 
 loss: !new:torch.nn.MSELoss
 
+split_by_boundary: true
+
 optim_metric: loss
 optim_mode: min
 
