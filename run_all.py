@@ -36,7 +36,7 @@ ENCODERS = {
 }
 
 TASK = []
-EXCLUDE_DATASETS = {"daic_woz", "edaic"}  # long-form interview audio, OOMs during cache warm
+EXCLUDE_DATASETS = {"daic_woz"}  # permanent dead task; edaic is live
 
 PROBE_NAME = "AvgTProbe"
 PROBE_YAML = "AvgTProbe.yaml"
@@ -65,21 +65,26 @@ def discover_all_encoders() -> dict[str, str]:
             for stem, yaml_name in sorted(stem_to_yaml.items())}
 
 
-def discover_tasks(datasets: list[str] | None = None) -> list[str]:
+def discover_tasks(datasets: list[str] | None = None,
+                   tasks: list[str] | None = None) -> list[str]:
     """Auto-scan training/config/tasks/*.yaml and return sorted list of stems.
     Override with TASK env var (comma-separated) if set. Datasets listed in
-    EXCLUDE_DATASETS are filtered out. If `datasets` is given, keep only those."""
+    EXCLUDE_DATASETS are filtered out. If `datasets` is given, keep only those.
+    If `tasks` is given, keep only stems matching those names."""
     if TASK:
         stems = TASK
     else:
         stems = sorted(p.stem for p in TASKS_DIR.glob("*.yaml"))
-    allowed = set(datasets) if datasets else None
+    allowed_ds = set(datasets) if datasets else None
+    allowed_tasks = set(tasks) if tasks else None
     out = []
     for s in stems:
         ds = get_task_info(s)[0]
         if ds in EXCLUDE_DATASETS:
             continue
-        if allowed is not None and ds not in allowed:
+        if allowed_ds is not None and ds not in allowed_ds:
+            continue
+        if allowed_tasks is not None and s not in allowed_tasks:
             continue
         out.append(s)
     return out
@@ -155,7 +160,13 @@ def task_ids(task_stem: str) -> frozenset[str]:
     for p in manifest_paths(task_stem):
         if p.exists():
             with p.open() as f:
-                ids |= set(json.load(f).keys())
+                data = json.load(f)
+                if isinstance(data, dict):
+                    ids |= set(data.keys())
+                elif isinstance(data, list):
+                    for fold in data:
+                        if isinstance(fold, dict):
+                            ids |= set(fold.keys())
     frozen = frozenset(ids)
     _task_ids_cache[task_stem] = frozen
     return frozen
@@ -460,7 +471,7 @@ def _needed_keys(task_stem: str) -> set[tuple[str, int]]:
 
 
 def cmd_run(args: argparse.Namespace) -> None:
-    tasks = discover_tasks(args.dataset)
+    tasks = discover_tasks(args.dataset, args.task)
     skipped, completed, failed = 0, 0, []
 
     # Filter encoders by --encoder flag (default: all). Repeatable.
@@ -610,6 +621,9 @@ def main() -> None:
     run_parser.add_argument("--dataset", type=str, default=None,
                             action="append",
                             help="Run only tasks whose dataset field matches (repeatable; default: all datasets)")
+    run_parser.add_argument("--task", type=str, default=None,
+                            action="append",
+                            help="Run only these task stems (repeatable; default: all tasks)")
 
     args = parser.parse_args()
     if args.command == "status":
