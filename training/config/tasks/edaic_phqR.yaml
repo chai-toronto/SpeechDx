@@ -18,7 +18,7 @@ split_by_boundary: true
 optim_metric: loss
 optim_mode: min
 
-num_aug_ver: 1
+num_aug_ver: 3
 snr_low: 0
 snr_high: 15
 speed: !new:builtins.list

@@ -15,7 +15,7 @@ loss: !new:torch.nn.BCEWithLogitsLoss
 
 split_by_boundary: true
 
-num_aug_ver: 1
+num_aug_ver: 3
 snr_low: 0
 snr_high: 15
 speed: !new:builtins.list
