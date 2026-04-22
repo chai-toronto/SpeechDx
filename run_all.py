@@ -348,9 +348,14 @@ def cmd_summary(args: argparse.Namespace) -> None:
     matrices: dict[str, dict[str, dict[str, float]]] = {
         k: defaultdict(dict) for k in CSV_LAYOUT.values()
     }
-    # Track which tasks are regression (have any regression metric)
+    # Classify tasks by task_type yaml field so empty rows are still emitted
     regression_tasks: set[str] = set()
     classification_tasks: set[str] = set()
+    for task_stem in tasks:
+        if _load_task_yaml(task_stem).get("task_type") == "R":
+            regression_tasks.add(task_stem)
+        else:
+            classification_tasks.add(task_stem)
     found, missing = 0, 0
 
     for task_stem in tasks:
@@ -362,10 +367,6 @@ def cmd_summary(args: argparse.Namespace) -> None:
                 missing += 1
                 continue
             found += 1
-            if any(k in metrics for k in REGRESSION_METRICS):
-                regression_tasks.add(task_stem)
-            if any(k in metrics for k in CLASSIFICATION_METRICS):
-                classification_tasks.add(task_stem)
             for metric_key in CSV_LAYOUT.values():
                 if metric_key in metrics:
                     matrices[metric_key][task_stem][model_name] = metrics[metric_key]
@@ -376,13 +377,10 @@ def cmd_summary(args: argparse.Namespace) -> None:
     written = []
     for csv_name, metric_key in CSV_LAYOUT.items():
         data = matrices[metric_key]
-        if not data:
-            continue
-        # Classification CSVs → only classification tasks; regression → only regression tasks
-        if metric_key in REGRESSION_METRICS:
-            task_rows = sorted(t for t in data if t in regression_tasks)
-        else:
-            task_rows = sorted(t for t in data if t in classification_tasks)
+        # Classification CSVs → only classification tasks; regression → only regression tasks.
+        # Emit every task of the matching type, even if all encoders are empty.
+        pool = regression_tasks if metric_key in REGRESSION_METRICS else classification_tasks
+        task_rows = sorted(pool)
         if not task_rows:
             continue
 
