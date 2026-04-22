@@ -1,19 +1,22 @@
-task: adC
-task_type: B
+task: mmseR
+task_type: R
 
 dataset: dbank
 
-data_io_script: training.dataio.prep_default
-prepare_data_fn: prepare_data
+data_io_script: training.dataio.prep_dbank
+prepare_data_fn: prepare_dbank_mmseR
 
 label_key: label_encoded
 skip_prep: False
 
 num_labels: 1
 
-loss: !new:torch.nn.BCEWithLogitsLoss
+loss: !new:torch.nn.MSELoss
 
 split_by_boundary: false
+
+optim_metric: loss
+optim_mode: min
 
 num_aug_ver: 3
 snr_low: 0
