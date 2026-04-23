@@ -25,6 +25,8 @@ num_fold: 5 # works from 2 to num. subjects. To be implemented: 0 -> normal spli
 nested: true
 num_outer_fold: 5
 
+num_labels: 1
+
 loss: !new:torch.nn.MSELoss
 
 ##### Augmentation
