@@ -53,7 +53,7 @@ def prepare_ksof_stutL(
         class_bits.append((df[src_col] >= STUT_MAJORITY).astype(int).values)
 
     label_matrix = list(zip(*class_bits))  # list of 7-tuples
-    df["label"] = [list(t) for t in label_matrix]
+    df["label"] = [[int(x) for x in t] for t in label_matrix]
 
     n_before = len(df)
     keep = [any(t) for t in label_matrix]
