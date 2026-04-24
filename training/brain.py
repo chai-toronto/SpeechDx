@@ -1,11 +1,59 @@
 from pathlib import Path
 
+import numpy as np
 import torch
 import speechbrain as sb
 from ray import tune
+from scipy.stats import bootstrap
 from torchmetrics import MetricCollection
 from torchmetrics.classification import Precision, Recall, F1Score, AUROC, Accuracy
 from torchmetrics.regression import MeanAbsoluteError, MeanSquaredError, PearsonCorrCoef, R2Score
+
+
+def delong_ci(y_true, y_score, alpha=0.05):
+    """Compute DeLong confidence interval for AUC."""
+    y_true = np.asarray(y_true)
+    y_score = np.asarray(y_score)
+    pos = y_score[y_true == 1]
+    neg = y_score[y_true == 0]
+    m, n = len(pos), len(neg)
+    if m == 0 or n == 0:
+        return np.nan, (np.nan, np.nan)
+    
+    # Placement values
+    v10 = np.mean(pos[:, None] > neg[None, :], axis=1) + \
+          0.5 * np.mean(pos[:, None] == neg[None, :], axis=1)
+    v01 = np.mean(pos[None, :] > neg[:, None], axis=0) + \
+          0.5 * np.mean(pos[None, :] == neg[:, None], axis=0)
+    
+    auc = np.mean(v10)
+    var = np.var(v10, ddof=1) / m + np.var(v01, ddof=1) / n
+    se = np.sqrt(var)
+    
+    z = 1.96  # for 95% CI
+    return auc, (max(0, auc - z * se), min(1, auc + z * se))
+
+
+def bootstrap_mae_ci(y_true, y_pred, n_resamples=1000, confidence_level=0.95):
+    """Compute bootstrap confidence interval for MAE."""
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    
+    def mae_statistic(indices):
+        return np.mean(np.abs(y_true[indices] - y_pred[indices]))
+    
+    rng = np.random.default_rng(42)
+    indices = np.arange(len(y_true))
+    result = bootstrap(
+        (indices,),
+        statistic=mae_statistic,
+        n_resamples=n_resamples,
+        confidence_level=confidence_level,
+        method='percentile',
+        random_state=rng
+    )
+    mae = np.mean(np.abs(y_true - y_pred))
+    return mae, (result.confidence_interval.low, result.confidence_interval.high)
 
 
 def unwrap_ddp(module):
@@ -24,6 +72,10 @@ class DiagnosticsBrain(sb.Brain):
         # stopper variant, trial-specific save_folder) is now baked into the
         # forked main.yaml by training.config_fork.
         self.ray_optim = ray_optim
+        
+        # Storage for CI calculation during test
+        self._test_preds = []
+        self._test_labels = []
 
         # Re-register `counter` via add_recoverable (singular) so it lands in
         # optional_recoverables too. SB's YAML constructor uses add_recoverables
@@ -143,6 +195,25 @@ class DiagnosticsBrain(sb.Brain):
         else:
             self.error_metrics.update(predictions, lab)
 
+        # Store predictions and labels for CI calculation during test
+        if stage == sb.Stage.TEST:
+            with torch.no_grad():
+                if self.task_type == "R":
+                    self._test_preds.append(predictions.squeeze(-1).cpu())
+                    self._test_labels.append(lab.squeeze(-1).cpu())
+                elif self.task_type == "B":
+                    # For binary, store sigmoid probabilities
+                    self._test_preds.append(torch.sigmoid(predictions).squeeze(-1).cpu())
+                    self._test_labels.append(lab.squeeze(-1).cpu())
+                elif self.task_type == "C":
+                    # For multiclass, store softmax probabilities
+                    self._test_preds.append(torch.softmax(predictions, dim=-1).cpu())
+                    self._test_labels.append(lab.cpu())
+                elif self.task_type == "L":
+                    # For multilabel, store sigmoid probabilities
+                    self._test_preds.append(torch.sigmoid(predictions).cpu())
+                    self._test_labels.append(lab.cpu())
+
         return loss
 
     def on_stage_end(self, stage, stage_loss, epoch=None):
@@ -203,6 +274,56 @@ class DiagnosticsBrain(sb.Brain):
                 test_stats=eval_stats,
             )
             self.test_stats = detensor_dict(eval_stats)
+            
+            # Compute confidence intervals
+            if self._test_preds and self._test_labels:
+                all_preds = torch.cat(self._test_preds, dim=0).numpy()
+                all_labels = torch.cat(self._test_labels, dim=0).numpy()
+                
+                if self.task_type == "R":
+                    # Bootstrap CI for MAE
+                    mae, (mae_lo, mae_hi) = bootstrap_mae_ci(all_labels, all_preds)
+                    self.test_stats["MAE_CI_low"] = mae_lo
+                    self.test_stats["MAE_CI_high"] = mae_hi
+                elif self.task_type == "B":
+                    # DeLong CI for binary AUROC
+                    auc_delong, (auc_lo, auc_hi) = delong_ci(all_labels, all_preds)
+                    auc_torchmetrics = self.test_stats.get("AUROC", None)
+                    # Verify DeLong AUC matches torchmetrics AUROC
+                    if auc_torchmetrics is not None:
+                        diff = abs(auc_delong - auc_torchmetrics)
+                        print(f"[AUC CHECK] torchmetrics={auc_torchmetrics:.6f}, DeLong={auc_delong:.6f}, diff={diff:.2e}")
+                        if diff > 1e-4:
+                            print(f"[WARNING] AUC mismatch > 1e-4!")
+                    self.test_stats["AUROC_CI_low"] = auc_lo
+                    self.test_stats["AUROC_CI_high"] = auc_hi
+                elif self.task_type == "C":
+                    # For multiclass, compute one-vs-rest AUC CI for each class
+                    # and report macro-average CI
+                    n_classes = all_preds.shape[1]
+                    auc_los, auc_his, auc_vals = [], [], []
+                    for c in range(n_classes):
+                        y_true_c = (all_labels == c).astype(int)
+                        y_score_c = all_preds[:, c]
+                        auc_c, (lo, hi) = delong_ci(y_true_c, y_score_c)
+                        if not np.isnan(lo):
+                            auc_los.append(lo)
+                            auc_his.append(hi)
+                            auc_vals.append(auc_c)
+                    if auc_los:
+                        auc_delong_macro = np.mean(auc_vals)
+                        auc_torchmetrics = self.test_stats.get("AUROC", None)
+                        # Note: torchmetrics uses weighted avg, DeLong uses macro avg
+                        if auc_torchmetrics is not None:
+                            diff = abs(auc_delong_macro - auc_torchmetrics)
+                            print(f"[AUC CHECK] torchmetrics(weighted)={auc_torchmetrics:.6f}, DeLong(macro)={auc_delong_macro:.6f}, diff={diff:.2e}")
+                            print(f"  (Note: weighted vs macro avg may differ)")
+                        self.test_stats["AUROC_CI_low"] = np.mean(auc_los)
+                        self.test_stats["AUROC_CI_high"] = np.mean(auc_his)
+                
+                # Clear storage
+                self._test_preds = []
+                self._test_labels = []
 
 def detensor_dict(d: dict):
     new_d = {}

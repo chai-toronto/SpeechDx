@@ -30,6 +30,7 @@ from ray.tune.search.optuna import OptunaSearch
 from ray.tune.search.searcher import ConcurrencyLimiter
 
 from training.dataio.preprocessing import master_dataio_prep
+# from training.dataio.preprocessing import master_dataio_prep_cross
 
 os.environ["RAY_CHDIR_TO_TRIAL_DIR"] = "0"
 import ray
@@ -103,7 +104,18 @@ def dataio_prep(hparams):
 
     with open(hparams['test_annotation'], "r") as f:
         test = json.load(f)
+    # if hparams.get("cross_eval", False):
+    #     data_dict = {
+    #         "train": train,
+    #         "val": val,
+    #         "test": test,
+    #         "all_train": train | val, # for cache warming
+    #         "all_test": test, # for cache warming
+    #     }
 
+    #     # datasets, cache_handles = master_dataio_prep_cross(data_dict, hparams)
+    #     datasets = master_dataio_prep_cross(data_dict, hparams)
+    # else:
     data_dict = {
         "train": train,
         "val": val,
@@ -203,8 +215,11 @@ if __name__ == "__main__":
     with open(hparams_file) as fin:
         hparams = load_hyperpyyaml(fin, overrides)
 
-    # Wipe output_folder unless continuing a previous experiment
-    if not hparams.get("continue_exp", False):
+    # Log key config values for verification
+    print(f"[CONFIG] test_only={hparams.get('test_only', False)}, warm_cache={hparams.get('warm_cache', True)}")
+
+    # Wipe output_folder unless continuing a previous experiment or test_only
+    if not hparams.get("continue_exp", False) and not hparams.get("test_only", False):
         output_folder = Path(hparams["output_folder"])
         if output_folder.exists():
             print(f"Wiping output_folder: {output_folder}")
@@ -225,7 +240,26 @@ if __name__ == "__main__":
             sys.exit("Error: 'data_io_script' path must be defined in the YAML file.")
 
         prepare_data_fn = getattr(data_io_module, hparams["prepare_data_fn"])
-
+        # if hparams.get("cross_eval", False):
+        #     print("Running cross-dataset evaluation data prep...")
+        #     sb.utils.distributed.run_on_main(
+        #         prepare_data_fn,
+        #         kwargs={
+        #             "wav_folder_train": hparams["wav_folder_train"],
+        #             "metadata_path_train": hparams["metadata_path_train"],
+        #             "wav_folder_test": hparams["wav_folder_test"],
+        #             "metadata_path_test": hparams["metadata_path_test"],
+        #             "manifest_train_path": hparams["train_annotation"],
+        #             "manifest_val_path": hparams["val_annotation"],
+        #             "manifest_test_path": hparams["test_annotation"],
+        #             "ratio": hparams.get("ratio", None),
+        #             "random_seed": hparams["random_seed"],
+        #             "dataset": hparams["dataset"],
+        #             "task": hparams["task"],
+        #         },
+        #     )
+        # else:
+        print("Running standard data prep...")
         sb.utils.distributed.run_on_main(
             prepare_data_fn,
             kwargs={
@@ -244,6 +278,7 @@ if __name__ == "__main__":
     # Warm cache (if True) early so Ray workers can open it read-only;
     # must run before Ray spawns parallel trials
     datasets = dataio_prep(hparams)
+    print("Cache warm complete.")
 
     _project_root = Path.cwd().resolve()
     resolved_paths = _collect_resolved_paths(hparams, _project_root)
