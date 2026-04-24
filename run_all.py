@@ -491,14 +491,15 @@ def cmd_run(args: argparse.Namespace) -> None:
         dataset, task = get_task_info(task_stem)
         for model_name, encoder_yaml in encoders.items():
             folder = get_output_folder(dataset, task, model_name)
-            # if is_complete(folder, task_stem):
-            #     print(f"SKIP (done): {task_stem} × {model_name}")
-            #     skipped += 1
-            #     completed_by_ds_enc[(dataset, model_name)].append(task_stem)
-            #     continue
-            if test_only and not (folder / "best_hparams.yaml").exists():
-                print(f"SKIP (no trained model): {task_stem} × {model_name}")
+            if test_only:
+                if not (folder / "best_hparams.yaml").exists():
+                    print(f"SKIP (no trained model): {task_stem} × {model_name}")
+                    skipped += 1
+                    continue
+            elif is_complete(folder, task_stem):
+                print(f"SKIP (done): {task_stem} × {model_name}")
                 skipped += 1
+                completed_by_ds_enc[(dataset, model_name)].append(task_stem)
                 continue
             pending.append((task_stem, model_name, encoder_yaml))
 
