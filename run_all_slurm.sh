@@ -34,11 +34,12 @@ nvidia-smi --query-gpu=timestamp,index,power.draw,memory.used \
            --format=csv,noheader -l 1 > "$SLURM_JOB_ID.gpu.csv" &
 LOGGER_PID=$!
 
-: "${ENCODER:?ENCODER env var must be set (e.g. sbatch --export=ALL,ENCODER=wavlm ...). Accepts a space- or comma-separated list for packed jobs.}"
 ENC_ARGS=()
-for ENC in ${ENCODER//,/ }; do
-    ENC_ARGS+=(--encoder="$ENC")
-done
+if [[ -n "${ENCODER:-}" ]]; then
+    for ENC in ${ENCODER//,/ }; do
+        ENC_ARGS+=(--encoder="$ENC")
+    done
+fi
 DS_ARGS=()
 if [[ -n "${DATASET:-}" ]]; then
     for DS in ${DATASET//,/ }; do
@@ -51,7 +52,11 @@ if [[ -n "${TASK:-}" ]]; then
         TASK_ARGS+=(--task="$T")
     done
 fi
-echo "=== Packed run: ${ENC_ARGS[*]} ${DS_ARGS[*]} ${TASK_ARGS[*]} ==="
-python run_all.py run --device=cuda -j "${JOBS:-3}" "${ENC_ARGS[@]}" "${DS_ARGS[@]}" "${TASK_ARGS[@]}"
+TEST_ONLY_ARG=()
+if [[ -n "${TEST_ONLY:-}" ]]; then
+    TEST_ONLY_ARG+=(--test-only)
+fi
+echo "=== Packed run: ${ENC_ARGS[*]} ${DS_ARGS[*]} ${TASK_ARGS[*]} ${TEST_ONLY_ARG[*]} ==="
+python run_all.py run --device=cuda -j "${JOBS:-3}" "${ENC_ARGS[@]}" "${DS_ARGS[@]}" "${TASK_ARGS[@]}" "${TEST_ONLY_ARG[@]}"
 
 kill $LOGGER_PID

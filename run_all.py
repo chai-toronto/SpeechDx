@@ -237,6 +237,33 @@ def is_complete(output_folder: Path, task_stem: str) -> bool:
     return (output_folder / get_results_file(task_stem)).exists()
 
 
+def _expected_ci_keys(task_type: str) -> tuple[str, str] | None:
+    """CI field names brain.py emits per task_type. None = no CI produced."""
+    if task_type == "R":
+        return ("MAE_CI_low", "MAE_CI_high")
+    if task_type in ("B", "C"):
+        return ("AUROC_CI_low", "AUROC_CI_high")
+    return None  # L (multilabel) — brain.py doesn't compute CI
+
+
+def has_ci_results(output_folder: Path, task_stem: str) -> bool:
+    """test_only skip gate: True iff results already contain CI fields (so a
+    re-run would add nothing). mvdr (CV yaml) synthesizes CI from cross-fold
+    std and doesn't go through test_only; task types without CI support are
+    also treated as already-satisfied."""
+    results_file = output_folder / get_results_file(task_stem)
+    if not results_file.exists():
+        return False
+    if results_file.suffix == ".yaml":
+        return True
+    expected = _expected_ci_keys(_load_task_yaml(task_stem).get("task_type", ""))
+    if expected is None:
+        return True
+    lo, hi = expected
+    text = results_file.read_text()
+    return lo in text and hi in text
+
+
 def make_config(model_name: str, encoder_yaml: str, task_yaml: str, config_id: str = "",
                 warm_cache_override: bool | None = None, test_only: bool = False) -> Path:
     text = BASE_CONFIG.read_text()
@@ -299,11 +326,12 @@ def run_one(task_stem: str, model_name: str, encoder_yaml: str, device=None,
 
 
 # ─── Result parsing ────────────────────────────────────────────────────
-CLASSIFICATION_METRICS = ["AUROC", "F1", "accuracy"]
+CLASSIFICATION_METRICS = ["AUROC", "AUC_CI", "F1", "accuracy"]
 REGRESSION_METRICS = ["MAE", "MSE", "PearsonR", "R2"]
 # filename -> list of metric keys that belong in that CSV
 CSV_LAYOUT = {
     "AUC": "AUROC",
+    "AUC_CI": "AUC_CI",
     "F1": "F1",
     "Acc": "accuracy",
     "MAE": "MAE",
@@ -313,9 +341,9 @@ CSV_LAYOUT = {
 }
 
 
-def parse_results_txt(path: Path) -> dict[str, float]:
+def parse_results_txt(path: Path) -> dict[str, float | str]:
     """Parse 'key: value' lines from a test_results.txt file."""
-    metrics = {}
+    metrics: dict[str, float | str] = {}
     for line in path.read_text().splitlines():
         if ":" not in line:
             continue
@@ -324,15 +352,30 @@ def parse_results_txt(path: Path) -> dict[str, float]:
             metrics[key.strip()] = float(val.strip())
         except ValueError:
             pass
+    lo, hi = metrics.get("AUROC_CI_low"), metrics.get("AUROC_CI_high")
+    if isinstance(lo, float) and isinstance(hi, float):
+        metrics["AUC_CI"] = f"({lo:.4f}, {hi:.4f})"
     return metrics
 
 
-def parse_results_yaml(path: Path) -> dict[str, float]:
-    """Parse test_results.yaml (trainPerFoldCV) — take summary means."""
+def parse_results_yaml(path: Path) -> dict[str, float | str]:
+    """Parse test_results.yaml (trainPerFoldCV) — take summary means.
+
+    For mvdr (CV) AUROC, synthesize AUC_CI as (mean - std, mean + std) since
+    DeLong per-fold CIs aren't aggregated; cross-fold std is the meaningful
+    uncertainty.
+    """
     data = yaml.safe_load(path.read_text())
     summary = data.get("summary", {}) if isinstance(data, dict) else {}
-    return {k: float(v["mean"]) for k, v in summary.items()
-            if isinstance(v, dict) and "mean" in v}
+    metrics: dict[str, float | str] = {
+        k: float(v["mean"]) for k, v in summary.items()
+        if isinstance(v, dict) and "mean" in v
+    }
+    auroc = summary.get("AUROC")
+    if isinstance(auroc, dict) and "mean" in auroc and "std" in auroc:
+        m, s = float(auroc["mean"]), float(auroc["std"])
+        metrics["AUC_CI"] = f"({m - s:.4f}, {m + s:.4f})"
+    return metrics
 
 
 def load_metrics(output_folder: Path, task_stem: str) -> dict[str, float] | None:
@@ -396,7 +439,12 @@ def cmd_summary(args: argparse.Namespace) -> None:
                 row = [task_stem]
                 for enc in encoders:
                     val = data[task_stem].get(enc, "")
-                    row.append(f"{val:.4f}" if isinstance(val, float) else "")
+                    if isinstance(val, float):
+                        row.append(f"{val:.4f}")
+                    elif isinstance(val, str):
+                        row.append(val)
+                    else:
+                        row.append("")
                 writer.writerow(row)
         written.append(csv_path)
 
@@ -429,16 +477,32 @@ def cmd_summary(args: argparse.Namespace) -> None:
 
 def cmd_status(args: argparse.Namespace) -> None:
     tasks = discover_tasks()
-    complete, incomplete = 0, 0
+    test_only = getattr(args, "test_only", False)
+    complete, incomplete, absent = 0, 0, 0
 
     encoders = list(ENCODERS.keys())
     rows = []
     for task_stem in tasks:
         dataset, task = get_task_info(task_stem)
         row = [task_stem]
+        # Tasks whose type has no CI support (e.g. L) render blank in test_only
+        # view — test_only can't add anything.
+        ci_applicable = (
+            _expected_ci_keys(_load_task_yaml(task_stem).get("task_type", "")) is not None
+        ) if test_only else True
         for model_name in encoders:
             folder = get_output_folder(dataset, task, model_name)
-            if is_complete(folder, task_stem):
+            if test_only:
+                if not ci_applicable or not (folder / get_results_file(task_stem)).exists():
+                    row.append(" ")
+                    absent += 1
+                elif has_ci_results(folder, task_stem):
+                    row.append("☑")
+                    complete += 1
+                else:
+                    row.append("☐")
+                    incomplete += 1
+            elif is_complete(folder, task_stem):
                 row.append("☑")
                 complete += 1
             else:
@@ -460,9 +524,14 @@ def cmd_status(args: argparse.Namespace) -> None:
     for row in rows:
         print(format_row(row))
 
-    total = complete + incomplete
-    print(f"\nLegend: ☑ complete, ☐ incomplete")
-    print(f"Summary: {complete}/{total} complete, {incomplete} remaining")
+    if test_only:
+        total = complete + incomplete + absent
+        print(f"\nLegend: ☑ CI present, ☐ tested without CI, blank = no test result")
+        print(f"Summary: {complete}/{total} with CI, {incomplete} pending CI, {absent} no test result")
+    else:
+        total = complete + incomplete
+        print(f"\nLegend: ☑ complete, ☐ incomplete")
+        print(f"Summary: {complete}/{total} complete, {incomplete} remaining")
 
 
 def _needed_keys(task_stem: str) -> set[tuple[str, int]]:
@@ -492,6 +561,10 @@ def cmd_run(args: argparse.Namespace) -> None:
         for model_name, encoder_yaml in encoders.items():
             folder = get_output_folder(dataset, task, model_name)
             if test_only:
+                if has_ci_results(folder, task_stem):
+                    print(f"SKIP (CI present): {task_stem} × {model_name}")
+                    skipped += 1
+                    continue
                 if not (folder / "best_hparams.yaml").exists():
                     print(f"SKIP (no trained model): {task_stem} × {model_name}")
                     skipped += 1
@@ -617,7 +690,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run training across task × encoder combos")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("status", help="Show completion status of all runs")
+    status_parser = sub.add_parser("status", help="Show completion status of all runs")
+    status_parser.add_argument("--test-only", action="store_true",
+                               help="Report CI-presence status instead of completion status")
 
     summary_parser = sub.add_parser("summary", help="Collect results into per-metric CSVs")
     summary_parser.add_argument("--out-dir", type=str, default="exps/_summary",
