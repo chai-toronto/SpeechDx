@@ -238,7 +238,7 @@ def is_complete(output_folder: Path, task_stem: str) -> bool:
 
 
 def make_config(model_name: str, encoder_yaml: str, task_yaml: str, config_id: str = "",
-                warm_cache_override: bool | None = None) -> Path:
+                warm_cache_override: bool | None = None, test_only: bool = False) -> Path:
     text = BASE_CONFIG.read_text()
     subs = [
         (r"^model_name:.*$", f"model_name: {model_name}"),
@@ -253,6 +253,10 @@ def make_config(model_name: str, encoder_yaml: str, task_yaml: str, config_id: s
         text = re.sub(pattern, replacement, text, flags=re.MULTILINE)
     # Remove chunk_at line entirely
     text = re.sub(r"^chunk_at:.*\n?", "", text, flags=re.MULTILINE)
+    # Override test_only and warm_cache if requested
+    if test_only:
+        text = re.sub(r"^test_only:.*$", "test_only: True", text, flags=re.MULTILINE)
+        text = re.sub(r"^warm_cache:.*$", "warm_cache: false", text, flags=re.MULTILINE)
     # Include model name + SLURM job id so concurrent jobs (same encoder, different
     # datasets) don't overwrite/delete each other's temp config.
     job_suffix = f"_job{os.environ['SLURM_JOB_ID']}" if os.environ.get("SLURM_JOB_ID") else ""
@@ -263,12 +267,12 @@ def make_config(model_name: str, encoder_yaml: str, task_yaml: str, config_id: s
 
 def run_one(task_stem: str, model_name: str, encoder_yaml: str, device=None,
             config_id: str = "",
-            warm_cache_override: bool | None = None) -> tuple[str, bool, float]:
+            warm_cache_override: bool | None = None, test_only: bool = False) -> tuple[str, bool, float]:
     """Run a single training job. Returns (label, success, elapsed_seconds)."""
     label = f"{task_stem} × {model_name}"
     task_yaml = f"{task_stem}.yaml"
     config_path = make_config(model_name, encoder_yaml, task_yaml, config_id,
-                              warm_cache_override=warm_cache_override)
+                              warm_cache_override=warm_cache_override, test_only=test_only)
 
     cmd = get_train_command(task_stem).split()
     cmd.append(str(config_path))
@@ -471,6 +475,7 @@ def _needed_keys(task_stem: str) -> set[tuple[str, int]]:
 def cmd_run(args: argparse.Namespace) -> None:
     tasks = discover_tasks(args.dataset, args.task)
     skipped, completed, failed = 0, 0, []
+    test_only = getattr(args, 'test_only', False)
 
     # Filter encoders by --encoder flag (default: all). Repeatable.
     if args.encoder:
@@ -486,10 +491,14 @@ def cmd_run(args: argparse.Namespace) -> None:
         dataset, task = get_task_info(task_stem)
         for model_name, encoder_yaml in encoders.items():
             folder = get_output_folder(dataset, task, model_name)
-            if is_complete(folder, task_stem):
-                print(f"SKIP (done): {task_stem} × {model_name}")
+            # if is_complete(folder, task_stem):
+            #     print(f"SKIP (done): {task_stem} × {model_name}")
+            #     skipped += 1
+            #     completed_by_ds_enc[(dataset, model_name)].append(task_stem)
+            #     continue
+            if test_only and not (folder / "best_hparams.yaml").exists():
+                print(f"SKIP (no trained model): {task_stem} × {model_name}")
                 skipped += 1
-                completed_by_ds_enc[(dataset, model_name)].append(task_stem)
                 continue
             pending.append((task_stem, model_name, encoder_yaml))
 
@@ -536,6 +545,12 @@ def cmd_run(args: argparse.Namespace) -> None:
         task_stem, model_name, encoder_yaml = job
         dataset, _ = get_task_info(task_stem)
         key = (dataset, model_name)
+
+        # test_only never writes cache — skip lock logic entirely.
+        if test_only:
+            return run_one(task_stem, model_name, encoder_yaml, args.device,
+                           f"_{idx}", warm_cache_override=False, test_only=True)
+
         try:
             needed = _needed_keys(task_stem)
         except Exception:
@@ -549,7 +564,7 @@ def cmd_run(args: argparse.Namespace) -> None:
 
         if is_reader:
             return run_one(task_stem, model_name, encoder_yaml, args.device,
-                           f"_{idx}", warm_cache_override=False)
+                           f"_{idx}", warm_cache_override=False, test_only=test_only)
 
         # Writer path — acquire per-(dataset, encoder) lock. Release early if the
         # re-check shows a concurrent writer satisfied our keys (run as reader).
@@ -566,9 +581,9 @@ def cmd_run(args: argparse.Namespace) -> None:
                 ds_lock.release()
                 released = True
                 return run_one(task_stem, model_name, encoder_yaml, args.device,
-                               f"_{idx}", warm_cache_override=False)
+                               f"_{idx}", warm_cache_override=False, test_only=test_only)
             result = run_one(task_stem, model_name, encoder_yaml, args.device,
-                             f"_{idx}", warm_cache_override=None)
+                             f"_{idx}", warm_cache_override=None, test_only=test_only)
             _, success, _ = result
             if success and needed is not None:
                 with written_lock:
@@ -622,6 +637,8 @@ def main() -> None:
     run_parser.add_argument("--task", type=str, default=None,
                             action="append",
                             help="Run only these task stems (repeatable; default: all tasks)")
+    run_parser.add_argument("--test-only", action="store_true",
+                            help="Run inference only (no training), requires prior completed runs")
 
     args = parser.parse_args()
     if args.command == "status":
