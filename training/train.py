@@ -385,8 +385,22 @@ if __name__ == "__main__":
     # from edits to the base training/config/*.yaml between HP opt and eval.
     best_trial_dir = Path(base_output_folder) / best_config["trial_id"]
     best_forked_yaml = best_trial_dir / "config" / "main.yaml"
-    with open(best_forked_yaml) as fin:
-        hparams = load_hyperpyyaml(fin)
+    if best_forked_yaml.exists():
+        with open(best_forked_yaml) as fin:
+            hparams = load_hyperpyyaml(fin)
+    else:
+        # Legacy trial dirs predate training.config_fork — no per-trial
+        # config/main.yaml exists. Reload base hparams and apply best_config
+        # values as overrides. save_folder resolves to the top-level ./save
+        # layout these runs used, where the final checkpoint lives.
+        print(f"Forked config missing at {best_forked_yaml}; "
+              f"falling back to base hparams with best_config overrides")
+        legacy_overrides = yaml.dump(
+            {k: v for k, v in best_config.items() if k != "trial_id"}
+        )
+        merged = (overrides or "") + "\n" + legacy_overrides
+        with open(hparams_file) as fin:
+            hparams = load_hyperpyyaml(fin, merged)
 
     # Reuse main-process ``datasets`` — manifests and dataloader options are
     # identical across trials; only lr_s/l2 changed, so the cached dataset
