@@ -237,18 +237,6 @@ def is_complete(output_folder: Path, task_stem: str) -> bool:
     return (output_folder / get_results_file(task_stem)).exists()
 
 
-def is_trained(output_folder: Path, task_stem: str) -> bool:
-    """True iff HP-opt finished, so test_only can reuse the best config(s).
-    mvdr tasks use trainPerFoldCV and need every fold's best_hparams file."""
-    if task_stem.startswith("mvdr"):
-        num_fold = int(_load_task_yaml(task_stem).get("num_fold", 0))
-        if num_fold < 2:
-            return False
-        return all((output_folder / f"best_hparams_fold_{i}.yaml").exists()
-                   for i in range(num_fold))
-    return (output_folder / "best_hparams.yaml").exists()
-
-
 def make_config(model_name: str, encoder_yaml: str, task_yaml: str, config_id: str = "",
                 warm_cache_override: bool | None = None, test_only: bool = False) -> Path:
     text = BASE_CONFIG.read_text()
@@ -504,7 +492,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         for model_name, encoder_yaml in encoders.items():
             folder = get_output_folder(dataset, task, model_name)
             if test_only:
-                if not is_trained(folder, task_stem):
+                if not (folder / "best_hparams.yaml").exists():
                     print(f"SKIP (no trained model): {task_stem} × {model_name}")
                     skipped += 1
                     continue
