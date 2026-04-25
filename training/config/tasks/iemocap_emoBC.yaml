@@ -7,12 +7,15 @@ dataset: iemocap
 # DYNAMIC SCRIPT CONFIGURATION (Generic)
 # ----------------------------------
 data_io_script: training.dataio.prep_iemocap
-
 prepare_data_fn: prepare_iemocap_emoBC
 
 label_key: label_encoded
+# Stratify on the original 6-emotion string (richer balance) before binary collapse.
+raw_label_key: label
 
 skip_prep: False
+
+num_fold: 5
 
 num_labels: 1
 

@@ -4,10 +4,14 @@ task_type: R
 dataset: torgo
 
 data_io_script: training.dataio.prep_torgo
-prepare_data_fn: prepare_torgo_sevR
+prepare_data_fn: prepare_sevR
 
 label_key: label_encoded
+raw_label_key: severity
+
 skip_prep: False
+
+num_fold: 5
 
 num_labels: 1
 

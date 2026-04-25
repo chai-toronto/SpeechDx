@@ -4,9 +4,36 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from pandas import Series, DataFrame
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GroupKFold, StratifiedGroupKFold, train_test_split
 
 from training.dataio.utils import ensure_dir, PathEncoder
+
+
+def kfold_split(df, stratify_cols, group_col, n_splits, random_seed, shuffle=True):
+    """Speaker-disjoint k-fold with stratification fallback.
+
+    Joins ``stratify_cols`` into a single key and uses ``StratifiedGroupKFold``
+    so no participant straddles folds. If sklearn rejects the key (e.g. a
+    stratum has fewer than ``n_splits`` members), drops the right-most column
+    and retries; final fallback is plain ``GroupKFold``.
+    """
+    work = df.reset_index(drop=True).copy()
+    groups = work[group_col].to_numpy()
+    X = np.zeros(len(work))
+    cols = list(stratify_cols)
+    while cols:
+        try:
+            key = work[cols].astype(str).agg("_".join, axis=1).to_numpy()
+            sgkf = StratifiedGroupKFold(
+                n_splits=n_splits, shuffle=shuffle, random_state=random_seed,
+            )
+            return [(work.iloc[tr].copy(), work.iloc[va].copy())
+                    for tr, va in sgkf.split(X, key, groups)]
+        except ValueError:
+            cols = cols[:-1]
+    gkf = GroupKFold(n_splits=n_splits)
+    return [(work.iloc[tr].copy(), work.iloc[va].copy())
+            for tr, va in gkf.split(X, groups=groups)]
 
 
 def save_task_csv(df_train, df_val, df_test, dataset, task):

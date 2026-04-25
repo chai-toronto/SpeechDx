@@ -7,7 +7,14 @@ data_io_script: training.dataio.prep_ksof
 prepare_data_fn: prepare_ksof_stutL
 
 label_key: label_encoded
+# Multilabel — prep derives a stratification signature from the label vector
+# internally; this key is unused but kept so trainPerFoldCV's kwargs builder
+# is satisfied.
+raw_label_key: label
+
 skip_prep: False
+
+num_fold: 5
 
 num_labels: 8
 

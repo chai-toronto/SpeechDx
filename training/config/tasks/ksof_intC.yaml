@@ -7,12 +7,15 @@ data_io_script: training.dataio.prep_ksof
 prepare_data_fn: prepare_ksof_stutC
 
 label_key: label_encoded
+raw_label_key: label
+
 skip_prep: False
+
+num_fold: 5
 
 num_labels: 1
 
 loss: !new:torch.nn.BCEWithLogitsLoss
-
 
 num_aug_ver: 3
 snr_low: 0

@@ -6,22 +6,21 @@ dataset: uaspeech
 # ----------------------------------
 # DYNAMIC SCRIPT CONFIGURATION (Generic)
 # ----------------------------------
-# Path to the file containing the dataset-specific preparation and IO functions
-data_io_script: training.dataio.prep_default
-
-# Name of the function to call for manifest generation
+data_io_script: training.dataio.prep_uaspeech
 prepare_data_fn: prepare_data
 
-# Key used in the SpeechBrain batch object for the label
 label_key: label_encoded
-# Data preparation
+raw_label_key: label
+
 skip_prep: False
+
+num_fold: 5
+
 num_labels: 1
 
 loss: !new:torch.nn.BCEWithLogitsLoss
 
 # Augmentation
-# For all data that can be trained, during training with cached repr, will sample from versions
 num_aug_ver: 3
 snr_low: 0
 snr_high: 15
