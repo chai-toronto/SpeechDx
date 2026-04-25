@@ -6,7 +6,7 @@ feature_dim: 384
 num_layers: 1  # single CLS token output
 layer_dim: 1
 max_length: 8.18
-min_length: 3.18
+min_length: 8.18
 
 encoder: !new:model.opera.OPERA_GT
   freeze_encoder: True
