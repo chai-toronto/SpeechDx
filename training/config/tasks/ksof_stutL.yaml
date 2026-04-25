@@ -9,7 +9,7 @@ prepare_data_fn: prepare_ksof_stutL
 label_key: label_encoded
 skip_prep: False
 
-num_labels: 7
+num_labels: 8
 
 loss: !new:torch.nn.BCEWithLogitsLoss
 
