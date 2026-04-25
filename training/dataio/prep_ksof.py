@@ -8,9 +8,16 @@ import pandas as pd
 
 from training.dataio.prep_utils import save_task_csv, to_sb_dict_and_save
 
-# 7-class multilabel order:
+# Six disfluency classes used for the binary stutter/no-stutter task.
+STUT_DISFL_COLS = [
+    "Block", "Prolongation", "Sound Repetition", "Word / Phrase Repetition",
+    "Modified/ Speech technique", "Interjection",
+]
+
+
+# 8-class multilabel order:
 #   0 block, 1 prolongation, 2 sound_rep, 3 word_rep,
-#   4 modified, 5 interjection, 6 no_disfl
+#   4 modified, 5 interjection, 6 no_disfl, 7 garbage
 STUT_CLASS_COLS = [
     ("block", "Block"),
     ("prolongation", "Prolongation"),
@@ -20,14 +27,12 @@ STUT_CLASS_COLS = [
     ("interjection", "Interjection"),
     ("no_disfl", "No dysfluencies"),
 ]
-
-STUT_MAJORITY = 2  # >=2 of 3 annotators
-
-# Six disfluency classes used for the binary stutter/no-stutter task.
-STUT_DISFL_COLS = [
-    "Block", "Prolongation", "Sound Repetition", "Word / Phrase Repetition",
-    "Modified/ Speech technique", "Interjection",
+# "Garbage" = unintelligible / no speech / poor audio / background music
+# (any one of these columns has a majority vote).
+STUT_GARBAGE_COLS = [
+    "Unintelligible", "No Speech", "Poor Audio Quality", "Music (Background Noise)"
 ]
+STUT_MAJORITY = 2  # >=2 of 3 annotators
 
 
 def prepare_ksof_stutL(
@@ -35,34 +40,35 @@ def prepare_ksof_stutL(
         manifest_train_path, manifest_val_path, manifest_test_path,
         ratio, random_seed, dataset, task,
 ):
-    """7-class multilabel stuttering classification.
+    """8-class multilabel stuttering classification.
 
     Labels are derived per clip from the three-annotator counts in the source
-    CSV via majority vote (count >= 2). Clips where no class reaches majority
-    (all-zero label, e.g. garbage/ambiguous) are dropped.
+    CSV via majority vote (count >= 2). The 8th class (`garbage`) fires if a
+    majority of annotators marked the clip as unintelligible, no-speech, poor
+    audio, or background music.
 
     Splits come from the official KSoF partition already encoded in the
-    `split` column (0=train, 1=dev, 2=test).
+    `split` column (0=train, 1=dev, 2=test). All 5597 segments are kept:
+    multilabel naturally handles segments the challenge would have dropped as
+    ambiguous in its single-label setting.
     """
     df = pd.read_csv(metadata_path)
     df["path"] = Path(wav_folder).resolve() / df["path"]
 
-    # Per-class majority-vote binary targets -> 7-dim list per row.
+    # Per-class majority-vote binary targets -> 8-dim list per row.
     class_bits = []
     for _, src_col in STUT_CLASS_COLS:
         class_bits.append((df[src_col] >= STUT_MAJORITY).astype(int).values)
+    garbage = pd.concat(
+        [(df[c] >= STUT_MAJORITY) for c in STUT_GARBAGE_COLS], axis=1
+    ).any(axis=1).astype(int).values
+    class_bits.append(garbage)
 
-    label_matrix = list(zip(*class_bits))  # list of 7-tuples
+    label_matrix = list(zip(*class_bits))  # list of 8-tuples
     df["label"] = [[int(x) for x in t] for t in label_matrix]
 
-    n_before = len(df)
-    keep = [any(t) for t in label_matrix]
-    df = df[keep].reset_index(drop=True)
-    class_bits = [col[keep] for col in class_bits]
-    print(f"Dropped {n_before - len(df)} clips with no majority label; kept {len(df)}.")
-
     n_pos = [int(col.sum()) for col in class_bits]
-    names = [n for n, _ in STUT_CLASS_COLS]
+    names = [n for n, _ in STUT_CLASS_COLS] + ["garbage"]
     print("Per-class positives:", dict(zip(names, n_pos)))
 
     df_test = df[df["split"] == 2]
@@ -76,7 +82,6 @@ def prepare_ksof_stutL(
         df_test, manifest_test_path,
     )
     print("--- prepare_ksof_stutL finished ---")
-
 
 def prepare_ksof_stutC(
         wav_folder, metadata_path,
