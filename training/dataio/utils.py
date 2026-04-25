@@ -13,6 +13,9 @@ class PathEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, Path):
             return str(obj)
+        # numpy scalars (int64/float64/bool_) aren't JSON-native
+        if hasattr(obj, "item") and hasattr(obj, "dtype"):
+            return obj.item()
         return super().default(obj)
 
 

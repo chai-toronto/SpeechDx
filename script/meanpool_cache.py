@@ -68,6 +68,79 @@ def meanpool_one(args):
         return rel, f"err:{type(e).__name__}:{e}", 0
 
 
+def verify_one(args):
+    src_path, sample = args
+    rel = str(src_path)
+    try:
+        n_keys = 0
+        n_bad_shape = 0
+        n_nonfinite = 0
+        dims = set()
+        bad_examples = []
+        with h5py.File(src_path, "r", locking=False) as fin:
+            uids = list(fin.keys())
+            if sample and sample > 0 and len(uids) > sample:
+                step = max(1, len(uids) // sample)
+                uids = uids[::step][:sample]
+            for uid in uids:
+                g = fin[uid]
+                if not isinstance(g, h5py.Group):
+                    continue
+                for vkey in g.keys():
+                    arr = g[vkey][:]
+                    n_keys += 1
+                    if arr.ndim != 1:
+                        n_bad_shape += 1
+                        if len(bad_examples) < 3:
+                            bad_examples.append(f"{uid}/{vkey} shape={arr.shape}")
+                        continue
+                    dims.add(int(arr.shape[0]))
+                    if not np.all(np.isfinite(arr)):
+                        n_nonfinite += 1
+                        if len(bad_examples) < 3:
+                            bad_examples.append(f"{uid}/{vkey} non-finite")
+        status = "ok" if (n_bad_shape == 0 and n_nonfinite == 0 and len(dims) <= 1) else "bad"
+        return rel, status, n_keys, n_bad_shape, n_nonfinite, sorted(dims), bad_examples
+    except Exception as e:
+        return rel, f"err:{type(e).__name__}:{e}", 0, 0, 0, [], []
+
+
+def cmd_verify(args):
+    src = Path(args.src).resolve()
+    if not src.is_dir():
+        print(f"src not found: {src}", file=sys.stderr)
+        sys.exit(1)
+    caches = find_caches(src)
+    if not caches:
+        print(f"no caches under {src}")
+        return
+    print(f"verifying {len(caches)} cache files under {src}")
+    jobs = [(c, args.sample) for c in caches]
+    results = []
+    if args.workers <= 1:
+        for j in tqdm(jobs, desc="verify"):
+            results.append(verify_one(j))
+    else:
+        with mp.get_context("spawn").Pool(args.workers) as pool:
+            for r in tqdm(pool.imap_unordered(verify_one, jobs),
+                          total=len(jobs), desc="verify"):
+                results.append(r)
+
+    n_ok = sum(1 for r in results if r[1] == "ok")
+    n_bad = sum(1 for r in results if r[1] == "bad")
+    n_err = len(results) - n_ok - n_bad
+    total_keys = sum(r[2] for r in results)
+    print(f"\nverified: {n_ok} ok, {n_bad} bad, {n_err} errors; {total_keys} keys checked")
+    for rel, status, n_keys, n_bad_shape, n_nonfinite, dims, bad_examples in results:
+        if status == "ok":
+            continue
+        print(f"  {rel}  ->  {status}  keys={n_keys} bad_shape={n_bad_shape} non_finite={n_nonfinite} dims={dims}")
+        for ex in bad_examples:
+            print(f"      {ex}")
+    if n_bad or n_err:
+        sys.exit(2)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--src", default="tmp")
@@ -76,7 +149,15 @@ def main():
                     help="parallel files (default 1). Each worker streams one key at a time, so RAM use is bounded.")
     ap.add_argument("--overwrite", action="store_true",
                     help="rebuild even if destination already exists")
+    ap.add_argument("--verify", action="store_true",
+                    help="verify --src caches are mean-pooled (1-D, finite, consistent D); skip writing")
+    ap.add_argument("--sample", type=int, default=0,
+                    help="when verifying, check at most N evenly-spaced uids per file (0 = all)")
     args = ap.parse_args()
+
+    if args.verify:
+        cmd_verify(args)
+        return
 
     src = Path(args.src).resolve()
     dst = Path(args.dst).resolve()
