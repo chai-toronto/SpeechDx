@@ -34,9 +34,13 @@ def prepare_sevR(
         manifest_train_path, manifest_val_path,
         random_seed, raw_label_key, num_fold, dataset, task,
 ):
-    """Severity regression (0-3), speaker-disjoint k-fold."""
+    """Severity regression (1-3), speaker-disjoint k-fold.
+
+    Controls have no severity (NaN in the CSV) and are dropped here.
+    """
     df = pd.read_csv(metadata_path)
     df["path"] = Path(wav_folder).resolve() / df["path"]
+    df = df.dropna(subset=[raw_label_key]).reset_index(drop=True)
     df["label"] = df[raw_label_key].astype(float)
 
     folds = kfold_split(
