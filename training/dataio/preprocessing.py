@@ -204,7 +204,13 @@ def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
         train_cache_dir = hparams.get("train_cache_dir")
         val_cache_dir = hparams.get("val_cache_dir")
 
-        cache_mode = f"multi_L{num_layers}" if speech_encoder.output_hidden_states else "single"
+        cache_pool = hparams.get("cache_pool", "none")
+        if speech_encoder.output_hidden_states:
+            cache_mode = f"multi_L{num_layers}"
+        elif cache_pool == "mean":
+            cache_mode = "single_avg"
+        else:
+            cache_mode = "single"
         train_cache_dir = os.path.join(train_cache_dir, cache_mode)
         val_cache_dir = os.path.join(val_cache_dir, cache_mode)
 
@@ -234,6 +240,8 @@ def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
                         else:
                             # T dim is always -2
                             emb = torch.cat([e.squeeze(0) for e in embs], dim=-2).cpu()
+                            if cache_pool == "mean":
+                                emb = emb.mean(dim=-2, keepdim=True)
                     return emb
 
                 return cache_emb

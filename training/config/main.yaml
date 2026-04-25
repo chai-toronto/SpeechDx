@@ -39,6 +39,9 @@ cache_encoder: true
 train_cache_dir: !ref <slurm_tmpdir>/<dataset>/<model_name>/train
 val_cache_dir: !ref <slurm_tmpdir>/<dataset>/<model_name>/val
 warm_cache: true
+# Pooling applied before saving to cache (single mode only): "none" stores T x D,
+# "mean" avg-pools over T to 1 x D and writes under a single_avg/ subdir.
+cache_pool: mean
 
 # ----------------------------------
 # DYNAMIC SCRIPT CONFIGURATION (Generic)

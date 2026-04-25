@@ -280,6 +280,11 @@ if __name__ == "__main__":
     datasets = dataio_prep(hparams)
     print("Cache warm complete.")
 
+    # Cache-only mode: stop here so the cache can be reused by later runs.
+    if hparams.get("cache_only", False):
+        print("[CACHE_ONLY] Cache generation complete; exiting before training.")
+        sys.exit(0)
+
     _project_root = Path.cwd().resolve()
     resolved_paths = _collect_resolved_paths(hparams, _project_root)
     base_output_folder = resolved_paths["output_folder"]

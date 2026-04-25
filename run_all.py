@@ -39,7 +39,7 @@ TASK = []
 EXCLUDE_DATASETS = {"daic_woz"}  # permanent dead task; edaic is live
 
 PROBE_NAME = "AvgTProbe"
-PROBE_YAML = "AvgTProbe.yaml"
+PROBE_YAML = "Probe.yaml"
 EXPERIMENT_TAG = "run1"
 
 BASE_CONFIG = Path("training/config/main.yaml")
@@ -180,8 +180,8 @@ def task_weight(task_stem: str) -> int:
 def ensure_manifest(task_stem: str) -> None:
     """Call the task's prepare_data_fn if manifest files are missing.
 
-    Different prep_*.py modules take slightly different kwargs (e.g. mvdr
-    takes `num_fold` and `raw_label_key` instead of `ratio`/`manifest_test_path`),
+    Different prep_*.py modules take slightly different kwargs (e.g. CV tasks
+    take `num_fold` and `raw_label_key` instead of `ratio`/`manifest_test_path`),
     so we build a superset kwargs dict and filter to the function's actual
     signature.
     """
@@ -219,16 +219,21 @@ def ensure_manifest(task_stem: str) -> None:
     _task_ids_cache.pop(task_stem, None)  # force re-read from fresh manifests
 
 
+def is_cv(task_stem: str) -> bool:
+    """A task is CV iff its yaml sets num_fold."""
+    return _load_task_yaml(task_stem).get("num_fold") is not None
+
+
 def get_train_command(task_stem: str) -> str:
-    """mvdr tasks use trainPerFoldCV; everything else uses train."""
-    if task_stem.startswith("mvdr"):
+    """CV tasks use trainPerFoldCV; everything else uses train."""
+    if is_cv(task_stem):
         return "python -m training.trainPerFoldCV"
     return "python -m training.train"
 
 
 def get_results_file(task_stem: str) -> str:
     """trainPerFoldCV writes test_results.yaml; train writes test_results.txt."""
-    if task_stem.startswith("mvdr"):
+    if is_cv(task_stem):
         return "test_results.yaml"
     return "test_results.txt"
 
@@ -265,7 +270,8 @@ def has_ci_results(output_folder: Path, task_stem: str) -> bool:
 
 
 def make_config(model_name: str, encoder_yaml: str, task_yaml: str, config_id: str = "",
-                warm_cache_override: bool | None = None, test_only: bool = False) -> Path:
+                warm_cache_override: bool | None = None, test_only: bool = False,
+                cache_only: bool = False) -> Path:
     text = BASE_CONFIG.read_text()
     subs = [
         (r"^model_name:.*$", f"model_name: {model_name}"),
@@ -280,8 +286,16 @@ def make_config(model_name: str, encoder_yaml: str, task_yaml: str, config_id: s
         text = re.sub(pattern, replacement, text, flags=re.MULTILINE)
     # Remove chunk_at line entirely
     text = re.sub(r"^chunk_at:.*\n?", "", text, flags=re.MULTILINE)
-    # Override test_only and warm_cache if requested
-    if test_only:
+    # Force skip_prep: True — ensure_manifest handles this
+    text = re.sub(r"^skip_prep:.*$", "skip_prep: True", text, flags=re.MULTILINE)
+    # Override test_only and warm_cache if requested. test_only and cache_only
+    # are mutually exclusive (enforced at the CLI), so handle them separately.
+    if cache_only:
+        # Force warm_cache true — otherwise dataio_prep opens read-only and the
+        # train script's cache_only exit path warms nothing.
+        text = re.sub(r"^warm_cache:.*$", "warm_cache: true", text, flags=re.MULTILINE)
+        text += "\ncache_only: True\n"
+    elif test_only:
         text = re.sub(r"^test_only:.*$", "test_only: True", text, flags=re.MULTILINE)
         text = re.sub(r"^warm_cache:.*$", "warm_cache: false", text, flags=re.MULTILINE)
     # Include model name + SLURM job id so concurrent jobs (same encoder, different
@@ -294,12 +308,14 @@ def make_config(model_name: str, encoder_yaml: str, task_yaml: str, config_id: s
 
 def run_one(task_stem: str, model_name: str, encoder_yaml: str, device=None,
             config_id: str = "",
-            warm_cache_override: bool | None = None, test_only: bool = False) -> tuple[str, bool, float]:
+            warm_cache_override: bool | None = None, test_only: bool = False,
+            cache_only: bool = False) -> tuple[str, bool, float]:
     """Run a single training job. Returns (label, success, elapsed_seconds)."""
     label = f"{task_stem} × {model_name}"
     task_yaml = f"{task_stem}.yaml"
     config_path = make_config(model_name, encoder_yaml, task_yaml, config_id,
-                              warm_cache_override=warm_cache_override, test_only=test_only)
+                              warm_cache_override=warm_cache_override, test_only=test_only,
+                              cache_only=cache_only)
 
     cmd = get_train_command(task_stem).split()
     cmd.append(str(config_path))
@@ -545,6 +561,7 @@ def cmd_run(args: argparse.Namespace) -> None:
     tasks = discover_tasks(args.dataset, args.task)
     skipped, completed, failed = 0, 0, []
     test_only = getattr(args, 'test_only', False)
+    cache_only = getattr(args, 'cache_only', False)
 
     # Filter encoders by --encoder flag (default: all). Repeatable.
     if args.encoder:
@@ -560,7 +577,11 @@ def cmd_run(args: argparse.Namespace) -> None:
         dataset, task = get_task_info(task_stem)
         for model_name, encoder_yaml in encoders.items():
             folder = get_output_folder(dataset, task, model_name)
-            if test_only:
+            if cache_only:
+                # cache_only produces no result files, so result-based skip
+                # checks don't apply; always queue the job.
+                pass
+            elif test_only:
                 if has_ci_results(folder, task_stem):
                     print(f"SKIP (CI present): {task_stem} × {model_name}")
                     skipped += 1
@@ -619,6 +640,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         task_stem, model_name, encoder_yaml = job
         dataset, _ = get_task_info(task_stem)
         key = (dataset, model_name)
+        label = f"{task_stem} × {model_name}"
 
         # test_only never writes cache — skip lock logic entirely.
         if test_only:
@@ -637,8 +659,15 @@ def cmd_run(args: argparse.Namespace) -> None:
                 is_reader = needed.issubset(written[key])
 
         if is_reader:
+            # In cache_only mode, readers add nothing — skip the subprocess
+            # entirely instead of paying ~60s of Python+SpeechBrain startup
+            # just to open the cache and exit.
+            if cache_only:
+                print(f"SKIP (cache covered): {label}", flush=True)
+                return label, True, 0.0
             return run_one(task_stem, model_name, encoder_yaml, args.device,
-                           f"_{idx}", warm_cache_override=False, test_only=test_only)
+                           f"_{idx}", warm_cache_override=False, test_only=test_only,
+                           cache_only=cache_only)
 
         # Writer path — acquire per-(dataset, encoder) lock. Release early if the
         # re-check shows a concurrent writer satisfied our keys (run as reader).
@@ -654,10 +683,15 @@ def cmd_run(args: argparse.Namespace) -> None:
             if satisfied:
                 ds_lock.release()
                 released = True
+                if cache_only:
+                    print(f"SKIP (cache covered): {label}", flush=True)
+                    return label, True, 0.0
                 return run_one(task_stem, model_name, encoder_yaml, args.device,
-                               f"_{idx}", warm_cache_override=False, test_only=test_only)
+                               f"_{idx}", warm_cache_override=False, test_only=test_only,
+                               cache_only=cache_only)
             result = run_one(task_stem, model_name, encoder_yaml, args.device,
-                             f"_{idx}", warm_cache_override=None, test_only=test_only)
+                             f"_{idx}", warm_cache_override=None, test_only=test_only,
+                             cache_only=cache_only)
             _, success, _ = result
             if success and needed is not None:
                 with written_lock:
@@ -677,8 +711,9 @@ def cmd_run(args: argparse.Namespace) -> None:
                 failed.append(label)
 
     # Summary
+    done_label = "cache warmed" if cache_only else "completed"
     print(f"\n{'='*60}")
-    print(f"  Done — {completed} completed, {skipped} skipped, {len(failed)} failed")
+    print(f"  Done — {completed} {done_label}, {skipped} skipped, {len(failed)} failed")
     if failed:
         print("  Failed runs:")
         for name in failed:
@@ -715,8 +750,12 @@ def main() -> None:
                             help="Run only these task stems (repeatable; default: all tasks)")
     run_parser.add_argument("--test-only", action="store_true",
                             help="Run inference only (no training), requires prior completed runs")
+    run_parser.add_argument("--cache-only", action="store_true",
+                            help="Warm HDF5 caches via dataio_prep and exit before any training/evaluation")
 
     args = parser.parse_args()
+    if args.command == "run" and getattr(args, "cache_only", False) and getattr(args, "test_only", False):
+        parser.error("--cache-only and --test-only are mutually exclusive")
     if args.command == "status":
         cmd_status(args)
     elif args.command == "run":
