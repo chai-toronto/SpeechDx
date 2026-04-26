@@ -257,8 +257,17 @@ class DiagnosticsBrain(sb.Brain):
                 valid_stats=eval_stats,
             )
 
-            # Save the current checkpoint and delete previous checkpoints, based on F1
-            self.checkpointer.save_and_keep_only(meta=eval_stats, max_keys=max_keys, min_keys=min_keys)
+            # SB's Checkpoint set difference uses dict-eq on meta; NaN tensors
+            # (e.g. PearsonR on low-variance regression) make the same ckpt
+            # loaded twice compare unequal, causing double-delete.
+            ckpt_meta = {}
+            for k, v in eval_stats.items():
+                if hasattr(v, "item") and getattr(v, "numel", lambda: 1)() == 1:
+                    v = v.item()
+                if isinstance(v, float) and v != v:
+                    continue
+                ckpt_meta[k] = v
+            self.checkpointer.save_and_keep_only(meta=ckpt_meta, max_keys=max_keys, min_keys=min_keys)
 
             if self.ray_optim:
                 eval_stats = detensor_dict(eval_stats)
