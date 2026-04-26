@@ -113,6 +113,46 @@ def _make_stratify_key(speaker_df, stratify_cols):
     # Final fallback: no stratification
     return None
 
+def speaker_stratified_split_train_val(df, ratio, random_seed, stratify_cols=None):
+    """
+    Split a DataFrame into train/val with speaker-independent,
+    stratified partitioning.
+
+    Args:
+        df: DataFrame with 'Participant_ID' and 'label' columns.
+        ratio: List of 2 ints summing to 100, e.g. [90, 10].
+        random_seed: Random seed for reproducibility.
+        stratify_cols: List of column names to stratify on (at the speaker level).
+            If None, defaults to ["label"]. Columns must exist in df.
+
+    Returns:
+        (df_train, df_val)
+    """
+    if stratify_cols is None:
+        stratify_cols = ["label"]
+
+    if len(ratio) != 2:
+        raise ValueError(f"ratio must have length 2 for train/val split, got {ratio}")
+
+    if sum(ratio) != 100:
+        raise ValueError(f"ratio must sum to 100, got {ratio}")
+
+    speakers = df.groupby("Participant_ID")[stratify_cols].first().reset_index()
+    stratify_key = _make_stratify_key(speakers, stratify_cols)
+
+    val_size = ratio[1] / 100
+
+    train_spk, val_spk = train_test_split(
+        speakers["Participant_ID"],
+        test_size=val_size,
+        stratify=stratify_key,
+        random_state=random_seed,
+    )
+
+    df_train = df[df["Participant_ID"].isin(train_spk)].copy()
+    df_val = df[df["Participant_ID"].isin(val_spk)].copy()
+
+    return df_train, df_val
 
 def speaker_stratified_split(df, ratio, random_seed, stratify_cols=None):
     """

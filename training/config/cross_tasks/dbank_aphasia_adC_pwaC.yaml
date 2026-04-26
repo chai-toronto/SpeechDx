@@ -1,0 +1,27 @@
+task: adC_pwaC
+task_type: B
+
+dataset: dbank_aphasia
+train_dataset: dbank
+test_dataset: aphasia
+
+data_io_script: training.dataio.prep_aphasia_dbank
+prepare_data_fn: prepare_dbank_aphasia_adC_pwaC
+
+label_key: label_encoded
+skip_prep: False
+
+num_labels: 1
+
+loss: !new:torch.nn.BCEWithLogitsLoss
+
+split_by_boundary: false
+
+num_aug_ver: 3
+snr_low: 0
+snr_high: 15
+speed: !new:builtins.list
+  - !new:builtins.range
+    - 90 #start
+    - 110 #stop
+    - 1 #step
