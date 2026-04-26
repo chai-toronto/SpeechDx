@@ -438,5 +438,11 @@ if __name__ == "__main__":
         for name, score in brain.test_stats.items():
             f.write(f"{name}: {score}\n")
 
+    # Drop Ray Tune storage now that test eval is on disk.
+    ray_storage = Path(base_output_folder) / "results"
+    if ray_storage.exists():
+        shutil.rmtree(ray_storage, ignore_errors=True)
+        print(f"Cleaned {ray_storage}")
+
 
 

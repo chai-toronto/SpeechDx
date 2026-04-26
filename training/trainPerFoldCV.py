@@ -347,3 +347,10 @@ if __name__ == "__main__":
         yaml.dump({"summary": summary, "folds": fold_detail}, f, default_flow_style=False)
 
     print(f"\nSummary saved to {summary_path}")
+
+    # Drop Ray Tune storage now that the campaign is complete; resume after this
+    # point is no longer meaningful since the summary is the success signal.
+    ray_results_dir = Path(resolved_paths["output_folder"]) / "ray_results"
+    if ray_results_dir.exists():
+        shutil.rmtree(ray_results_dir, ignore_errors=True)
+        print(f"Cleaned {ray_results_dir}")

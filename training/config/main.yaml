@@ -178,5 +178,5 @@ ckpt_interval_minutes: 15 # save checkpoint every N min
 checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
   checkpoints_dir: !ref <save_folder>
   recoverables:
-    model: !ref <model>
+    probe: !ref <probe_params[probe]>
     counter: !ref <epoch_counter>
