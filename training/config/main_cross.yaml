@@ -41,8 +41,8 @@ noise_folder: !ref <data_folder>/noise/
 
 cache_encoder: true
 train_cache_dir_1: !ref <slurm_tmpdir>/<train_dataset>/<model_name>/train
-val_cache_dir_1: !ref <slurm_tmpdir>/<test_dataset>/<model_name>/val
-train_cache_dir_2: !ref <slurm_tmpdir>/<train_dataset>/<model_name>/train
+val_cache_dir_1: !ref <slurm_tmpdir>/<train_dataset>/<model_name>/val
+train_cache_dir_2: !ref <slurm_tmpdir>/<test_dataset>/<model_name>/train
 val_cache_dir_2: !ref <slurm_tmpdir>/<test_dataset>/<model_name>/val
 warm_cache: false
 # Pooling applied before saving to cache (single mode only): "none" stores T x D,
