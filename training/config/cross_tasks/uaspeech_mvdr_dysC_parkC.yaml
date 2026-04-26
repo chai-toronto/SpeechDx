@@ -1,0 +1,25 @@
+task: dysC_parkC
+task_type: B
+
+dataset: uaspeech_mvdr
+train_dataset: uaspeech
+test_dataset: mvdr
+
+data_io_script: training.dataio.prep_mvdr_uaspeech
+prepare_data_fn: prepare_uaspeech_mvdr_dysC_parkC
+
+label_key: label_encoded
+skip_prep: False
+
+num_labels: 1
+
+loss: !new:torch.nn.BCEWithLogitsLoss
+
+num_aug_ver: 3
+snr_low: 0
+snr_high: 15
+speed: !new:builtins.list
+  - !new:builtins.range
+    - 90 #start
+    - 110 #stop
+    - 1 #step

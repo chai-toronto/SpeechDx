@@ -1,0 +1,25 @@
+task: emoBC_emoBC
+task_type: B
+
+dataset: ravdess_iemocap
+train_dataset: ravdess
+test_dataset: iemocap
+
+data_io_script: training.dataio.prep_ravdess_iemocap
+prepare_data_fn: prepare_ravdess_iemocap_emoBC_emoBC
+
+label_key: label_encoded
+skip_prep: False
+
+num_labels: 1
+
+loss: !new:torch.nn.BCEWithLogitsLoss
+
+num_aug_ver: 3
+snr_low: 0
+snr_high: 15
+speed: !new:builtins.list
+  - !new:builtins.range
+    - 90 #start
+    - 110 #stop
+    - 1 #step
