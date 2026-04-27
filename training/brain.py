@@ -5,6 +5,7 @@ import torch
 import speechbrain as sb
 from ray import tune
 from scipy.stats import bootstrap
+from sklearn.metrics import roc_auc_score
 from torchmetrics import MetricCollection
 from torchmetrics.classification import Precision, Recall, F1Score, AUROC, Accuracy
 from torchmetrics.regression import MeanAbsoluteError, MeanSquaredError, PearsonCorrCoef, R2Score
@@ -32,6 +33,62 @@ def delong_ci(y_true, y_score, alpha=0.05):
     
     z = 1.96  # for 95% CI
     return auc, (max(0, auc - z * se), min(1, auc + z * se))
+
+
+def bootstrap_macro_auc_ci(
+    y_true,
+    y_score,
+    subject_ids=None,
+    n_boot=1000,
+    ci=95,
+    seed=42,
+):
+    """Bootstrap CI for multilabel macro-AUC.
+
+    If subject_ids is provided, resampling is done at the subject level
+    (cluster bootstrap); otherwise it is done at the sample level.
+    """
+    rng = np.random.default_rng(seed)
+    y_true = np.asarray(y_true)
+    y_score = np.asarray(y_score)
+
+    def macro_auc(yt, ys):
+        aucs = []
+        for k in range(yt.shape[1]):
+            if len(np.unique(yt[:, k])) < 2:
+                continue
+            aucs.append(roc_auc_score(yt[:, k], ys[:, k]))
+        if not aucs:
+            return np.nan
+        return np.mean(aucs)
+
+    point_estimate = macro_auc(y_true, y_score)
+
+    boot_scores = []
+    if subject_ids is None:
+        n = len(y_true)
+        for _ in range(n_boot):
+            idx = rng.choice(n, size=n, replace=True)
+            boot_scores.append(macro_auc(y_true[idx], y_score[idx]))
+    else:
+        subject_ids = np.asarray(subject_ids)
+        subjects = np.unique(subject_ids)
+        subj_to_idx = {s: np.where(subject_ids == s)[0] for s in subjects}
+        for _ in range(n_boot):
+            sampled = rng.choice(subjects, size=len(subjects), replace=True)
+            idx = np.concatenate([subj_to_idx[s] for s in sampled])
+            boot_scores.append(macro_auc(y_true[idx], y_score[idx]))
+
+    boot_scores = np.asarray(boot_scores)
+    boot_scores = boot_scores[~np.isnan(boot_scores)]
+
+    if boot_scores.size == 0:
+        return point_estimate, (np.nan, np.nan)
+
+    alpha = (100 - ci) / 2
+    lower = np.percentile(boot_scores, alpha)
+    upper = np.percentile(boot_scores, 100 - alpha)
+    return point_estimate, (lower, upper)
 
 
 def bootstrap_mae_ci(y_true, y_pred, n_resamples=1000, confidence_level=0.95):
@@ -76,6 +133,7 @@ class DiagnosticsBrain(sb.Brain):
         # Storage for CI calculation during test
         self._test_preds = []
         self._test_labels = []
+        self._test_pids = []
 
         # Re-register `counter` via add_recoverable (singular) so it lands in
         # optional_recoverables too. SB's YAML constructor uses add_recoverables
@@ -213,6 +271,8 @@ class DiagnosticsBrain(sb.Brain):
                     # For multilabel, store sigmoid probabilities
                     self._test_preds.append(torch.sigmoid(predictions).cpu())
                     self._test_labels.append(lab.cpu())
+                    # Track participant ids for subject-level cluster bootstrap.
+                    self._test_pids.extend(list(batch.pid))
 
         return loss
 
@@ -329,10 +389,30 @@ class DiagnosticsBrain(sb.Brain):
                             print(f"  (Note: weighted vs macro avg may differ)")
                         self.test_stats["AUROC_CI_low"] = np.mean(auc_los)
                         self.test_stats["AUROC_CI_high"] = np.mean(auc_his)
-                
+                elif self.task_type == "L":
+                    # Multilabel: bootstrap CI for macro-AUC. Use a cluster
+                    # (subject-level) bootstrap when the test set has multiple
+                    # samples per subject; otherwise plain sample bootstrap.
+                    subject_ids = np.asarray(self._test_pids) if self._test_pids else None
+                    if subject_ids is not None and len(np.unique(subject_ids)) == len(subject_ids):
+                        # Every sample is its own subject -> sample bootstrap.
+                        subject_ids = None
+                    auc_macro, (auc_lo, auc_hi) = bootstrap_macro_auc_ci(
+                        y_true=all_labels.astype(int),
+                        y_score=all_preds,
+                        subject_ids=subject_ids,
+                    )
+                    auc_torchmetrics = self.test_stats.get("AUROC", None)
+                    if auc_torchmetrics is not None and not np.isnan(auc_macro):
+                        diff = abs(auc_macro - auc_torchmetrics)
+                        print(f"[AUC CHECK] torchmetrics(macro)={auc_torchmetrics:.6f}, sklearn(macro)={auc_macro:.6f}, diff={diff:.2e}")
+                    self.test_stats["AUROC_CI_low"] = auc_lo
+                    self.test_stats["AUROC_CI_high"] = auc_hi
+
                 # Clear storage
                 self._test_preds = []
                 self._test_labels = []
+                self._test_pids = []
 
 def detensor_dict(d: dict):
     new_d = {}

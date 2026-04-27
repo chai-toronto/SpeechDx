@@ -19,7 +19,7 @@ from training.dataio.cache_dynamic_item import CachedHDF5DynamicItem
 
 def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
     train_dynamic_items, val_dynamic_items = [], []
-    output_keys = ["id", "path"]
+    output_keys = ["id", "path", "pid"]
 
     sample_rate = hparams.get("sample_rate", 16000)
 
@@ -52,6 +52,14 @@ def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
     # 90% to 109% speed perturbation
     perturbator = SpeedPerturb(orig_freq=sample_rate,
                                speeds=hparams["data_params"]["speed"])
+
+    @sb.utils.data_pipeline.takes("Participant_ID")
+    @sb.utils.data_pipeline.provides("pid")
+    def get_pid(pid: str):
+        return pid
+
+    train_dynamic_items.append(get_pid)
+    val_dynamic_items.append(get_pid)
 
     # Define audio pipeline
     @sb.utils.data_pipeline.takes("path")
@@ -248,7 +256,7 @@ def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
                             # T dim is always -2
                             emb = torch.cat([e.squeeze(0) for e in embs], dim=-2).cpu()
                             if cache_pool == "mean":
-                                emb = emb.mean(dim=-2, keepdim=True)
+                                emb = emb.mean(dim=-2, keepdim=False)
                     return emb
 
                 return cache_emb
@@ -351,7 +359,7 @@ def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
 
 def master_dataio_prep_cross(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
     train_dynamic_items, val_dynamic_items, test_dynamic_items = [], [], []
-    output_keys = ["id", "path"]
+    output_keys = ["id", "path", "pid"]
 
     sample_rate = hparams.get("sample_rate", 16000)
     max_samples = hparams.get("max_length", 10e5) * sample_rate
@@ -386,6 +394,15 @@ def master_dataio_prep_cross(data_dict: dict[str, Any], hparams) -> dict[Any, An
         orig_freq=sample_rate,
         speeds=hparams["data_params"]["speed"],
     )
+
+    @sb.utils.data_pipeline.takes("Participant_ID")
+    @sb.utils.data_pipeline.provides("pid")
+    def get_pid(pid: str):
+        return pid
+
+    train_dynamic_items.append(get_pid)
+    val_dynamic_items.append(get_pid)
+    test_dynamic_items.append(get_pid)
 
     @sb.utils.data_pipeline.takes("path")
     @sb.utils.data_pipeline.provides("signal", "raw_duration")

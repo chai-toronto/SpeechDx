@@ -246,9 +246,9 @@ def _expected_ci_keys(task_type: str) -> tuple[str, str] | None:
     """CI field names brain.py emits per task_type. None = no CI produced."""
     if task_type == "R":
         return ("MAE_CI_low", "MAE_CI_high")
-    if task_type in ("B", "C"):
+    if task_type in ("B", "C", "L"):
         return ("AUROC_CI_low", "AUROC_CI_high")
-    return None  # L (multilabel) — brain.py doesn't compute CI
+    return None
 
 
 def has_ci_results(output_folder: Path, task_stem: str) -> bool:
