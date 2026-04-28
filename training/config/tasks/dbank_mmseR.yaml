@@ -11,6 +11,10 @@ skip_prep: False
 
 num_labels: 1
 
+# Bin edges for auto per-sample regression weighting (np.digitize semantics):
+# bins are 0-9 / 10-18 / 19-23 / 24-30.
+clinical_cutoffs: [10, 19, 24]
+
 loss: !new:torch.nn.MSELoss
 
 split_by_boundary: false

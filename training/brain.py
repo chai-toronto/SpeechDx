@@ -1,3 +1,5 @@
+import copy
+import json
 from pathlib import Path
 
 import numpy as np
@@ -118,10 +120,100 @@ def unwrap_ddp(module):
     return getattr(module, "module", module)
 
 
+def _load_train_labels(manifest_path, fold_idx=None):
+    """Read training labels from the manifest's canonical ``label`` field.
+
+    For flat dict-of-samples manifests, ``fold_idx`` is ignored. For CV
+    list-of-folds manifests, ``fold_idx`` selects one fold's training set
+    (each entry is already the train partition for that fold).
+    """
+    with open(manifest_path, "r") as f:
+        data = json.load(f)
+    if isinstance(data, list):
+        if fold_idx is None:
+            raise ValueError(
+                f"manifest {manifest_path} is a list of folds; pass fold_idx"
+            )
+        fold = data[fold_idx]
+    else:
+        fold = data
+    return [sample["label"] for sample in fold.values()]
+
+
+def compute_auto_class_weights(task_type, labels, num_labels, cutoffs=None):
+    """Compute class weights from raw training labels.
+
+    Returns a ``(kind, payload)`` pair, or ``None`` if it can't be computed.
+    For B/L kind is ``"pos_weight"``; for C ``"weight"``; for R
+    ``"regression_bins"`` with payload ``(edges_tensor, bin_weights_tensor)``.
+    For R, ``cutoffs`` (e.g. clinical bin edges) takes priority. If absent, we
+    use unique values when there are few (<=10), else 10 quantile bins.
+    """
+    if task_type == "R":
+        y = np.asarray(labels, dtype=np.float64).reshape(-1)
+        if cutoffs is not None and len(cutoffs) > 0:
+            edges = np.asarray(cutoffs, dtype=np.float64)
+        else:
+            unique = np.unique(y)
+            if unique.size <= 1:
+                return None
+            if unique.size <= 10:
+                edges = (unique[:-1] + unique[1:]) / 2.0
+            else:
+                # 10 quantile bins -> 9 internal edges (deduped for ties).
+                edges = np.unique(np.quantile(y, np.linspace(0, 1, 11)[1:-1]))
+                if edges.size == 0:
+                    return None
+        bins = np.digitize(y, bins=edges)
+        n_bins = len(edges) + 1
+        counts = np.bincount(bins, minlength=n_bins).astype(np.float64)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            bin_weight = np.where(counts > 0, 1.0 / counts, 0.0)
+        # Normalize so the average per-sample weight is 1 (loss scale stable).
+        avg = (counts * bin_weight).sum() / counts.sum()
+        if avg > 0:
+            bin_weight = bin_weight / avg
+        return "regression_bins", (
+            torch.tensor(edges, dtype=torch.float32),
+            torch.tensor(bin_weight, dtype=torch.float32),
+        )
+
+    if task_type == "B":
+        y = np.asarray(labels, dtype=np.float64).reshape(-1)
+        pos = float((y > 0.5).sum())
+        neg = float((y <= 0.5).sum())
+        if pos == 0 or neg == 0:
+            return None
+        return "pos_weight", torch.tensor([neg / pos], dtype=torch.float32)
+
+    if task_type == "C":
+        y = np.asarray(labels, dtype=np.int64).reshape(-1)
+        n = y.size
+        counts = np.bincount(y, minlength=num_labels).astype(np.float64)
+        # Inverse-frequency weighting: N / (K * count_k); zero-count classes
+        # get weight 0 to avoid divide-by-zero (they contribute no loss anyway).
+        with np.errstate(divide="ignore", invalid="ignore"):
+            w = np.where(counts > 0, n / (num_labels * counts), 0.0)
+        return "weight", torch.tensor(w, dtype=torch.float32)
+
+    if task_type == "L":
+        y = np.asarray(labels, dtype=np.float64)
+        if y.ndim != 2 or y.shape[1] != num_labels:
+            return None
+        n = y.shape[0]
+        pos = y.sum(axis=0)
+        neg = n - pos
+        with np.errstate(divide="ignore", invalid="ignore"):
+            w = np.where(pos > 0, neg / pos, 1.0)
+        return "pos_weight", torch.tensor(w, dtype=torch.float32)
+
+    return None
+
+
 class DiagnosticsBrain(sb.Brain):
     """Class that manages the training loop for a generic diagnostics task."""
 
-    def __init__(self, ray_optim=False, **kwargs):
+    def __init__(self, ray_optim=False, fold_idx=None, **kwargs):
         super().__init__(**kwargs)
         self.cache = None
         # Gates `tune.report(...)` vs. stopper-counter update in on_stage_end.
@@ -129,6 +221,10 @@ class DiagnosticsBrain(sb.Brain):
         # stopper variant, trial-specific save_folder) is now baked into the
         # forked main.yaml by training.config_fork.
         self.ray_optim = ray_optim
+        # For CV manifests (train.json is a list of fold dicts), callers that
+        # know which fold this brain handles should pass fold_idx so auto class
+        # weights are computed from that fold's train partition only.
+        self.fold_idx = fold_idx
         
         # Storage for CI calculation during test
         self._test_preds = []
@@ -182,6 +278,86 @@ class DiagnosticsBrain(sb.Brain):
 
         self.model = unwrap_ddp(self.modules.model)
         self.hparams.loss = self.hparams.loss.to(self.device)
+
+        if getattr(self.hparams, "auto_class_weights", False):
+            # Flat manifest: apply now. CV manifest: apply only if the caller
+            # passed fold_idx (e.g. trainPerFoldCV); otherwise the CV subclasses
+            # in brains.py call _apply_auto_class_weights themselves after
+            # setting brain_id.
+            manifest_path = getattr(self.hparams, "train_annotation", None)
+            if manifest_path and Path(manifest_path).exists():
+                with open(manifest_path, "r") as f:
+                    is_cv = isinstance(json.load(f), list)
+                if not is_cv:
+                    self._apply_auto_class_weights()
+                elif self.fold_idx is not None:
+                    self._apply_auto_class_weights(fold_idx=self.fold_idx)
+
+    def _apply_auto_class_weights(self, fold_idx=None):
+        """Compute class weights from the train manifest and set them on the loss.
+
+        Overrides any pos_weight/weight already set in the task YAML. For R
+        tasks we bin the labels (clinical cutoffs from ``data_params`` if
+        provided, else unique values or quantiles), compute per-bin weights,
+        and switch the loss to ``reduction='none'`` so ``compute_objectives``
+        can apply per-sample weights at training time.
+
+        For CV manifests, pass ``fold_idx`` to compute weights from that fold's
+        train partition only.
+        """
+        manifest_path = getattr(self.hparams, "train_annotation", None)
+        if manifest_path is None or not Path(manifest_path).exists():
+            print(f"[auto_class_weights] train manifest missing at {manifest_path}; skipping")
+            return
+
+        labels = _load_train_labels(manifest_path, fold_idx=fold_idx)
+
+        # Optional clinical bin edges live in data_params (per-task yaml).
+        cutoffs = None
+        data_params = getattr(self.hparams, "data_params", None)
+        if isinstance(data_params, dict):
+            cutoffs = data_params.get("clinical_cutoffs")
+
+        result = compute_auto_class_weights(
+            task_type=self.task_type,
+            labels=labels,
+            num_labels=self.hparams.num_labels,
+            cutoffs=cutoffs,
+        )
+        if result is None:
+            print(f"[auto_class_weights] could not compute weights for task_type={self.task_type}; skipping")
+            return
+
+        # Snapshot an unweighted loss for val/test so the loss reported there
+        # reflects raw generalization error (not training-set bin frequencies).
+        # Copy first, then strip any weight attrs in case the YAML had set them.
+        unweighted = copy.deepcopy(self.hparams.loss)
+        for attr in ("pos_weight", "weight"):
+            if hasattr(unweighted, attr) and getattr(unweighted, attr) is not None:
+                setattr(unweighted, attr, None)
+        unweighted.reduction = "mean"
+        self._unweighted_loss = unweighted.to(self.device)
+
+        kind, payload = result
+        fold_tag = "" if fold_idx is None else f" fold={fold_idx}"
+        if kind == "regression_bins":
+            edges, bin_weights = payload
+            self._reg_bin_edges = edges.to(self.device)
+            self._reg_bin_weights = bin_weights.to(self.device)
+            # Switch loss to elementwise so we can weight per-sample. The
+            # reduce-by-mean happens in compute_objectives.
+            self.hparams.loss.reduction = "none"
+            print(
+                f"[auto_class_weights]{fold_tag} task_type=R "
+                f"edges={edges.tolist()} bin_weights={bin_weights.tolist()}"
+            )
+        else:
+            tensor = payload.to(self.device)
+            setattr(self.hparams.loss, kind, tensor)
+            print(
+                f"[auto_class_weights]{fold_tag} task_type={self.task_type} "
+                f"{kind}={tensor.detach().cpu().tolist()}"
+            )
 
 
     def compute_forward(self, batch, stage):
@@ -244,7 +420,21 @@ class DiagnosticsBrain(sb.Brain):
             if lab.dim() == 1 and self.task_type in ("R", "B"):
                 lab = lab.unsqueeze(1)
 
-        loss = self.hparams.loss(predictions, lab)
+        # Class weighting is a training-time gradient-shaping trick: val/test
+        # should report the unweighted loss so early stopping / HP selection
+        # isn't biased by training-set class frequencies. The unweighted loss
+        # is snapshotted in _apply_auto_class_weights when auto weighting is on.
+        if stage != sb.Stage.TRAIN and hasattr(self, "_unweighted_loss"):
+            loss = self._unweighted_loss(predictions, lab)
+        else:
+            loss = self.hparams.loss(predictions, lab)
+            # For R with auto class weights, the train loss is reduction='none';
+            # apply per-sample bin weights, then reduce.
+            if self.task_type == "R" and hasattr(self, "_reg_bin_weights"):
+                lab_flat = lab.squeeze(-1) if lab.dim() > 1 else lab
+                sample_bins = torch.bucketize(lab_flat, self._reg_bin_edges)
+                sample_w = self._reg_bin_weights[sample_bins]
+                loss = (loss.squeeze(-1) * sample_w).mean()
 
         if self.task_type == "R":
             self.error_metrics.update(predictions.squeeze(-1), lab.squeeze(-1))

@@ -11,6 +11,10 @@ skip_prep: False
 
 num_labels: 1
 
+# Bin edges for auto per-sample regression weighting (np.digitize semantics):
+# bins are 0-4 / 5-9 / 10-14 / 15-19 / 20+ (PHQ-8 severity).
+clinical_cutoffs: [5, 10, 15, 20]
+
 loss: !new:torch.nn.MSELoss
 
 split_by_boundary: true

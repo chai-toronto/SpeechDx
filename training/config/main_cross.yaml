@@ -160,6 +160,10 @@ opt_class: !name:torch.optim.AdamW
 
 loss: !ref <data_params[loss]>
 
+# Auto-compute pos_weight / class weight from the training manifest at brain
+# init. Overrides any pos_weight set in the task YAML. Skipped for regression.
+auto_class_weights: true
+
 # HP Optimizer
 # Enable Ray Tune hyperparameter optimization
 continue_exp: !ref <hpopt_params[continue_exp]>

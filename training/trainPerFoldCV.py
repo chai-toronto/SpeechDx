@@ -99,6 +99,7 @@ def train_fold_with_ray(config, hparams_file, run_opts, overrides, resolved_path
 
     brain = DiagnosticsBrain(
         ray_optim=True,
+        fold_idx=fold_idx,
         modules=hparams["modules"],
         opt_class=hparams["opt_class"],
         hparams=hparams,
