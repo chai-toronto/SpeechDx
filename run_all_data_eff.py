@@ -760,6 +760,7 @@ def cmd_run(args: argparse.Namespace) -> None:
     failed_log_paths: dict[str, Path] = {}
     test_only = getattr(args, 'test_only', False)
     cache_only = getattr(args, 'cache_only', False)
+    no_writer = getattr(args, 'no_writer', False)
 
     # Filter encoders by --encoder flag (default: all). Repeatable.
     if args.encoder:
@@ -822,6 +823,8 @@ def cmd_run(args: argparse.Namespace) -> None:
     progress = _Progress(total_jobs)
     max_workers = max(1, args.max_workers)
     mode = "cache-only" if cache_only else ("test-only" if test_only else "train+test")
+    if no_writer and not (test_only or cache_only):
+        mode = "train+test (no-writer)"
     _emit(
         "",
         f"[{_now()}] Run start  : {total_jobs} pending, {skipped} skipped",
@@ -882,6 +885,12 @@ def cmd_run(args: argparse.Namespace) -> None:
 
         if test_only:
             return _execute(job, idx, "test")
+
+        # no_writer mode: assume cache already warmed (e.g. by a prior
+        # --cache-only pass); every job runs as a reader, no per-(dataset,
+        # encoder) serialization.
+        if no_writer:
+            return _execute(job, idx, "reader")
 
         try:
             needed = _needed_keys(task_stem, level_dir)
@@ -995,10 +1004,14 @@ def main() -> None:
                             help="Run inference only (no training), requires prior completed runs")
     run_parser.add_argument("--cache-only", action="store_true",
                             help="Warm HDF5 caches via dataio_prep and exit before any training/evaluation")
+    run_parser.add_argument("--no-writer", action="store_true",
+                            help="Run every job as a reader (warm_cache=False), no per-(dataset,encoder) serialization. Assumes caches are already warmed (e.g. via a prior --cache-only pass).")
 
     args = parser.parse_args()
     if args.command == "run" and getattr(args, "cache_only", False) and getattr(args, "test_only", False):
         parser.error("--cache-only and --test-only are mutually exclusive")
+    if args.command == "run" and getattr(args, "cache_only", False) and getattr(args, "no_writer", False):
+        parser.error("--cache-only and --no-writer are mutually exclusive (cache-only IS the writer)")
     if args.command == "status":
         cmd_status(args)
     elif args.command == "run":

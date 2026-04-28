@@ -39,6 +39,24 @@ ENCODERS = {
 TASK = []
 EXCLUDE_DATASETS = {"daic_woz"}  # permanent dead task; edaic is live
 
+# Tasks listed on the paper "Task Characteristics" sheet — kept in sync with
+# run_all_data_eff.PAPER_TASKS so the full benchmark and the data-efficiency
+# sweep evaluate the same task set.
+PAPER_TASKS = [
+    "edaic_depC", "edaic_phqR",
+    "ravdess_emoC", "ravdess_emoBC",
+    "iemocap_emoC", "iemocap_emoBC",
+    "dbank_adC", "dbank_mmseR",
+    "aphasia_pwaC",
+    "torgo_dysC", "torgo_sevR",
+    "uaspeech_dysC",
+    "mvdr_parkC", "mvdr_updrs5R", "mvdr_updrs18R", "mvdr_hyR",
+    "ksof_intC", "ksof_stutL",
+    "c9s_t1", "c9s_L_t1", "c9s_t2", "c9s_L_t2", "c9s_sympL",
+    "coswara_sympC", "coswara_covidC", "coswara_sympL",
+    "avfad_pathC",
+]
+
 PROBE_NAME = "AvgTProbe"
 PROBE_YAML = "Probe.yaml"
 EXPERIMENT_TAG = "run1"
@@ -128,14 +146,11 @@ def discover_all_encoders() -> dict[str, str]:
 
 def discover_tasks(datasets: list[str] | None = None,
                    tasks: list[str] | None = None) -> list[str]:
-    """Auto-scan training/config/tasks/*.yaml and return sorted list of stems.
-    Override with TASK env var (comma-separated) if set. Datasets listed in
-    EXCLUDE_DATASETS are filtered out. If `datasets` is given, keep only those.
-    If `tasks` is given, keep only stems matching those names."""
-    if TASK:
-        stems = TASK
-    else:
-        stems = sorted(p.stem for p in TASKS_DIR.glob("*.yaml"))
+    """Return sorted PAPER_TASKS, optionally narrowed by `datasets` / `tasks`.
+    Tasks not present under TASKS_DIR are dropped silently. Datasets listed in
+    EXCLUDE_DATASETS are filtered out."""
+    available = {p.stem for p in TASKS_DIR.glob("*.yaml")}
+    stems = sorted(s for s in PAPER_TASKS if s in available)
     allowed_ds = set(datasets) if datasets else None
     allowed_tasks = set(tasks) if tasks else None
     out = []
@@ -654,6 +669,7 @@ def cmd_run(args: argparse.Namespace) -> None:
     failed_log_paths: dict[str, Path] = {}
     test_only = getattr(args, 'test_only', False)
     cache_only = getattr(args, 'cache_only', False)
+    no_writer = getattr(args, 'no_writer', False)
 
     # Filter encoders by --encoder flag (default: all). Repeatable.
     if args.encoder:
@@ -724,6 +740,8 @@ def cmd_run(args: argparse.Namespace) -> None:
 
     max_workers = max(1, args.max_workers)
     mode = "cache-only" if cache_only else ("test-only" if test_only else "train+test")
+    if no_writer and not (test_only or cache_only):
+        mode = "train+test (no-writer)"
     _emit(
         "",
         f"[{_now()}] Run start  : {total_jobs} pending, {skipped} skipped",
@@ -785,6 +803,12 @@ def cmd_run(args: argparse.Namespace) -> None:
         # test_only never writes cache — skip lock logic entirely.
         if test_only:
             return _execute(job, idx, "test")
+
+        # no_writer mode: assume cache already warmed (e.g. by a prior
+        # --cache-only pass); every job runs as a reader, no per-(dataset,
+        # encoder) serialization.
+        if no_writer:
+            return _execute(job, idx, "reader")
 
         try:
             needed = _needed_keys(task_stem)
@@ -890,10 +914,14 @@ def main() -> None:
                             help="Run inference only (no training), requires prior completed runs")
     run_parser.add_argument("--cache-only", action="store_true",
                             help="Warm HDF5 caches via dataio_prep and exit before any training/evaluation")
+    run_parser.add_argument("--no-writer", action="store_true",
+                            help="Run every job as a reader (warm_cache=False), no per-(dataset,encoder) serialization. Assumes caches are already warmed (e.g. via a prior --cache-only pass).")
 
     args = parser.parse_args()
     if args.command == "run" and getattr(args, "cache_only", False) and getattr(args, "test_only", False):
         parser.error("--cache-only and --test-only are mutually exclusive")
+    if args.command == "run" and getattr(args, "cache_only", False) and getattr(args, "no_writer", False):
+        parser.error("--cache-only and --no-writer are mutually exclusive (cache-only IS the writer)")
     if args.command == "status":
         cmd_status(args)
     elif args.command == "run":
