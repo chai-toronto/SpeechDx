@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Run training across all task × encoder combinations with skip-checking and timing."""
+"""Data-efficiency driver: re-trains the paper-benchmark probes at four
+reduced training-set sizes (6.25%, 12.5%, 25%, 50% of train participants).
+
+Manifests are produced once by the regular pipeline (under exps/<...>/manifest/),
+then copied + subsampled into data_eff_exps/<level>/<...>/manifest/. Test split
+(and CV held-out folds) pass through unchanged. The encoder cache at
+embeddings_avg_final/<dataset>/<model>/ is shared with the full benchmark and
+is unaffected by manifest size.
+"""
 
 import argparse
 import csv
@@ -17,6 +25,8 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
+
+from training.dataio.subsample import subsample_and_write
 
 # ─── Global configuration ──────────────────────────────────────────────
 # Encoders: model_name -> encoder YAML filename
@@ -48,14 +58,41 @@ TMP_CONFIG = Path("training/config/_tmp_run.yaml")
 TASKS_DIR = Path("training/config/tasks")
 ENCODERS_DIR = Path("training/config/encoders")
 
+# ─── Data-efficiency configuration ─────────────────────────────────────
+EXP_ROOT_BASE = "data_eff_exps"
+# (level_dir, level_value). level_dir becomes a path component, so no '.'.
+LEVELS = [
+    ("06p25", 0.0625),
+    ("12p5",  0.125),
+    ("25",    0.25),
+    ("50",    0.50),
+]
+LEVEL_VALUE = {d: v for d, v in LEVELS}
+
+# Tasks listed on the paper "Task Characteristics" sheet — the only set
+# evaluated under data-efficiency.
+PAPER_TASKS = [
+    "edaic_depC", "edaic_phqR",
+    "ravdess_emoC", "ravdess_emoBC",
+    "iemocap_emoC", "iemocap_emoBC",
+    "dbank_adC", "dbank_mmseR",
+    "aphasia_pwaC",
+    "torgo_dysC", "torgo_sevR",
+    "uaspeech_dysC",
+    "mvdr_parkC", "mvdr_updrs5R", "mvdr_updrs18R", "mvdr_hyR",
+    "ksof_intC", "ksof_stutL",
+    "c9s_t1", "c9s_L_t1", "c9s_t2", "c9s_L_t2", "c9s_sympL",
+    "coswara_sympC", "coswara_covidC", "coswara_sympL",
+    "avfad_pathC",
+]
+
 # ─── Per-task log delegation ────────────────────────────────────────────
-LOGS_ROOT = Path("logs/run_all")
-ROLE_W = 7  # fixed-width role label so concurrent rows align
+LOGS_ROOT = Path("logs/run_all_data_eff")
+ROLE_W = 7
 _terminal_lock = threading.Lock()
 
 
 def _emit(*lines: str) -> None:
-    """Atomic multi-line print so concurrent workers don't interleave."""
     with _terminal_lock:
         for ln in lines:
             print(ln, flush=True)
@@ -81,8 +118,6 @@ def _tail(path: Path, n: int = 20) -> list[str]:
 
 
 class _Progress:
-    """Thread-safe counters surfaced as snapshot strings in driver output."""
-
     def __init__(self, total: int):
         self.total = total
         self.active = 0
@@ -128,14 +163,10 @@ def discover_all_encoders() -> dict[str, str]:
 
 def discover_tasks(datasets: list[str] | None = None,
                    tasks: list[str] | None = None) -> list[str]:
-    """Auto-scan training/config/tasks/*.yaml and return sorted list of stems.
-    Override with TASK env var (comma-separated) if set. Datasets listed in
-    EXCLUDE_DATASETS are filtered out. If `datasets` is given, keep only those.
-    If `tasks` is given, keep only stems matching those names."""
-    if TASK:
-        stems = TASK
-    else:
-        stems = sorted(p.stem for p in TASKS_DIR.glob("*.yaml"))
+    """Return sorted PAPER_TASKS, optionally narrowed by `datasets` / `tasks`.
+    Tasks not present under TASKS_DIR are dropped silently."""
+    available = {p.stem for p in TASKS_DIR.glob("*.yaml")}
+    stems = sorted(s for s in PAPER_TASKS if s in available)
     allowed_ds = set(datasets) if datasets else None
     allowed_tasks = set(tasks) if tasks else None
     out = []
@@ -161,13 +192,22 @@ def get_task_info(task_stem: str) -> tuple[str, str]:
     return dataset_m.group(1), task_m.group(1)
 
 
-def get_output_folder(dataset: str, task: str, model_name: str, tag: str = EXPERIMENT_TAG) -> Path:
-    return Path(f"./exps/{dataset}_{task}/{model_name}-{PROBE_NAME}-{tag}")
+def get_output_folder(dataset: str, task: str, model_name: str, level_dir: str,
+                      tag: str = EXPERIMENT_TAG) -> Path:
+    return Path(f"./{EXP_ROOT_BASE}/{level_dir}/{dataset}_{task}/"
+                f"{model_name}-{PROBE_NAME}-{tag}")
+
+
+def src_manifest_paths(task_stem: str) -> tuple[Path, Path, Path]:
+    """Original (full) manifest paths under exps/<dataset>_<task>/manifest/."""
+    dataset, task = get_task_info(task_stem)
+    base = Path(f"./exps/{dataset}_{task}/manifest")
+    return base / "train.json", base / "valid.json", base / "test.json"
 
 
 # ─── Task metadata (manifests, num_aug_ver) ─────────────────────────────
 _task_yaml_cache: dict[str, dict] = {}
-_task_ids_cache: dict[str, frozenset[str]] = {}
+_task_ids_cache: dict[tuple[str, str], frozenset[str]] = {}
 _main_yaml_cache: dict | None = None
 
 
@@ -204,9 +244,10 @@ def _load_task_yaml(task_stem: str) -> dict:
     return _task_yaml_cache[task_stem]
 
 
-def manifest_paths(task_stem: str) -> tuple[Path, Path, Path]:
+def manifest_paths(task_stem: str, level_dir: str) -> tuple[Path, Path, Path]:
+    """Subsampled manifest paths for a (task, level) pair."""
     dataset, task = get_task_info(task_stem)
-    base = Path(f"./exps/{dataset}_{task}/manifest")
+    base = Path(f"./{EXP_ROOT_BASE}/{level_dir}/{dataset}_{task}/manifest")
     return base / "train.json", base / "valid.json", base / "test.json"
 
 
@@ -214,11 +255,13 @@ def task_num_ver(task_stem: str) -> int:
     return int(_load_task_yaml(task_stem).get("num_aug_ver", 1))
 
 
-def task_ids(task_stem: str) -> frozenset[str]:
-    if task_stem in _task_ids_cache:
-        return _task_ids_cache[task_stem]
+def task_ids(task_stem: str, level_dir: str) -> frozenset[str]:
+    """Union of uids across the subsampled manifests for (task, level)."""
+    cache_key = (task_stem, level_dir)
+    if cache_key in _task_ids_cache:
+        return _task_ids_cache[cache_key]
     ids: set[str] = set()
-    for p in manifest_paths(task_stem):
+    for p in manifest_paths(task_stem, level_dir):
         if p.exists():
             with p.open() as f:
                 data = json.load(f)
@@ -229,26 +272,25 @@ def task_ids(task_stem: str) -> frozenset[str]:
                         if isinstance(fold, dict):
                             ids |= set(fold.keys())
     frozen = frozenset(ids)
-    _task_ids_cache[task_stem] = frozen
+    _task_ids_cache[cache_key] = frozen
     return frozen
 
 
-def task_weight(task_stem: str) -> int:
+def task_weight(task_stem: str, level_dir: str) -> int:
     """Sort key: run biggest cache-writers first so readers unlock sooner."""
-    return task_num_ver(task_stem) * len(task_ids(task_stem))
+    return task_num_ver(task_stem) * len(task_ids(task_stem, level_dir))
 
 
-def ensure_manifest(task_stem: str) -> None:
-    """Call the task's prepare_data_fn if manifest files are missing.
+def _ensure_source_manifest(task_stem: str) -> None:
+    """Call the task's prepare_data_fn if the source manifest under
+    exps/<dataset>_<task>/manifest/ is missing. Mirrors run_all.ensure_manifest.
 
     Different prep_*.py modules take slightly different kwargs (e.g. CV tasks
     take `num_fold` and `raw_label_key` instead of `ratio`/`manifest_test_path`),
     so we build a superset kwargs dict and filter to the function's actual
     signature.
     """
-    tr, va, te = manifest_paths(task_stem)
-    # Heuristic: most tasks produce all 3; CV tasks produce only train+valid.
-    # Call prep only if train or valid is missing.
+    tr, va, te = src_manifest_paths(task_stem)
     if tr.exists() and va.exists():
         return
     tcfg = _load_task_yaml(task_stem)
@@ -258,7 +300,7 @@ def ensure_manifest(task_stem: str) -> None:
 
     module = importlib.import_module(tcfg["data_io_script"])
     fn = getattr(module, tcfg["prepare_data_fn"])
-    print(f"Preparing manifests for {task_stem} …", flush=True)
+    print(f"Preparing source manifests for {task_stem} …", flush=True)
     tr.parent.mkdir(parents=True, exist_ok=True)
 
     all_kwargs = {
@@ -277,7 +319,35 @@ def ensure_manifest(task_stem: str) -> None:
     sig = inspect.signature(fn)
     kwargs = {k: v for k, v in all_kwargs.items() if k in sig.parameters}
     fn(**kwargs)
-    _task_ids_cache.pop(task_stem, None)  # force re-read from fresh manifests
+
+
+def ensure_manifest(task_stem: str, level_dir: str) -> None:
+    """Ensure the subsampled manifests exist at data_eff_exps/<level>/<...>/manifest/.
+
+    Idempotent: skips when the destination already has the expected files.
+    Source manifests under exps/<...>/manifest/ are produced on demand.
+    """
+    src_tr, src_va, src_te = src_manifest_paths(task_stem)
+    dst_tr, dst_va, dst_te = manifest_paths(task_stem, level_dir)
+    cv = is_cv(task_stem)
+
+    # Idempotent skip: train+valid present (and test if non-CV) ⇒ already done.
+    if dst_tr.exists() and dst_va.exists() and (cv or dst_te.exists()):
+        return
+
+    _ensure_source_manifest(task_stem)
+    seed = int(_load_main_yaml().get("random_seed", 2026))
+    level_value = LEVEL_VALUE[level_dir]
+    print(f"Subsampling {task_stem} → {level_dir} ({level_value:.4%}) …", flush=True)
+    subsample_and_write(
+        src_manifest_dir=src_tr.parent,
+        dst_manifest_dir=dst_tr.parent,
+        task_yaml_path=TASKS_DIR / f"{task_stem}.yaml",
+        level=level_value,
+        seed=seed,
+        task_stem=task_stem,
+    )
+    _task_ids_cache.pop((task_stem, level_dir), None)
 
 
 def is_cv(task_stem: str) -> bool:
@@ -330,7 +400,8 @@ def has_ci_results(output_folder: Path, task_stem: str) -> bool:
     return lo in text and hi in text
 
 
-def make_config(model_name: str, encoder_yaml: str, task_yaml: str, config_id: str = "",
+def make_config(model_name: str, encoder_yaml: str, task_yaml: str, level_dir: str,
+                config_id: str = "",
                 warm_cache_override: bool | None = None, test_only: bool = False,
                 cache_only: bool = False) -> Path:
     text = BASE_CONFIG.read_text()
@@ -345,6 +416,9 @@ def make_config(model_name: str, encoder_yaml: str, task_yaml: str, config_id: s
         subs.append((r"^warm_cache:.*$", f"warm_cache: {str(warm_cache_override).lower()}"))
     for pattern, replacement in subs:
         text = re.sub(pattern, replacement, text, flags=re.MULTILINE)
+    # Redirect ./exps/ → ./data_eff_exps/<level>/ for output_folder and the three
+    # manifest paths in main.yaml (no other literal references to ./exps/).
+    text = text.replace("./exps/", f"./{EXP_ROOT_BASE}/{level_dir}/")
     # Remove chunk_at line entirely
     text = re.sub(r"^chunk_at:.*\n?", "", text, flags=re.MULTILINE)
     # Force skip_prep: True — ensure_manifest handles this
@@ -359,24 +433,26 @@ def make_config(model_name: str, encoder_yaml: str, task_yaml: str, config_id: s
     elif test_only:
         text = re.sub(r"^test_only:.*$", "test_only: True", text, flags=re.MULTILINE)
         text = re.sub(r"^warm_cache:.*$", "warm_cache: false", text, flags=re.MULTILINE)
-    # Include model name + SLURM job id so concurrent jobs (same encoder, different
-    # datasets) don't overwrite/delete each other's temp config.
+    # Include model name + level + SLURM job id so concurrent jobs (same encoder,
+    # different datasets/levels) don't overwrite/delete each other's temp config.
     job_suffix = f"_job{os.environ['SLURM_JOB_ID']}" if os.environ.get("SLURM_JOB_ID") else ""
-    config_path = Path(f"training/config/_tmp_run_{model_name}{job_suffix}{config_id}.yaml")
+    config_path = Path(
+        f"training/config/_tmp_run_de_{model_name}_{level_dir}{job_suffix}{config_id}.yaml"
+    )
     config_path.write_text(text)
     return config_path
 
 
-def run_one(task_stem: str, model_name: str, encoder_yaml: str, device=None,
-            config_id: str = "",
+def run_one(task_stem: str, model_name: str, encoder_yaml: str, level_dir: str,
+            device=None, config_id: str = "",
             warm_cache_override: bool | None = None, test_only: bool = False,
             cache_only: bool = False,
             log_path: Path | None = None) -> tuple[str, bool, float]:
     """Run a single training job, redirecting child stdout/stderr to log_path.
     Returns (label, success, elapsed_seconds)."""
-    label = f"{task_stem} × {model_name}"
+    label = f"{task_stem} × {model_name} @ {level_dir}"
     task_yaml = f"{task_stem}.yaml"
-    config_path = make_config(model_name, encoder_yaml, task_yaml, config_id,
+    config_path = make_config(model_name, encoder_yaml, task_yaml, level_dir, config_id,
                               warm_cache_override=warm_cache_override, test_only=test_only,
                               cache_only=cache_only)
 
@@ -386,10 +462,10 @@ def run_one(task_stem: str, model_name: str, encoder_yaml: str, device=None,
         cmd.append(f"--device={device}")
 
     if log_path is None:
-        log_path = LOGS_ROOT / "_ad_hoc" / f"{_slug(task_stem)}__{_slug(model_name)}.log"
+        log_path = (LOGS_ROOT / "_ad_hoc" / level_dir
+                    / f"{_slug(task_stem)}__{_slug(model_name)}.log")
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # PYTHONUNBUFFERED=1 keeps `tail -f` responsive when stdout is a file.
     env = {**os.environ, "PYTHONUNBUFFERED": "1"}
 
     start = time.time()
@@ -400,7 +476,7 @@ def run_one(task_stem: str, model_name: str, encoder_yaml: str, device=None,
             f.write(f"  Command: {' '.join(cmd)}\n")
             f.write(f"  Started: {datetime.now().isoformat(timespec='seconds')}\n")
             f.write(f"  test_only={test_only}  cache_only={cache_only}  "
-                    f"warm_cache_override={warm_cache_override}\n")
+                    f"warm_cache_override={warm_cache_override}  level={level_dir}\n")
             f.write(f"{'='*60}\n")
             f.flush()
             subprocess.run(cmd, check=True, stdout=f,
@@ -494,14 +570,26 @@ def load_metrics(output_folder: Path, task_stem: str) -> dict[str, float] | None
     return parse_results_txt(results_file)
 
 
+def _resolve_levels(arg_levels: list[str] | None) -> list[tuple[str, float]]:
+    """Filter LEVELS to the user-specified set. None ⇒ all levels."""
+    if not arg_levels:
+        return list(LEVELS)
+    by_name = {d: v for d, v in LEVELS}
+    out = []
+    for name in arg_levels:
+        if name not in by_name:
+            raise SystemExit(
+                f"Unknown level {name!r}. Choices: {[d for d, _ in LEVELS]}"
+            )
+        out.append((name, by_name[name]))
+    return out
+
+
 def cmd_summary(args: argparse.Namespace) -> None:
     tasks = discover_tasks()
     encoders = list(ENCODERS.keys())
+    levels = _resolve_levels(getattr(args, "level", None))
 
-    # metric_key -> {task_stem: {encoder: value}}
-    matrices: dict[str, dict[str, dict[str, float]]] = {
-        k: defaultdict(dict) for k in CSV_LAYOUT.values()
-    }
     # Classify tasks by task_type yaml field so empty rows are still emitted
     regression_tasks: set[str] = set()
     classification_tasks: set[str] = set()
@@ -510,146 +598,164 @@ def cmd_summary(args: argparse.Namespace) -> None:
             regression_tasks.add(task_stem)
         else:
             classification_tasks.add(task_stem)
-    found, missing = 0, 0
 
-    for task_stem in tasks:
-        dataset, task = get_task_info(task_stem)
-        for model_name in encoders:
-            folder = get_output_folder(dataset, task, model_name, args.tag)
-            metrics = load_metrics(folder, task_stem)
-            if metrics is None:
-                missing += 1
+    out_root = Path(args.out_dir)
+    out_root.mkdir(parents=True, exist_ok=True)
+
+    grand_found, grand_missing, written_paths = 0, 0, []
+
+    for level_dir, _ in levels:
+        # metric_key -> {task_stem: {encoder: value}}
+        matrices: dict[str, dict[str, dict[str, float]]] = {
+            k: defaultdict(dict) for k in CSV_LAYOUT.values()
+        }
+        found, missing = 0, 0
+        for task_stem in tasks:
+            dataset, task = get_task_info(task_stem)
+            for model_name in encoders:
+                folder = get_output_folder(dataset, task, model_name, level_dir, args.tag)
+                metrics = load_metrics(folder, task_stem)
+                if metrics is None:
+                    missing += 1
+                    continue
+                found += 1
+                for metric_key in CSV_LAYOUT.values():
+                    if metric_key in metrics:
+                        matrices[metric_key][task_stem][model_name] = metrics[metric_key]
+
+        grand_found += found
+        grand_missing += missing
+        out_dir = out_root / level_dir
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        for csv_name, metric_key in CSV_LAYOUT.items():
+            data = matrices[metric_key]
+            pool = regression_tasks if metric_key in REGRESSION_METRICS else classification_tasks
+            task_rows = sorted(pool)
+            if not task_rows:
                 continue
-            found += 1
-            for metric_key in CSV_LAYOUT.values():
-                if metric_key in metrics:
-                    matrices[metric_key][task_stem][model_name] = metrics[metric_key]
+            csv_path = out_dir / f"{csv_name}.csv"
+            with csv_path.open("w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["task", *encoders])
+                for task_stem in task_rows:
+                    row = [task_stem]
+                    for enc in encoders:
+                        val = data[task_stem].get(enc, "")
+                        if isinstance(val, float):
+                            row.append(f"{val:.4f}")
+                        elif isinstance(val, str):
+                            row.append(val)
+                        else:
+                            row.append("")
+                    writer.writerow(row)
+            written_paths.append(csv_path)
 
-    out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    written = []
-    for csv_name, metric_key in CSV_LAYOUT.items():
-        data = matrices[metric_key]
-        # Classification CSVs → only classification tasks; regression → only regression tasks.
-        # Emit every task of the matching type, even if all encoders are empty.
-        pool = regression_tasks if metric_key in REGRESSION_METRICS else classification_tasks
-        task_rows = sorted(pool)
-        if not task_rows:
-            continue
-
-        csv_path = out_dir / f"{csv_name}.csv"
-        with csv_path.open("w", newline="") as f:
+        # Per-level completion matrix over the paper task set.
+        comp_path = out_dir / "completion.csv"
+        totals = {enc: 0 for enc in encoders}
+        with comp_path.open("w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(["task", *encoders])
-            for task_stem in task_rows:
+            for task_stem in tasks:
+                dataset, task = get_task_info(task_stem)
                 row = [task_stem]
                 for enc in encoders:
-                    val = data[task_stem].get(enc, "")
-                    if isinstance(val, float):
-                        row.append(f"{val:.4f}")
-                    elif isinstance(val, str):
-                        row.append(val)
-                    else:
-                        row.append("")
+                    folder = get_output_folder(dataset, task, enc, level_dir, args.tag)
+                    done = is_complete(folder, task_stem)
+                    row.append("1" if done else "0")
+                    if done:
+                        totals[enc] += 1
                 writer.writerow(row)
-        written.append(csv_path)
+            writer.writerow(["TOTAL", *(str(totals[e]) for e in encoders)])
+        written_paths.append(comp_path)
 
-    # Completion matrix — non-exclusion: every task yaml × every encoder yaml
-    all_tasks = discover_all_tasks()
-    all_encoders = discover_all_encoders()  # stem -> folder_name
-    comp_path = out_dir / "completion.csv"
-    totals = {stem: 0 for stem in all_encoders}
-    with comp_path.open("w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["task", *all_encoders.keys()])
-        for task_stem in all_tasks:
-            dataset, task = get_task_info(task_stem)
-            row = [task_stem]
-            for stem, folder_name in all_encoders.items():
-                folder = get_output_folder(dataset, task, folder_name, args.tag)
-                done = is_complete(folder, task_stem)
-                row.append("1" if done else "0")
-                if done:
-                    totals[stem] += 1
-            writer.writerow(row)
-        writer.writerow(["TOTAL", *(str(totals[s]) for s in all_encoders)])
-    written.append(comp_path)
-
-    print(f"\nParsed {found} result files, {missing} missing")
-    print(f"Wrote {len(written)} CSV(s) to {out_dir}/")
-    for p in written:
+    print(f"\nParsed {grand_found} result files, {grand_missing} missing")
+    print(f"Wrote {len(written_paths)} CSV(s) under {out_root}/")
+    for p in written_paths:
         print(f"  {p}")
 
 
 def cmd_status(args: argparse.Namespace) -> None:
     tasks = discover_tasks()
     test_only = getattr(args, "test_only", False)
-    complete, incomplete, absent = 0, 0, 0
-
+    levels = _resolve_levels(getattr(args, "level", None))
     encoders = list(ENCODERS.keys())
-    rows = []
-    for task_stem in tasks:
-        dataset, task = get_task_info(task_stem)
-        row = [task_stem]
-        # Tasks whose type has no CI support (e.g. L) render blank in test_only
-        # view — test_only can't add anything.
-        ci_applicable = (
-            _expected_ci_keys(_load_task_yaml(task_stem).get("task_type", "")) is not None
-        ) if test_only else True
-        for model_name in encoders:
-            folder = get_output_folder(dataset, task, model_name)
-            if test_only:
-                if not ci_applicable or not (folder / get_results_file(task_stem)).exists():
-                    row.append(" ")
-                    absent += 1
-                elif has_ci_results(folder, task_stem):
+
+    grand_complete, grand_incomplete, grand_absent = 0, 0, 0
+
+    for level_dir, _ in levels:
+        complete, incomplete, absent = 0, 0, 0
+        rows = []
+        for task_stem in tasks:
+            dataset, task = get_task_info(task_stem)
+            row = [task_stem]
+            ci_applicable = (
+                _expected_ci_keys(_load_task_yaml(task_stem).get("task_type", "")) is not None
+            ) if test_only else True
+            for model_name in encoders:
+                folder = get_output_folder(dataset, task, model_name, level_dir)
+                if test_only:
+                    if not ci_applicable or not (folder / get_results_file(task_stem)).exists():
+                        row.append(" ")
+                        absent += 1
+                    elif has_ci_results(folder, task_stem):
+                        row.append("☑")
+                        complete += 1
+                    else:
+                        row.append("☐")
+                        incomplete += 1
+                elif is_complete(folder, task_stem):
                     row.append("☑")
                     complete += 1
                 else:
                     row.append("☐")
                     incomplete += 1
-            elif is_complete(folder, task_stem):
-                row.append("☑")
-                complete += 1
-            else:
-                row.append("☐")
-                incomplete += 1
-        rows.append(row)
+            rows.append(row)
 
-    headers = ["task", *encoders]
-    widths = [len(header) for header in headers]
-    for row in rows:
-        for idx, cell in enumerate(row):
-            widths[idx] = max(widths[idx], len(cell))
+        headers = ["task", *encoders]
+        widths = [len(header) for header in headers]
+        for row in rows:
+            for idx, cell in enumerate(row):
+                widths[idx] = max(widths[idx], len(cell))
 
-    def format_row(row: list[str]) -> str:
-        return " | ".join(cell.ljust(widths[idx]) for idx, cell in enumerate(row))
+        def format_row(row, w=widths):
+            return " | ".join(cell.ljust(w[idx]) for idx, cell in enumerate(row))
 
-    print(format_row(headers))
-    print("-+-".join("-" * width for width in widths))
-    for row in rows:
-        print(format_row(row))
+        print(f"\n=== Level {level_dir} ===")
+        print(format_row(headers))
+        print("-+-".join("-" * width for width in widths))
+        for row in rows:
+            print(format_row(row))
+
+        if test_only:
+            total = complete + incomplete + absent
+            print(f"  ({complete}/{total} with CI, {incomplete} pending CI, {absent} no result)")
+        else:
+            total = complete + incomplete
+            print(f"  ({complete}/{total} complete, {incomplete} remaining)")
+        grand_complete += complete
+        grand_incomplete += incomplete
+        grand_absent += absent
 
     if test_only:
-        total = complete + incomplete + absent
         print(f"\nLegend: ☑ CI present, ☐ tested without CI, blank = no test result")
-        print(f"Summary: {complete}/{total} with CI, {incomplete} pending CI, {absent} no test result")
+        print(f"All levels: {grand_complete} CI / {grand_incomplete} pending CI / {grand_absent} no result")
     else:
-        total = complete + incomplete
         print(f"\nLegend: ☑ complete, ☐ incomplete")
-        print(f"Summary: {complete}/{total} complete, {incomplete} remaining")
+        print(f"All levels: {grand_complete}/{grand_complete + grand_incomplete} complete")
 
 
-def _needed_keys(task_stem: str) -> set[tuple[str, int]]:
-    """Cache keys a task's warmup would need: (id, version) for each id × version."""
-    ids = task_ids(task_stem)
+def _needed_keys(task_stem: str, level_dir: str) -> set[tuple[str, int]]:
+    """Cache keys this (task, level) job would need: (id, version) per uid × ver."""
+    ids = task_ids(task_stem, level_dir)
     num_ver = task_num_ver(task_stem)
     return {(uid, v) for uid in ids for v in range(num_ver)}
 
 
 def cmd_run(args: argparse.Namespace) -> None:
     tasks = discover_tasks(args.dataset, args.task)
+    levels = _resolve_levels(getattr(args, "level", None))
     skipped, completed, failed = 0, 0, []
     failed_log_paths: dict[str, Path] = {}
     test_only = getattr(args, 'test_only', False)
@@ -661,67 +767,59 @@ def cmd_run(args: argparse.Namespace) -> None:
     else:
         encoders = ENCODERS
 
-    # Per-invocation log dir. One subdir per `cmd_run` call so logs from
-    # different invocations are easy to separate, grep, and prune.
     run_stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     run_log_dir = LOGS_ROOT / run_stamp
     run_log_dir.mkdir(parents=True, exist_ok=True)
 
-    # Collect pending jobs + track all tasks (pending + completed per encoder)
-    # so we can seed the written-key state from completed tasks.
-    pending: list[tuple[str, str, str]] = []  # (task_stem, model_name, encoder_yaml)
-    completed_by_ds_enc: dict[tuple[str, str], list[str]] = defaultdict(list)
-    for task_stem in tasks:
-        dataset, task = get_task_info(task_stem)
-        for model_name, encoder_yaml in encoders.items():
-            folder = get_output_folder(dataset, task, model_name)
-            if cache_only:
-                # cache_only produces no result files, so result-based skip
-                # checks don't apply; always queue the job.
-                pass
-            elif test_only:
-                if has_ci_results(folder, task_stem):
-                    _emit(f"[{_now()}] SKIP (CI present)     : {task_stem} × {model_name}")
+    # job tuple: (task_stem, model_name, encoder_yaml, level_dir)
+    pending: list[tuple[str, str, str, str]] = []
+    completed_by_ds_enc: dict[tuple[str, str], list[tuple[str, str]]] = defaultdict(list)
+    for level_dir, _ in levels:
+        for task_stem in tasks:
+            dataset, task = get_task_info(task_stem)
+            for model_name, encoder_yaml in encoders.items():
+                folder = get_output_folder(dataset, task, model_name, level_dir)
+                if cache_only:
+                    pass
+                elif test_only:
+                    if has_ci_results(folder, task_stem):
+                        _emit(f"[{_now()}] SKIP (CI present)     : {task_stem} × {model_name} @ {level_dir}")
+                        skipped += 1
+                        continue
+                    if not (folder / "best_hparams.yaml").exists():
+                        _emit(f"[{_now()}] SKIP (no trained model): {task_stem} × {model_name} @ {level_dir}")
+                        skipped += 1
+                        continue
+                elif is_complete(folder, task_stem):
+                    _emit(f"[{_now()}] SKIP (done)            : {task_stem} × {model_name} @ {level_dir}")
                     skipped += 1
+                    completed_by_ds_enc[(dataset, model_name)].append((task_stem, level_dir))
                     continue
-                if not (folder / "best_hparams.yaml").exists():
-                    _emit(f"[{_now()}] SKIP (no trained model): {task_stem} × {model_name}")
-                    skipped += 1
-                    continue
-            elif is_complete(folder, task_stem):
-                _emit(f"[{_now()}] SKIP (done)            : {task_stem} × {model_name}")
-                skipped += 1
-                completed_by_ds_enc[(dataset, model_name)].append(task_stem)
-                continue
-            pending.append((task_stem, model_name, encoder_yaml))
+                pending.append((task_stem, model_name, encoder_yaml, level_dir))
 
-    # Pre-generate manifests for every task we intend to run, so the writer/reader
-    # classification has accurate ID sets before dispatch. prepare_data_fn is
-    # deterministic + cheap; skips if manifests already exist.
-    needed_tasks = {ts for ts, _, _ in pending}
-    # Also ensure manifests for completed tasks we'll use for seeding the written set.
-    needed_tasks |= {ts for lst in completed_by_ds_enc.values() for ts in lst}
-    for ts in sorted(needed_tasks):
+    # Subsample manifests for every (task, level) we'll touch, plus completed
+    # ones used to seed the cache-written set.
+    needed_pairs = {(ts, ld) for ts, _, _, ld in pending}
+    needed_pairs |= {pair for lst in completed_by_ds_enc.values() for pair in lst}
+    for ts, ld in sorted(needed_pairs):
         try:
-            ensure_manifest(ts)
+            ensure_manifest(ts, ld)
         except Exception as e:
-            print(f"⚠ prepare_data for {ts} failed: {e}", flush=True)
+            print(f"⚠ subsample for {ts} @ {ld} failed: {e}", flush=True)
 
-    # Seed per-(dataset, encoder) written-key sets from completed tasks.
+    # Seed per-(dataset, encoder) written-key sets from already-completed jobs.
     written: dict[tuple[str, str], set[tuple[str, int]]] = defaultdict(set)
-    for (ds, enc), tlist in completed_by_ds_enc.items():
-        for ts in tlist:
+    for (ds, enc), pair_list in completed_by_ds_enc.items():
+        for ts, ld in pair_list:
             try:
-                written[(ds, enc)] |= _needed_keys(ts)
+                written[(ds, enc)] |= _needed_keys(ts, ld)
             except Exception:
-                pass  # missing manifest; best-effort seeding
+                pass
 
+    # Run biggest cache-writers first so readers unlock sooner.
+    pending.sort(key=lambda j: -task_weight(j[0], j[3]))
     total_jobs = len(pending)
     progress = _Progress(total_jobs)
-
-    # Sort pending jobs so biggest cache-writers go first (more readers unlock sooner).
-    pending.sort(key=lambda j: -task_weight(j[0]))
-
     max_workers = max(1, args.max_workers)
     mode = "cache-only" if cache_only else ("test-only" if test_only else "train+test")
     _emit(
@@ -729,23 +827,23 @@ def cmd_run(args: argparse.Namespace) -> None:
         f"[{_now()}] Run start  : {total_jobs} pending, {skipped} skipped",
         f"           workers : up to {max_workers} concurrent",
         f"           mode    : {mode}",
-        f"           logs    : {run_log_dir}/  (one file per job)",
+        f"           levels  : {[d for d, _ in levels]}",
+        f"           logs    : {run_log_dir}/  (one file per job, nested by level)",
         "",
     )
 
-    # Per-(dataset, encoder) lock: held only by writer tasks. Readers run free.
-    # Pre-create so concurrent lookups all resolve to the same Lock instance.
     ds_enc_locks: dict[tuple[str, str], threading.Lock] = {}
-    for ts, mn, _ in pending:
+    for ts, mn, _, _ in pending:
         ds = get_task_info(ts)[0]
         ds_enc_locks.setdefault((ds, mn), threading.Lock())
-    written_lock = threading.Lock()  # guards `written` mutations
+    written_lock = threading.Lock()
 
-    def _execute(job: tuple[str, str, str], idx: int, role: str
+    def _execute(job: tuple[str, str, str, str], idx: int, role: str
                  ) -> tuple[str, bool, float]:
-        task_stem, model_name, encoder_yaml = job
-        label = f"{task_stem} × {model_name}"
-        log_path = run_log_dir / f"{_slug(task_stem)}__{_slug(model_name)}.log"
+        task_stem, model_name, encoder_yaml, level_dir = job
+        label = f"{task_stem} × {model_name} @ {level_dir}"
+        log_path = (run_log_dir / level_dir
+                    / f"{_slug(task_stem)}__{_slug(model_name)}.log")
         cmd_str = (f"{get_train_command(task_stem)} <tmp.yaml>"
                    + (f" --device={args.device}" if args.device else ""))
         warm = None if role.strip() == "writer" else False
@@ -758,8 +856,8 @@ def cmd_run(args: argparse.Namespace) -> None:
             f"           prog: {progress.snap()}",
         )
 
-        result = run_one(task_stem, model_name, encoder_yaml, args.device,
-                         f"_{idx}", warm_cache_override=warm,
+        result = run_one(task_stem, model_name, encoder_yaml, level_dir,
+                         args.device, f"_{idx}", warm_cache_override=warm,
                          test_only=test_only, cache_only=cache_only,
                          log_path=log_path)
         _, ok, elapsed = result
@@ -776,38 +874,31 @@ def cmd_run(args: argparse.Namespace) -> None:
             _emit(head)
         return result
 
-    def dispatch(job: tuple[str, str, str], idx: int) -> tuple[str, bool, float]:
-        task_stem, model_name, encoder_yaml = job
+    def dispatch(job: tuple[str, str, str, str], idx: int) -> tuple[str, bool, float]:
+        task_stem, model_name, encoder_yaml, level_dir = job
         dataset, _ = get_task_info(task_stem)
         key = (dataset, model_name)
-        label = f"{task_stem} × {model_name}"
+        label = f"{task_stem} × {model_name} @ {level_dir}"
 
-        # test_only never writes cache — skip lock logic entirely.
         if test_only:
             return _execute(job, idx, "test")
 
         try:
-            needed = _needed_keys(task_stem)
+            needed = _needed_keys(task_stem, level_dir)
         except Exception:
-            needed = None  # unknown → treat as writer
+            needed = None
 
-        # Reader check (under written_lock to see up-to-date state).
         is_reader = False
         if needed is not None:
             with written_lock:
                 is_reader = needed.issubset(written[key])
 
         if is_reader:
-            # In cache_only mode, readers add nothing — skip the subprocess
-            # entirely instead of paying ~60s of Python+SpeechBrain startup
-            # just to open the cache and exit.
             if cache_only:
                 _emit(f"[{_now()}] SKIP (cache covered)   : {label}")
                 return label, True, 0.0
             return _execute(job, idx, "reader")
 
-        # Writer path — acquire per-(dataset, encoder) lock. Release early if the
-        # re-check shows a concurrent writer satisfied our keys (run as reader).
         ds_lock = ds_enc_locks[key]
         ds_lock.acquire()
         released = False
@@ -843,8 +934,9 @@ def cmd_run(args: argparse.Namespace) -> None:
                 completed += 1
             else:
                 failed.append(label)
-                ts, mn, _ = job
-                failed_log_paths[label] = run_log_dir / f"{_slug(ts)}__{_slug(mn)}.log"
+                ts, mn, _, ld = job
+                failed_log_paths[label] = (run_log_dir / ld
+                                           / f"{_slug(ts)}__{_slug(mn)}.log")
 
     # Summary
     done_label = "cache warmed" if cache_only else "completed"
@@ -860,18 +952,28 @@ def cmd_run(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run training across task × encoder combos")
+    parser = argparse.ArgumentParser(
+        description="Data-efficiency driver: paper tasks × encoders × subsample levels"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
+    level_choices = [d for d, _ in LEVELS]
 
     status_parser = sub.add_parser("status", help="Show completion status of all runs")
     status_parser.add_argument("--test-only", action="store_true",
                                help="Report CI-presence status instead of completion status")
+    status_parser.add_argument("--level", type=str, default=None, action="append",
+                               choices=level_choices,
+                               help="Restrict to these levels (repeatable; default: all)")
 
     summary_parser = sub.add_parser("summary", help="Collect results into per-metric CSVs")
-    summary_parser.add_argument("--out-dir", type=str, default="exps/_summary",
-                                help="Directory to write metric CSVs (default: exps/_summary)")
+    summary_parser.add_argument("--out-dir", type=str,
+                                default=f"{EXP_ROOT_BASE}/_summary",
+                                help=f"Directory to write metric CSVs (default: {EXP_ROOT_BASE}/_summary)")
     summary_parser.add_argument("--tag", type=str, default=EXPERIMENT_TAG,
                                 help=f"Experiment tag to scan (default: {EXPERIMENT_TAG})")
+    summary_parser.add_argument("--level", type=str, default=None, action="append",
+                                choices=level_choices,
+                                help="Restrict to these levels (repeatable; default: all)")
 
     run_parser = sub.add_parser("run", help="Execute all incomplete runs")
     run_parser.add_argument("--device", type=str, default=None, help="Device override (e.g. cuda:0)")
@@ -885,7 +987,10 @@ def main() -> None:
                             help="Run only tasks whose dataset field matches (repeatable; default: all datasets)")
     run_parser.add_argument("--task", type=str, default=None,
                             action="append",
-                            help="Run only these task stems (repeatable; default: all tasks)")
+                            help="Run only these task stems (repeatable; default: all paper tasks)")
+    run_parser.add_argument("--level", type=str, default=None, action="append",
+                            choices=level_choices,
+                            help="Restrict to these levels (repeatable; default: all)")
     run_parser.add_argument("--test-only", action="store_true",
                             help="Run inference only (no training), requires prior completed runs")
     run_parser.add_argument("--cache-only", action="store_true",
