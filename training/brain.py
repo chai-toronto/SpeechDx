@@ -480,7 +480,12 @@ class DiagnosticsBrain(sb.Brain):
                 train_stats=eval_stats,
             )
 
-            self.checkpointer.delete_checkpoints(num_to_keep=0)
+            # Replace only the previous last_train ckpt; leave val-best ckpts
+            # alone so they survive across epochs for test-time loading.
+            self.checkpointer.delete_checkpoints(
+                num_to_keep=0,
+                ckpt_predicate=lambda c: c.path.name == 'CKPT+last_train',
+            )
             self.checkpointer.save_checkpoint(name='last_train')
 
 
@@ -517,7 +522,16 @@ class DiagnosticsBrain(sb.Brain):
                 if isinstance(v, float) and v != v:
                     continue
                 ckpt_meta[k] = v
-            self.checkpointer.save_and_keep_only(meta=ckpt_meta, max_keys=max_keys, min_keys=min_keys)
+            # Keep best-by-loss val ckpt for test loading; protect last_train
+            # (which has no metric meta and would otherwise be pruned by the
+            # default keep_recent=True path).
+            self.checkpointer.save_and_keep_only(
+                meta=ckpt_meta,
+                max_keys=max_keys,
+                min_keys=min_keys,
+                keep_recent=False,
+                ckpt_predicate=lambda c: c.path.name != 'CKPT+last_train',
+            )
 
             if self.ray_optim:
                 eval_stats = detensor_dict(eval_stats)

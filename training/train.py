@@ -429,7 +429,8 @@ if __name__ == "__main__":
     datasets = dataio_prep(hparams)
     brain.evaluate(
         test_set=datasets["test"],
-        test_loader_kwargs=hparams["test_dataloader_options"]
+        test_loader_kwargs=hparams["test_dataloader_options"],
+        min_key="loss",
     )
 
     # Write test results to file
