@@ -400,15 +400,48 @@ def has_ci_results(output_folder: Path, task_stem: str) -> bool:
     return lo in text and hi in text
 
 
+def _build_stub_encoder_params(encoder_yaml_path: Path) -> str:
+    """Inline encoder_params block that swaps the heavy encoder for StubEncoder.
+
+    Used for reader-only jobs whose embeddings come from cache: parsing the
+    real encoder yaml via !include would instantiate the multi-GB encoder via
+    !new: at YAML load time, even though forward() is never called.
+    """
+    text = encoder_yaml_path.read_text()
+    m = re.search(r"output_hidden_states:\s*(true|false|True|False)", text)
+    ohs = (m.group(1).lower() if m else "false")
+    fields: dict[str, str] = {}
+    for key in ("sample_rate", "feature_dim", "num_layers", "layer_dim",
+                "max_length", "min_length"):
+        m = re.search(rf"^{key}:\s*(.+?)\s*(?:#.*)?$", text, re.MULTILINE)
+        if m:
+            fields[key] = m.group(1).strip()
+    lines = ["encoder_params:"]
+    for k, v in fields.items():
+        lines.append(f"  {k}: {v}")
+    lines.append("  encoder: !new:model.stub_encoder.StubEncoder")
+    lines.append(f"    output_hidden_states: {ohs}")
+    return "\n".join(lines)
+
+
 def make_config(model_name: str, encoder_yaml: str, task_yaml: str, level_dir: str,
                 config_id: str = "",
                 warm_cache_override: bool | None = None, test_only: bool = False,
                 cache_only: bool = False) -> Path:
     text = BASE_CONFIG.read_text()
+    use_stub_encoder = (
+        warm_cache_override is False and not test_only and not cache_only
+    )
+    if use_stub_encoder:
+        encoder_params_replacement = _build_stub_encoder_params(
+            ENCODERS_DIR / encoder_yaml
+        )
+    else:
+        encoder_params_replacement = f"encoder_params: !include:encoders/{encoder_yaml}"
     subs = [
         (r"^model_name:.*$", f"model_name: {model_name}"),
         (r"^probe_name:.*$", f"probe_name: {PROBE_NAME}"),
-        (r"^encoder_params: !include:.*$", f"encoder_params: !include:encoders/{encoder_yaml}"),
+        (r"^encoder_params: !include:.*$", encoder_params_replacement),
         (r"^probe_params: !include:.*$", f"probe_params: !include:probes/{PROBE_YAML}"),
         (r"^data_params: !include:.*$", f"data_params: !include:tasks/{task_yaml}"),
     ]
