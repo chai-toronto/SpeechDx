@@ -263,7 +263,7 @@ class DiagnosticsBrain(sb.Brain):
         else:
             task_cfg = {
                 "L": {"task": "multilabel", "num_labels": num_classes, "average": "macro"},
-                "C": {"task": "multiclass", "num_classes": num_classes, "average": "weighted"},
+                "C": {"task": "multiclass", "num_classes": num_classes, "average": "macro"},
                 "B": {"task": "binary"},
             }
             cfg = task_cfg[task_type]
