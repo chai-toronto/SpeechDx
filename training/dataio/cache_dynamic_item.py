@@ -52,6 +52,13 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
         open_kwargs = {"locking": False} if self.file_mode == "r" else {}
         self.hdf5file = h5py.File(self.cache_location, self.file_mode, **open_kwargs)
 
+    def __deepcopy__(self, memo):
+        # FilteredSortedDynamicItemDataset deepcopies the pipeline; we want the
+        # cache shared, not duplicated. Otherwise __getstate__ closes our handle
+        # and subsequent uncached_ids() silently returns False for every key,
+        # making warm_cache iterate every uid for every version slot.
+        return self
+
     def _version_key(self, uid, version):
         """Return the HDF5 key for a specific version of uid."""
         return f"{uid}/v{version}"
