@@ -5,8 +5,8 @@ sample_rate: 16000
 feature_dim: 1024   # 768 for base, 1024 for large
 num_layers: 24   # 12 for base, 24 for large
 layer_dim: 1
-max_length: 10e5
-min_length: 3
+max_length: 300 # to prevent OOM
+min_length: 1
 
 encoder: !new:model.wavlm.WavLM
   ssl_encoder_source: "microsoft/wavlm-large"

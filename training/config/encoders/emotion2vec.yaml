@@ -16,8 +16,8 @@ sample_rate: 16000
 feature_dim: 1024  # 768 for base/plus_base/plus_seed, 1024 for plus_large
 num_layers: 1  # FunASR API only exposes final output
 layer_dim: 1
-max_length: 10e5
-min_length: 3
+max_length: 250 # to prevent OOM
+min_length: 1
 
 encoder: !new:model.emotion2vec.Emotion2Vec
   ssl_encoder_source: "iic/emotion2vec_plus_large"

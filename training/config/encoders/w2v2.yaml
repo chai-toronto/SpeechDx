@@ -6,7 +6,7 @@ feature_dim: 1024
 num_layers: 24
 layer_dim: 1
 max_length: 10e5
-min_length: 3
+min_length: 1
 
 encoder: !new:model.w2v2.Wav2Vec2
   ssl_encoder_source: "facebook/wav2vec2-large-960h-lv60-self"

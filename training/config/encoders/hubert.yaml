@@ -6,7 +6,7 @@ feature_dim: 1024  # 1024 for large, 768 for base
 num_layers: 24     # 24 for large, 12 for base
 layer_dim: 1
 max_length: 10e5
-min_length: 3
+min_length: 1
 
 encoder: !new:model.hubert.HuBERT
   ssl_encoder_source: "facebook/hubert-large-ls960-ft"

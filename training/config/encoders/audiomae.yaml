@@ -7,7 +7,7 @@ feature_dim: 768
 num_layers: 12
 layer_dim: 1
 max_length: 10
-min_length: 3
+min_length: 10
 
 encoder: !new:model.audiomae.AudioMAE
   ssl_encoder_source: "hance-ai/audiomae"

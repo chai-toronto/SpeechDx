@@ -2,7 +2,7 @@ sample_rate: 24000
 feature_dim: 512
 num_layers: 8
 layer_dim: 1
-max_length: 1000
+max_length: 10e5
 min_length: 1
 
 encoder: !new:model.qwen3_voice.Qwen3Voice

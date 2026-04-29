@@ -7,7 +7,7 @@ feature_dim: 1280  # 384 tiny, 512 base, 768 small, 1024 medium, 1280 large
 num_layers: 32     # 4 tiny, 6 base, 12 small, 24 medium, 32 large
 layer_dim: 1
 max_length: 30
-min_length: 3
+min_length: 30
 
 encoder: !new:model.whisper.Whisper
   ssl_encoder_source: "openai/whisper-large-v3"
