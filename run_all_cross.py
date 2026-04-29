@@ -13,25 +13,105 @@ import threading
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from pathlib import Path
 
 import yaml
 
 # Keep in sync with run_all.py unless intentionally different.
-ENCODERS = {
-    "emotion2vec": "emotion2vec.yaml",
-}
-
-TASK = []
-EXCLUDE_DATASETS = set()
-
-PROBE_NAME = "AvgTProbe"
-PROBE_YAML = "Probe.yaml"
-EXPERIMENT_TAG = "run1"
-
 BASE_CONFIG = Path("training/config/main_cross.yaml")
 TASKS_DIR = Path("training/config/cross_tasks")
 ENCODERS_DIR = Path("training/config/encoders")
+
+# Cross-run preset requested by user.
+TASK = [
+    "torgo_uaspeech_dysC",
+    "uaspeech_torgo_dysC",
+    "torgo_mvdr_dysC_parkC",
+    "uaspeech_mvdr_dysC_parkC",
+    "mvdr_torgo_parkC_dysC",
+    "mvdr_uaspeech_parkC_dysC",
+]
+EXCLUDE_DATASETS = set()
+EXCLUDE_ENCODERS = {"mms", "clap"}
+ENCODER_NAME_OVERRIDES = {"qwen3_voice": "qwen3voice"}
+
+
+def _default_encoders() -> dict[str, str]:
+    out: dict[str, str] = {}
+    for p in sorted(ENCODERS_DIR.glob("*.yaml")):
+        stem = p.stem
+        if stem.startswith("_") or stem in EXCLUDE_ENCODERS:
+            continue
+        model_name = ENCODER_NAME_OVERRIDES.get(stem, stem)
+        out[model_name] = p.name
+    return out
+
+
+ENCODERS = _default_encoders()
+
+PROBE_NAME = "Probe"
+PROBE_YAML = "Probe.yaml"
+EXPERIMENT_TAG = "run1"
+
+# Per-task log delegation.
+LOGS_ROOT = Path("logs/run_all_cross")
+NVME_TMPDIR = Path("/nvmepool/aina10/tmp")
+NVME_RAY_TMPDIR = Path("/nvmepool/aina10/ray_tmp")
+ROLE_W = 7
+_terminal_lock = threading.Lock()
+
+
+def _emit(*lines: str) -> None:
+    with _terminal_lock:
+        for ln in lines:
+            print(ln, flush=True)
+
+
+def _slug(s: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", s).strip("_") or "x"
+
+
+def _now() -> str:
+    return datetime.now().strftime("%H:%M:%S")
+
+
+def _tail(path: Path, n: int = 20) -> list[str]:
+    try:
+        text = path.read_text(errors="replace")
+    except FileNotFoundError:
+        return ["(log not written)"]
+    except Exception as e:
+        return [f"(log unreadable: {e})"]
+    lines = text.splitlines()
+    return lines[-n:] if lines else ["(log empty)"]
+
+
+class _Progress:
+    def __init__(self, total: int):
+        self.total = total
+        self.active = 0
+        self.done = 0
+        self.failed = 0
+        self._lock = threading.Lock()
+
+    def start(self) -> None:
+        with self._lock:
+            self.active += 1
+
+    def finish(self, ok: bool) -> None:
+        with self._lock:
+            self.active = max(0, self.active - 1)
+            if ok:
+                self.done += 1
+            else:
+                self.failed += 1
+
+    def snap(self) -> str:
+        with self._lock:
+            queued = max(0, self.total - self.active - self.done - self.failed)
+            return (f"act={self.active} queued={queued} "
+                    f"done={self.done} fail={self.failed}/{self.total}")
 
 
 def discover_all_tasks() -> list[str]:
@@ -168,11 +248,25 @@ def ensure_manifest(task_stem: str) -> None:
     print(f"Preparing manifests for {task_stem} …", flush=True)
     tr.parent.mkdir(parents=True, exist_ok=True)
 
+    def _resolve_metadata_path(ds_name: str) -> str:
+        processed_dir = Path(data_folder) / ds_name / "processed"
+        candidates = [
+            processed_dir / f"{ds_name}.csv",
+            processed_dir / "metadata.csv",
+        ]
+        for p in candidates:
+            if p.exists():
+                return str(p)
+        raise FileNotFoundError(
+            f"No metadata CSV found for dataset '{ds_name}'. Tried: "
+            + ", ".join(str(p) for p in candidates)
+        )
+
     all_kwargs = {
         "wav_folder_train": f"{data_folder}/{train_dataset}/processed/audio",
-        "metadata_path_train": f"{data_folder}/{train_dataset}/processed/{train_dataset}.csv",
+        "metadata_path_train": _resolve_metadata_path(train_dataset),
         "wav_folder_test": f"{data_folder}/{test_dataset}/processed/audio",
-        "metadata_path_test": f"{data_folder}/{test_dataset}/processed/{test_dataset}.csv",
+        "metadata_path_test": _resolve_metadata_path(test_dataset),
         "manifest_train_path": str(tr),
         "manifest_val_path": str(va),
         "manifest_test_path": str(te),
@@ -191,20 +285,32 @@ def get_train_command() -> str:
     return "python -m training.train"
 
 
-def get_results_file() -> str:
+def get_results_file(task_stem: str | None = None) -> str:
     return "test_results.txt"
 
 
-def is_complete(output_folder: Path) -> bool:
-    return (output_folder / get_results_file()).exists()
+def is_complete(output_folder: Path, task_stem: str | None = None) -> bool:
+    return (output_folder / get_results_file(task_stem)).exists()
 
 
-def has_ci_results(output_folder: Path) -> bool:
-    results_file = output_folder / get_results_file()
+def _expected_ci_keys(task_type: str) -> tuple[str, str] | None:
+    if task_type == "R":
+        return ("MAE_CI_low", "MAE_CI_high")
+    if task_type in ("B", "C", "L"):
+        return ("AUROC_CI_low", "AUROC_CI_high")
+    return None
+
+
+def has_ci_results(output_folder: Path, task_stem: str) -> bool:
+    results_file = output_folder / get_results_file(task_stem)
     if not results_file.exists():
         return False
+    expected = _expected_ci_keys(_load_task_yaml(task_stem).get("task_type", ""))
+    if expected is None:
+        return True
+    lo_key, hi_key = expected
     text = results_file.read_text()
-    return ("AUROC_CI_low" in text and "AUROC_CI_high" in text) or ("MAE_CI_low" in text and "MAE_CI_high" in text)
+    return lo_key in text and hi_key in text
 
 
 def make_config(model_name: str, encoder_yaml: str, task_yaml: str, config_id: str = "",
@@ -222,13 +328,24 @@ def make_config(model_name: str, encoder_yaml: str, task_yaml: str, config_id: s
         subs.append((r"^warm_cache:.*$", f"warm_cache: {str(warm_cache_override).lower()}"))
     for pattern, replacement in subs:
         text = re.sub(pattern, replacement, text, flags=re.MULTILINE)
-    text = re.sub(r"^skip_prep:.*$", "skip_prep: True", text, flags=re.MULTILINE)
     if cache_only:
         text = re.sub(r"^warm_cache:.*$", "warm_cache: true", text, flags=re.MULTILINE)
         text += "\ncache_only: True\n"
     elif test_only:
         text = re.sub(r"^test_only:.*$", "test_only: True", text, flags=re.MULTILINE)
         text = re.sub(r"^warm_cache:.*$", "warm_cache: false", text, flags=re.MULTILINE)
+
+    expected_snippets = [
+        f"model_name: {model_name}",
+        f"probe_name: {PROBE_NAME}",
+        f"encoder_params: !include:encoders/{encoder_yaml}",
+        f"probe_params: !include:probes/{PROBE_YAML}",
+        f"data_params: !include:cross_tasks/{task_yaml}",
+    ]
+    for snippet in expected_snippets:
+        if snippet not in text:
+            raise ValueError(f"Config generation failed; missing expected line: {snippet}")
+
     job_suffix = f"_job{os.environ['SLURM_JOB_ID']}" if os.environ.get("SLURM_JOB_ID") else ""
     config_path = Path(f"training/config/_tmp_run_cross_{model_name}{job_suffix}{config_id}.yaml")
     config_path.write_text(text)
@@ -237,7 +354,8 @@ def make_config(model_name: str, encoder_yaml: str, task_yaml: str, config_id: s
 
 def run_one(task_stem: str, model_name: str, encoder_yaml: str, device=None,
             config_id: str = "", warm_cache_override: bool | None = None,
-            test_only: bool = False, cache_only: bool = False) -> tuple[str, bool, float]:
+            test_only: bool = False, cache_only: bool = False,
+            log_path: Path | None = None) -> tuple[str, bool, float]:
     label = f"{task_stem} × {model_name}"
     task_yaml = f"{task_stem}.yaml"
     config_path = make_config(model_name, encoder_yaml, task_yaml, config_id,
@@ -247,19 +365,46 @@ def run_one(task_stem: str, model_name: str, encoder_yaml: str, device=None,
     cmd.append(str(config_path))
     if device:
         cmd.append(f"--device={device}")
-    print(f"\n{'='*60}")
-    print(f"  Running: {label}")
-    print(f"  Command: {' '.join(cmd)}")
-    print(f"{'='*60}", flush=True)
+    if log_path is None:
+        log_path = LOGS_ROOT / "_ad_hoc" / f"{_slug(task_stem)}__{_slug(model_name)}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    # Keep Python/Ray temp artifacts off /tmp (root filesystem) to avoid Errno 28.
+    NVME_TMPDIR.mkdir(parents=True, exist_ok=True)
+    NVME_RAY_TMPDIR.mkdir(parents=True, exist_ok=True)
+    env = {
+        **os.environ,
+        "PYTHONUNBUFFERED": "1",
+        "TMPDIR": str(NVME_TMPDIR),
+        "TEMP": str(NVME_TMPDIR),
+        "TMP": str(NVME_TMPDIR),
+        "RAY_TMPDIR": str(NVME_RAY_TMPDIR),
+    }
     start = time.time()
     try:
-        subprocess.run(cmd, check=True)
+        with log_path.open("w", buffering=1) as f:
+            f.write(f"{'='*60}\n")
+            f.write(f"  Running: {label}\n")
+            f.write(f"  Command: {' '.join(cmd)}\n")
+            f.write(f"  Started: {datetime.now().isoformat(timespec='seconds')}\n")
+            f.write(f"  test_only={test_only}  cache_only={cache_only}  "
+                    f"warm_cache_override={warm_cache_override}\n")
+            f.write(f"{'='*60}\n")
+            f.flush()
+            subprocess.run(cmd, check=True, stdout=f, stderr=subprocess.STDOUT, env=env)
         elapsed = time.time() - start
-        print(f"  ✓ {label} completed in {elapsed/60:.1f} min", flush=True)
+        with log_path.open("a") as f:
+            f.write(f"\n{'='*60}\n")
+            f.write(f"  ✓ {label} completed in {elapsed/60:.1f} min\n")
+            f.write(f"  Finished: {datetime.now().isoformat(timespec='seconds')}\n")
+            f.write(f"{'='*60}\n")
         return label, True, elapsed
     except subprocess.CalledProcessError as e:
         elapsed = time.time() - start
-        print(f"  ✗ {label} FAILED (exit code {e.returncode}) after {elapsed/60:.1f} min", flush=True)
+        with log_path.open("a") as f:
+            f.write(f"\n{'='*60}\n")
+            f.write(f"  ✗ {label} FAILED (exit code {e.returncode}) after {elapsed/60:.1f} min\n")
+            f.write(f"  Finished: {datetime.now().isoformat(timespec='seconds')}\n")
+            f.write(f"{'='*60}\n")
         return label, False, elapsed
     finally:
         config_path.unlink(missing_ok=True)
@@ -340,16 +485,16 @@ def cmd_status(args: argparse.Namespace) -> None:
         for model_name in encoders:
             folder = get_output_folder(dataset, task, model_name)
             if test_only:
-                if not (folder / get_results_file()).exists():
+                if not (folder / get_results_file(task_stem)).exists():
                     row.append(" ")
                     absent += 1
-                elif has_ci_results(folder):
+                elif has_ci_results(folder, task_stem):
                     row.append("☑")
                     complete += 1
                 else:
                     row.append("☐")
                     incomplete += 1
-            elif is_complete(folder):
+            elif is_complete(folder, task_stem):
                 row.append("☑")
                 complete += 1
             else:
@@ -384,12 +529,18 @@ def _needed_keys(task_stem: str) -> set[tuple[str, int]]:
 def cmd_run(args: argparse.Namespace) -> None:
     tasks = discover_tasks(args.dataset, args.task)
     skipped, completed, failed = 0, 0, []
+    failed_log_paths: dict[str, Path] = {}
     test_only = getattr(args, "test_only", False)
     cache_only = getattr(args, "cache_only", False)
+    no_writer = getattr(args, "no_writer", False)
     if args.encoder:
         encoders = {e: ENCODERS[e] for e in args.encoder}
     else:
         encoders = ENCODERS
+
+    run_stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    run_log_dir = LOGS_ROOT / run_stamp
+    run_log_dir.mkdir(parents=True, exist_ok=True)
 
     pending: list[tuple[str, str, str]] = []
     completed_by_ds_enc: dict[tuple[str, str], list[str]] = defaultdict(list)
@@ -400,16 +551,16 @@ def cmd_run(args: argparse.Namespace) -> None:
             if cache_only:
                 pass
             elif test_only:
-                if has_ci_results(folder):
-                    print(f"SKIP (CI present): {task_stem} × {model_name}")
+                if has_ci_results(folder, task_stem):
+                    _emit(f"[{_now()}] SKIP (CI present)     : {task_stem} × {model_name}")
                     skipped += 1
                     continue
                 if not (folder / "best_hparams.yaml").exists():
-                    print(f"SKIP (no trained model): {task_stem} × {model_name}")
+                    _emit(f"[{_now()}] SKIP (no trained model): {task_stem} × {model_name}")
                     skipped += 1
                     continue
-            elif is_complete(folder):
-                print(f"SKIP (done): {task_stem} × {model_name}")
+            elif is_complete(folder, task_stem):
+                _emit(f"[{_now()}] SKIP (done)            : {task_stem} × {model_name}")
                 skipped += 1
                 completed_by_ds_enc[(dataset, model_name)].append(task_stem)
                 continue
@@ -417,11 +568,21 @@ def cmd_run(args: argparse.Namespace) -> None:
 
     needed_tasks = {ts for ts, _, _ in pending}
     needed_tasks |= {ts for lst in completed_by_ds_enc.values() for ts in lst}
+    prep_failed: set[str] = set()
     for ts in sorted(needed_tasks):
         try:
             ensure_manifest(ts)
         except Exception as e:
-            print(f"⚠ prepare_data for {ts} failed: {e}", flush=True)
+            _emit(f"[{_now()}] ⚠ prepare_data for {ts} failed: {e}")
+            prep_failed.add(ts)
+
+    if prep_failed:
+        before = len(pending)
+        pending = [job for job in pending if job[0] not in prep_failed]
+        dropped = before - len(pending)
+        skipped += dropped
+        if dropped > 0:
+            _emit(f"[{_now()}] SKIP ({dropped} job(s)) due to manifest prep failure")
 
     written: dict[tuple[str, str], set[tuple[str, int]]] = defaultdict(set)
     for (ds, enc), tlist in completed_by_ds_enc.items():
@@ -431,10 +592,21 @@ def cmd_run(args: argparse.Namespace) -> None:
             except Exception:
                 pass
 
+    total_jobs = len(pending)
+    progress = _Progress(total_jobs)
     pending.sort(key=lambda j: -task_weight(j[0]))
     max_workers = max(1, args.max_workers)
-    print(f"\n{len(pending)} pending jobs")
-    print(f"Running with up to {max_workers} concurrent workers\n")
+    mode = "cache-only" if cache_only else ("test-only" if test_only else "train+test")
+    if no_writer and not (test_only or cache_only):
+        mode = "train+test (no-writer)"
+    _emit(
+        "",
+        f"[{_now()}] Run start  : {total_jobs} pending, {skipped} skipped",
+        f"           workers : up to {max_workers} concurrent",
+        f"           mode    : {mode}",
+        f"           logs    : {run_log_dir}/  (one file per job)",
+        "",
+    )
 
     ds_enc_locks: dict[tuple[str, str], threading.Lock] = {}
     for ts, mn, _ in pending:
@@ -442,14 +614,48 @@ def cmd_run(args: argparse.Namespace) -> None:
         ds_enc_locks.setdefault((ds, mn), threading.Lock())
     written_lock = threading.Lock()
 
+    def _execute(job: tuple[str, str, str], idx: int, role: str
+                 ) -> tuple[str, bool, float]:
+        task_stem, model_name, encoder_yaml = job
+        label = f"{task_stem} × {model_name}"
+        log_path = run_log_dir / f"{_slug(task_stem)}__{_slug(model_name)}.log"
+        cmd_str = (f"{get_train_command()} <tmp.yaml>"
+                   + (f" --device={args.device}" if args.device else ""))
+        warm = None if role.strip() == "writer" else False
+
+        progress.start()
+        _emit(
+            f"[{_now()}] START [{idx+1:>3}/{total_jobs}] {role:<{ROLE_W}} {label}",
+            f"           cmd : {cmd_str}",
+            f"           log : {log_path}",
+            f"           prog: {progress.snap()}",
+        )
+        result = run_one(task_stem, model_name, encoder_yaml, args.device, f"_{idx}",
+                         warm_cache_override=warm, test_only=test_only, cache_only=cache_only,
+                         log_path=log_path)
+        _, ok, elapsed = result
+        progress.finish(ok)
+        status = "✓ OK  " if ok else "✗ FAIL"
+        head = (f"[{_now()}] END   [{idx+1:>3}/{total_jobs}] {status:<{ROLE_W}} {label}    "
+                f"elapsed={elapsed/60:.1f} min   prog: {progress.snap()}")
+        if not ok:
+            tail_lines = _tail(log_path, 20)
+            extra = [f"           tail of {log_path}:"]
+            extra += [f"             | {ln}" for ln in tail_lines]
+            _emit(head, *extra)
+        else:
+            _emit(head)
+        return result
+
     def dispatch(job: tuple[str, str, str], idx: int) -> tuple[str, bool, float]:
         task_stem, model_name, encoder_yaml = job
         dataset, _ = get_task_info(task_stem)
         key = (dataset, model_name)
         label = f"{task_stem} × {model_name}"
         if test_only:
-            return run_one(task_stem, model_name, encoder_yaml, args.device,
-                           f"_{idx}", warm_cache_override=False, test_only=True)
+            return _execute(job, idx, "test")
+        if no_writer:
+            return _execute(job, idx, "reader")
         try:
             needed = _needed_keys(task_stem)
         except Exception:
@@ -460,11 +666,9 @@ def cmd_run(args: argparse.Namespace) -> None:
                 is_reader = needed.issubset(written[key])
         if is_reader:
             if cache_only:
-                print(f"SKIP (cache covered): {label}", flush=True)
+                _emit(f"[{_now()}] SKIP (cache covered)   : {label}")
                 return label, True, 0.0
-            return run_one(task_stem, model_name, encoder_yaml, args.device,
-                           f"_{idx}", warm_cache_override=False, test_only=test_only,
-                           cache_only=cache_only)
+            return _execute(job, idx, "reader")
         ds_lock = ds_enc_locks[key]
         ds_lock.acquire()
         released = False
@@ -478,14 +682,10 @@ def cmd_run(args: argparse.Namespace) -> None:
                 ds_lock.release()
                 released = True
                 if cache_only:
-                    print(f"SKIP (cache covered): {label}", flush=True)
+                    _emit(f"[{_now()}] SKIP (cache covered)   : {label}")
                     return label, True, 0.0
-                return run_one(task_stem, model_name, encoder_yaml, args.device,
-                               f"_{idx}", warm_cache_override=False, test_only=test_only,
-                               cache_only=cache_only)
-            result = run_one(task_stem, model_name, encoder_yaml, args.device,
-                             f"_{idx}", warm_cache_override=None, test_only=test_only,
-                             cache_only=cache_only)
+                return _execute(job, idx, "reader")
+            result = _execute(job, idx, "writer")
             _, success, _ = result
             if success and needed is not None:
                 with written_lock:
@@ -496,21 +696,26 @@ def cmd_run(args: argparse.Namespace) -> None:
                 ds_lock.release()
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = [pool.submit(dispatch, job, i) for i, job in enumerate(pending)]
+        futures = {pool.submit(dispatch, job, i): job for i, job in enumerate(pending)}
         for future in as_completed(futures):
+            job = futures[future]
             label, success, _ = future.result()
             if success:
                 completed += 1
             else:
                 failed.append(label)
+                ts, mn, _ = job
+                failed_log_paths[label] = run_log_dir / f"{_slug(ts)}__{_slug(mn)}.log"
 
     done_label = "cache warmed" if cache_only else "completed"
     print(f"\n{'='*60}")
     print(f"  Done — {completed} {done_label}, {skipped} skipped, {len(failed)} failed")
+    print(f"  Logs : {run_log_dir}/")
     if failed:
         print("  Failed runs:")
         for name in failed:
-            print(f"    - {name}")
+            lp = failed_log_paths.get(name)
+            print(f"    - {name}" + (f"   →  {lp}" if lp else ""))
     print(f"{'='*60}")
 
 
@@ -543,10 +748,14 @@ def main() -> None:
                             help="Run inference only (no training), requires prior completed runs")
     run_parser.add_argument("--cache-only", action="store_true",
                             help="Warm HDF5 caches via dataio_prep and exit before any training/evaluation")
+    run_parser.add_argument("--no-writer", action="store_true",
+                            help="Run every job as a reader (warm_cache=False), no per-(dataset,encoder) serialization. Assumes caches are already warmed (e.g. via a prior --cache-only pass).")
 
     args = parser.parse_args()
     if args.command == "run" and getattr(args, "cache_only", False) and getattr(args, "test_only", False):
         parser.error("--cache-only and --test-only are mutually exclusive")
+    if args.command == "run" and getattr(args, "cache_only", False) and getattr(args, "no_writer", False):
+        parser.error("--cache-only and --no-writer are mutually exclusive (cache-only IS the writer)")
     if args.command == "status":
         cmd_status(args)
     elif args.command == "run":
