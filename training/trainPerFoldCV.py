@@ -127,92 +127,92 @@ def run_fold_hp_optimization(fold_idx, hparams, hparams_file, run_opts, override
     resources_per_trial = tune_config.get("resources_per_trial", {"cpu": 1, "gpu": 0})
 
     ray.init(ignore_reinit_error=True)
-
-    trainable = tune.with_parameters(
-        train_fold_with_ray,
-        hparams_file=str(hparams_file),
-        run_opts=run_opts,
-        overrides=overrides,
-        resolved_paths=resolved_paths,
-        fold_idx=fold_idx,
-    )
-
-    reporter = CLIReporter(
-        metric_columns=["F1", "loss", "precision", "recall", "AUROC", "accuracy"],
-        max_report_frequency=30,
-    )
-
-    optuna_search = OptunaSearch(
-        metric=optim_metric,
-        mode=optim_mode,
-    )
-
-    search_alg = ConcurrencyLimiter(
-        optuna_search,
-        max_concurrent=hparams.get("max_concurrent_trials", 1),
-    )
-
-    stopper = tune.stopper.TrialPlateauStopper(
-        metric=optim_metric,
-        mode=optim_mode,
-        grace_period=hparams.get("limit_warmup", 2),
-        num_results=hparams.get("grace_period", 5),
-    )
-
-    storage_path = Path(resolved_paths["output_folder"]) / "ray_results" / f"fold_{fold_idx}"
-
-    if hparams.get("continue_exp", False):
-        print(f"Fold {fold_idx}: Continuing HP optimization from {storage_path}")
-        resume = "AUTO+RESTART_ERRORED"
-    else:
-        resume = False
-        if storage_path.exists():
-            shutil.rmtree(storage_path)
-
-    analysis = tune.run(
-        trainable,
-        config=search_space,
-        num_samples=tune_config.get("num_samples", 10),
-        resume=resume,
-        stop=stopper,
-        progress_reporter=reporter,
-        storage_path=storage_path.as_posix(),
-        name="hp_optimization",
-        search_alg=search_alg,
-        resources_per_trial=resources_per_trial,
-    )
-
-    best_trial = analysis.get_best_trial(metric=optim_metric, mode=optim_mode, scope="all")
-    best_config = analysis.get_best_config(metric=optim_metric, mode=optim_mode, scope="all")
-
-    # Get the metrics from the best-performing epoch, not just the last one.
-    # Match by trial_id because best_trial.local_path may point to a Ray
-    # session artifacts dir, while trial_dataframes is keyed by the persistent
-    # storage logdir.
-    df = None
-    for logdir, trial_df in analysis.trial_dataframes.items():
-        if best_trial.trial_id in logdir:
-            df = trial_df
-            break
-    if df is None:
-        raise KeyError(
-            f"Could not find trial dataframe for best trial {best_trial.trial_id}"
+    try:
+        trainable = tune.with_parameters(
+            train_fold_with_ray,
+            hparams_file=str(hparams_file),
+            run_opts=run_opts,
+            overrides=overrides,
+            resolved_paths=resolved_paths,
+            fold_idx=fold_idx,
         )
-    if optim_mode == "min":
-        best_row = df.loc[df[optim_metric].idxmin()]
-    else:
-        best_row = df.loc[df[optim_metric].idxmax()]
-    best_metrics = best_row.to_dict()
 
-    print(f"\nFold {fold_idx} best config: {best_config}")
-    print(f"Fold {fold_idx} best {optim_metric}: {best_metrics.get(optim_metric, 'N/A')}")
+        reporter = CLIReporter(
+            metric_columns=["F1", "loss", "precision", "recall", "AUROC", "accuracy"],
+            max_report_frequency=30,
+        )
 
-    # Save per-fold best config
-    fold_config_path = os.path.join(resolved_paths["output_folder"], f"best_hparams_fold_{fold_idx}.yaml")
-    with open(fold_config_path, "w") as f:
-        yaml.dump(best_config, f)
+        optuna_search = OptunaSearch(
+            metric=optim_metric,
+            mode=optim_mode,
+        )
 
-    ray.shutdown()
+        search_alg = ConcurrencyLimiter(
+            optuna_search,
+            max_concurrent=hparams.get("max_concurrent_trials", 1),
+        )
+
+        stopper = tune.stopper.TrialPlateauStopper(
+            metric=optim_metric,
+            mode=optim_mode,
+            grace_period=hparams.get("limit_warmup", 2),
+            num_results=hparams.get("grace_period", 5),
+        )
+
+        storage_path = Path(resolved_paths["output_folder"]) / "ray_results" / f"fold_{fold_idx}"
+
+        if hparams.get("continue_exp", False):
+            print(f"Fold {fold_idx}: Continuing HP optimization from {storage_path}")
+            resume = "AUTO+RESTART_ERRORED"
+        else:
+            resume = False
+            if storage_path.exists():
+                shutil.rmtree(storage_path)
+
+        analysis = tune.run(
+            trainable,
+            config=search_space,
+            num_samples=tune_config.get("num_samples", 10),
+            resume=resume,
+            stop=stopper,
+            progress_reporter=reporter,
+            storage_path=storage_path.as_posix(),
+            name="hp_optimization",
+            search_alg=search_alg,
+            resources_per_trial=resources_per_trial,
+        )
+
+        best_trial = analysis.get_best_trial(metric=optim_metric, mode=optim_mode, scope="all")
+        best_config = analysis.get_best_config(metric=optim_metric, mode=optim_mode, scope="all")
+
+        # Get the metrics from the best-performing epoch, not just the last one.
+        # Match by trial_id because best_trial.local_path may point to a Ray
+        # session artifacts dir, while trial_dataframes is keyed by the persistent
+        # storage logdir.
+        df = None
+        for logdir, trial_df in analysis.trial_dataframes.items():
+            if best_trial.trial_id in logdir:
+                df = trial_df
+                break
+        if df is None:
+            raise KeyError(
+                f"Could not find trial dataframe for best trial {best_trial.trial_id}"
+            )
+        if optim_mode == "min":
+            best_row = df.loc[df[optim_metric].idxmin()]
+        else:
+            best_row = df.loc[df[optim_metric].idxmax()]
+        best_metrics = best_row.to_dict()
+
+        print(f"\nFold {fold_idx} best config: {best_config}")
+        print(f"Fold {fold_idx} best {optim_metric}: {best_metrics.get(optim_metric, 'N/A')}")
+
+        # Save per-fold best config
+        fold_config_path = os.path.join(resolved_paths["output_folder"], f"best_hparams_fold_{fold_idx}.yaml")
+        with open(fold_config_path, "w") as f:
+            yaml.dump(best_config, f)
+    finally:
+        ray.shutdown()
     return best_config, best_metrics
 
 

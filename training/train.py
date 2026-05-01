@@ -298,83 +298,83 @@ if __name__ == "__main__":
         tune_config = hparams.get("ray_tune_config", {})
         resources_per_trial = tune_config.get("resources_per_trial", {"cpu": 1, "gpu": 0})
         ray.init(ignore_reinit_error=True)
+        try:
+            # Parse search space
+            search_space = parse_hp_search_space(hparams)
 
-        # Parse search space
-        search_space = parse_hp_search_space(hparams)
+            trainable = tune.with_parameters(
+                train_with_ray,
+                hparams_file=str(hparams_file),
+                run_opts=run_opts,
+                overrides=overrides,
+                resolved_paths=resolved_paths,
+            )
 
-        trainable = tune.with_parameters(
-            train_with_ray,
-            hparams_file=str(hparams_file),
-            run_opts=run_opts,
-            overrides=overrides,
-            resolved_paths=resolved_paths,
-        )
+            # Set up reporter
+            task_type = hparams.get("task_type", "B")
+            if task_type == "R":
+                metric_cols = ["loss", "MAE", "MSE", "R2", "PearsonR"]
+            else:
+                metric_cols = ["F1", "loss", "precision", "recall", "AUROC", "accuracy"]
+            reporter = CLIReporter(
+                metric_columns=metric_cols,
+                max_report_frequency=30,
+            )
 
-        # Set up reporter
-        task_type = hparams.get("task_type", "B")
-        if task_type == "R":
-            metric_cols = ["loss", "MAE", "MSE", "R2", "PearsonR"]
-        else:
-            metric_cols = ["F1", "loss", "precision", "recall", "AUROC", "accuracy"]
-        reporter = CLIReporter(
-            metric_columns=metric_cols,
-            max_report_frequency=30,
-        )
+            optuna_search = OptunaSearch(
+                metric = optim_metric,
+                mode = optim_mode,
+            )
 
-        optuna_search = OptunaSearch(
-            metric = optim_metric,
-            mode = optim_mode,
-        )
+            search_alg = ConcurrencyLimiter(
+                optuna_search,
+                max_concurrent=hparams.get("max_concurrent_trials", 1)
+            )
 
-        search_alg = ConcurrencyLimiter(
-            optuna_search,
-            max_concurrent=hparams.get("max_concurrent_trials", 1)
-        )
+            stopper = tune.stopper.TrialPlateauStopper(
+                metric=optim_metric,
+                mode=optim_mode,
+                grace_period=hparams['hpopt_params']['limit_warmup'],
+                num_results=hparams['grace_period'] # correct order, semantics from SB
+            )
 
-        stopper = tune.stopper.TrialPlateauStopper(
-            metric=optim_metric,
-            mode=optim_mode,
-            grace_period=hparams['hpopt_params']['limit_warmup'],
-            num_results=hparams['grace_period'] # correct order, semantics from SB
-        )
+            storage_path = Path(base_output_folder) / "results"
 
-        storage_path = Path(base_output_folder) / "results"
+            if hparams["continue_exp"]:
+                print(f"Continuing hyperparameter optimization from {storage_path}")
+                resume="AUTO+RESTART_ERRORED"
+            else:
+                resume=False
+                if storage_path.exists():
+                    shutil.rmtree(storage_path)
 
-        if hparams["continue_exp"]:
-            print(f"Continuing hyperparameter optimization from {storage_path}")
-            resume="AUTO+RESTART_ERRORED"
-        else:
-            resume=False
-            if storage_path.exists():
-                shutil.rmtree(storage_path)
+            # Run hyperparameter optimization
+            analysis = tune.run(
+                trainable,
+                config=search_space,
+                num_samples=tune_config.get("num_samples", 10),
+                resume=resume,
+                stop=stopper,
+                progress_reporter=reporter,
+                storage_path=storage_path.as_posix(),
+                name="hp_optimization",
+                search_alg=search_alg,
+                resources_per_trial=resources_per_trial,
+            )
 
-        # Run hyperparameter optimization
-        analysis = tune.run(
-            trainable,
-            config=search_space,
-            num_samples=tune_config.get("num_samples", 10),
-            resume=resume,
-            stop=stopper,
-            progress_reporter=reporter,
-            storage_path=storage_path.as_posix(),
-            name="hp_optimization",
-            search_alg=search_alg,
-            resources_per_trial=resources_per_trial,
-        )
+            trial_id = analysis.get_best_trial(metric=optim_metric, mode=optim_mode, scope="all").trial_id
 
-        trial_id = analysis.get_best_trial(metric=optim_metric, mode=optim_mode, scope="all").trial_id
+            # Print best hyperparameters
+            best_config = analysis.get_best_config(metric=optim_metric, mode=optim_mode, scope="all")
+            print(f"\nBest hyperparameters found: {best_config}")
+            best_config["trial_id"] = trial_id
 
-        # Print best hyperparameters
-        best_config = analysis.get_best_config(metric=optim_metric, mode=optim_mode, scope="all")
-        print(f"\nBest hyperparameters found: {best_config}")
-        best_config["trial_id"] = trial_id
-
-        # Save best config
-        best_config_path = os.path.join(base_output_folder, "best_hparams.yaml")
-        with open(best_config_path, "w") as f:
-            yaml.dump(best_config, f)
-
-        ray.shutdown()
+            # Save best config
+            best_config_path = os.path.join(base_output_folder, "best_hparams.yaml")
+            with open(best_config_path, "w") as f:
+                yaml.dump(best_config, f)
+        finally:
+            ray.shutdown()
 
     if best_config is None:
         # Try to load best config
