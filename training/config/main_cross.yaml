@@ -9,9 +9,9 @@ experiment_tag: run1
 ratio: [80, 20]
 cross_eval: true
 
-data_folder: /nvmepool/aina10/final_embeddings/embeddings_avg_final/
+data_folder: /nvmepool/aina10/
 #slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
-slurm_tmpdir: /nvmepool/aina10/final_embeddings/embeddings_avg_final/
+slurm_tmpdir: /nvmepool/aina10/
 #----------------------------------
 # Most of the knobs you should change
 data_params: !include:tasks/torgo_dysC.yaml
@@ -92,7 +92,6 @@ encoder: !ref <encoder_params[encoder]>
 model: !new:model.probe.Model
   encoder: !ref <encoder>
   probe: !ref <probe_params[probe]>
-  cache_pool: !ref <cache_pool>
 
 # modules (for nested modules)
 modules:

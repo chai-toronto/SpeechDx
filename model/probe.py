@@ -8,11 +8,10 @@ class Model(nn.Module):
     """
     A wrapper class for various probes.
     """
-    def __init__(self, probe, encoder, cache_pool=None):
+    def __init__(self, probe, encoder):
         super().__init__()
         self.probe = probe
         self.encoder = encoder
-        self.cache_pool = cache_pool
 
     def forward(self, x, lengths=None):
         """
@@ -23,16 +22,7 @@ class Model(nn.Module):
         """
 
         x = self.encoder(x, lengths=lengths)  # (B, T_max, D) or (B, L, T_max, D)
-        logits = self.probe(x, lengths)
-        # Keep probe contract stable only for mean-cache mode, where cached
-        # embeddings can carry singleton middle dimensions (e.g., Bx1xC).
-        if (
-            self.cache_pool == "mean"
-            and logits.dim() > 2
-            and all(dim == 1 for dim in logits.shape[1:-1])
-        ):
-            logits = logits.reshape(logits.shape[0], logits.shape[-1])
-        return logits
+        return self.probe(x, lengths)
 
 
 class LinearProbe(nn.Module):

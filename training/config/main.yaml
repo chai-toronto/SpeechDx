@@ -2,19 +2,19 @@ File: config/main.yaml
 random_seed: 2026
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <random_seed>]
 
-model_name: emotion2vec
+model_name: qwen3voice
 probe_name: AvgTProbe
 experiment_tag: run1
 
-ratio: [70, 10, 20]
-data_folder: /nvmepool/aina10/
+data_folder: ./data/
 #slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
-slurm_tmpdir: /nvmepool/aina10/
+slurm_tmpdir: ./embeddings_avg_final/
 #----------------------------------
 # Most of the knobs you should change
-data_params: !include:tasks/torgo_dysC.yaml
+data_params: !include:tasks/c9s_t2.yaml
+ratio: [70, 10, 20]
 
-encoder_params: !include:encoders/emotion2vec.yaml
+encoder_params: !include:encoders/qwen3_voice.yaml
 
 num_layers: !ref <encoder_params[num_layers]>
 num_labels: !ref <data_params[num_labels]>
@@ -83,7 +83,6 @@ encoder: !ref <encoder_params[encoder]>
 model: !new:model.probe.Model
   encoder: !ref <encoder>
   probe: !ref <probe_params[probe]>
-train  cache_pool: !ref <cache_pool>
 
 # modules (for nested modules)
 modules:
