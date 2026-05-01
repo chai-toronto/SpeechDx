@@ -262,7 +262,7 @@ def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
                             # T dim is always -2
                             emb = torch.cat([e.squeeze(0) for e in embs], dim=-2).cpu()
                             if cache_pool == "mean":
-                                emb = emb.mean(dim=-2, keepdim=True)
+                                emb = emb.mean(dim=-2, keepdim=False)
                     return emb
 
                 return cache_emb
@@ -589,7 +589,7 @@ def master_dataio_prep_cross(data_dict: dict[str, Any], hparams) -> dict[Any, An
                         else:
                             emb = torch.cat([e.squeeze(0) for e in embs], dim=-2).cpu()
                             if cache_pool == "mean":
-                                emb = emb.mean(dim=-2, keepdim=True)
+                                emb = emb.mean(dim=-2, keepdim=False)
                     return emb
 
                 return cache_emb
@@ -795,6 +795,44 @@ def master_dataio_prep_cross_category(data_dict: dict[str, Any], hparams) -> dic
         versions = sorted(train_versions_by_dataset[ds])
         for num_ver in versions:
             train_readers[(ds, num_ver)] = make_read_cache(train_dir, num_ver)
+
+    # Pre-flight: every (cache_uid, version) the manifest references must
+    # already exist in the per-dataset cache. Catches stale uid sets,
+    # too-low warmed num_aug_ver, and cache_mode mismatches up-front
+    # instead of mid-training when SB pulls the first sample.
+    train_uids_by_dataset = {}
+    for item in data_dict["train"].values():
+        ds = item.get("source_dataset")
+        if not ds:
+            continue
+        train_uids_by_dataset.setdefault(ds, []).append(str(item["cache_uid"]))
+    for (ds, num_ver), reader in train_readers.items():
+        uids = train_uids_by_dataset.get(ds, [])
+        for v in range(num_ver):
+            missing = reader.uncached_ids(uids, v)
+            if missing:
+                raise RuntimeError(
+                    f"Cache miss in train cache for source_dataset={ds!r} "
+                    f"v{v}: {len(missing)}/{len(uids)} uids missing "
+                    f"(first: {missing[:3]!r}). Re-warm with num_aug_ver "
+                    f">= {num_ver} via the regular run_all flow."
+                )
+    eval_uids_by_dataset = {}
+    for split in ("val", "test"):
+        for item in data_dict[split].values():
+            ds = item.get("source_dataset")
+            if not ds:
+                continue
+            eval_uids_by_dataset.setdefault(ds, []).append(str(item["cache_uid"]))
+    for ds, reader in eval_readers.items():
+        uids = eval_uids_by_dataset.get(ds, [])
+        missing = reader.uncached_ids(uids, 0)
+        if missing:
+            raise RuntimeError(
+                f"Cache miss in eval cache for source_dataset={ds!r} v0: "
+                f"{len(missing)}/{len(uids)} uids missing "
+                f"(first: {missing[:3]!r}). Re-warm via the regular run_all flow."
+            )
 
     @sb.utils.data_pipeline.takes("cache_uid", "source_dataset", "num_aug_ver")
     @sb.utils.data_pipeline.provides(*output_vars)
