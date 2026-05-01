@@ -12,8 +12,8 @@ hp_search_seed: 2026  # Seed for reproducible HP sampling (set to null for rando
 ray_tune_config:
   num_samples: 5  # Number of trial runs
   resources_per_trial:
-    cpu: 16   # CPUs per trial
-    gpu: 1
+    cpu: 2   # CPUs per trial
+    gpu: 0
 
 # Define hyperparameter search space
 # This is optional - if not provided, defaults will be used

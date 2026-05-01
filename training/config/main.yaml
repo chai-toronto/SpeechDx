@@ -8,7 +8,7 @@ experiment_tag: run1
 
 data_folder: ./data/
 #slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
-slurm_tmpdir: ./tmp/
+slurm_tmpdir: ./embeddings_avg_final/
 #----------------------------------
 # Most of the knobs you should change
 data_params: !include:tasks/c9s_t2.yaml
@@ -19,7 +19,7 @@ encoder_params: !include:encoders/qwen3_voice.yaml
 num_layers: !ref <encoder_params[num_layers]>
 num_labels: !ref <data_params[num_labels]>
 
-probe_params: !include:probes/AvgTProbe.yaml # Change encover params accordingly
+probe_params: !include:probes/Probe.yaml # Change encover params accordingly
   feature_dim: !ref <encoder_params[feature_dim]>
   num_labels: !ref <num_labels>
   num_layers: !ref <num_layers>
@@ -40,7 +40,7 @@ train_cache_dir: !ref <slurm_tmpdir>/<dataset>/<model_name>/train
 val_cache_dir: !ref <slurm_tmpdir>/<dataset>/<model_name>/val
 warm_cache: true
 # Pooling applied before saving to cache (single mode only): "none" stores T x D,
-# "mean" avg-pools over T to 1 x D and writes under a single_avg/ subdir.
+# "mean" avg-pools over T to D sized vector and writes under a single_avg/ subdir.
 cache_pool: mean
 
 # ----------------------------------
