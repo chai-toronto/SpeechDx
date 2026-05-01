@@ -31,6 +31,7 @@ from ray.tune.search.searcher import ConcurrencyLimiter
 
 from training.dataio.preprocessing import master_dataio_prep
 from training.dataio.preprocessing import master_dataio_prep_cross
+from training.dataio.preprocessing import master_dataio_prep_cross_category
 
 os.environ["RAY_CHDIR_TO_TRIAL_DIR"] = "0"
 import ray
@@ -104,7 +105,14 @@ def dataio_prep(hparams):
 
     with open(hparams['test_annotation'], "r") as f:
         test = json.load(f)
-    if hparams.get("cross_eval", False):
+    if hparams.get("cross_eval_category", False):
+        data_dict = {
+            "train": train,
+            "val": val,
+            "test": test,
+        }
+        datasets = master_dataio_prep_cross_category(data_dict, hparams)
+    elif hparams.get("cross_eval", False):
         data_dict = {
             "train": train,
             "val": val,
@@ -112,8 +120,6 @@ def dataio_prep(hparams):
             "all_train": train | val, # for cache warming
             "all_test": test, # for cache warming
         }
-
-        # datasets, cache_handles = master_dataio_prep_cross(data_dict, hparams)
         datasets = master_dataio_prep_cross(data_dict, hparams)
     else:
         data_dict = {
@@ -240,7 +246,31 @@ if __name__ == "__main__":
             sys.exit("Error: 'data_io_script' path must be defined in the YAML file.")
 
         prepare_data_fn = getattr(data_io_module, hparams["prepare_data_fn"])
-        if hparams.get("cross_eval", False):
+        if hparams.get("cross_eval_category", False):
+            print("Running category-cross evaluation data prep...")
+            category_settings = [
+                value
+                for key, value in sorted(hparams["data_params"].items())
+                if key.startswith("setting_")
+            ]
+            sb.utils.distributed.run_on_main(
+                prepare_data_fn,
+                kwargs={
+                    "manifest_train_path": hparams["train_annotation"],
+                    "manifest_val_path": hparams["val_annotation"],
+                    "manifest_test_path": hparams["test_annotation"],
+                    "ratio": hparams.get("ratio", None),
+                    "random_seed": hparams["random_seed"],
+                    "dataset": hparams["dataset"],
+                    "task": hparams["task"],
+                    "train_datasets": hparams["data_params"].get("train_datasets", []),
+                    "test_datasets": hparams["data_params"].get("test_datasets", []),
+                    "category_settings": category_settings,
+                    "dataset_audio_roots": hparams.get("dataset_audio_roots", {}),
+                    "dataset_metadata_paths": hparams.get("dataset_metadata_paths", {}),
+                },
+            )
+        elif hparams.get("cross_eval", False):
             print("Running cross-dataset evaluation data prep...")
             sb.utils.distributed.run_on_main(
                 prepare_data_fn,
@@ -298,83 +328,83 @@ if __name__ == "__main__":
         tune_config = hparams.get("ray_tune_config", {})
         resources_per_trial = tune_config.get("resources_per_trial", {"cpu": 1, "gpu": 0})
         ray.init(ignore_reinit_error=True)
-        try:
-            # Parse search space
-            search_space = parse_hp_search_space(hparams)
 
-            trainable = tune.with_parameters(
-                train_with_ray,
-                hparams_file=str(hparams_file),
-                run_opts=run_opts,
-                overrides=overrides,
-                resolved_paths=resolved_paths,
-            )
+        # Parse search space
+        search_space = parse_hp_search_space(hparams)
 
-            # Set up reporter
-            task_type = hparams.get("task_type", "B")
-            if task_type == "R":
-                metric_cols = ["loss", "MAE", "MSE", "R2", "PearsonR"]
-            else:
-                metric_cols = ["F1", "loss", "precision", "recall", "AUROC", "accuracy"]
-            reporter = CLIReporter(
-                metric_columns=metric_cols,
-                max_report_frequency=30,
-            )
+        trainable = tune.with_parameters(
+            train_with_ray,
+            hparams_file=str(hparams_file),
+            run_opts=run_opts,
+            overrides=overrides,
+            resolved_paths=resolved_paths,
+        )
 
-            optuna_search = OptunaSearch(
-                metric = optim_metric,
-                mode = optim_mode,
-            )
+        # Set up reporter
+        task_type = hparams.get("task_type", "B")
+        if task_type == "R":
+            metric_cols = ["loss", "MAE", "MSE", "R2", "PearsonR"]
+        else:
+            metric_cols = ["F1", "loss", "precision", "recall", "AUROC", "accuracy"]
+        reporter = CLIReporter(
+            metric_columns=metric_cols,
+            max_report_frequency=30,
+        )
 
-            search_alg = ConcurrencyLimiter(
-                optuna_search,
-                max_concurrent=hparams.get("max_concurrent_trials", 1)
-            )
+        optuna_search = OptunaSearch(
+            metric = optim_metric,
+            mode = optim_mode,
+        )
 
-            stopper = tune.stopper.TrialPlateauStopper(
-                metric=optim_metric,
-                mode=optim_mode,
-                grace_period=hparams['hpopt_params']['limit_warmup'],
-                num_results=hparams['grace_period'] # correct order, semantics from SB
-            )
+        search_alg = ConcurrencyLimiter(
+            optuna_search,
+            max_concurrent=hparams.get("max_concurrent_trials", 1)
+        )
 
-            storage_path = Path(base_output_folder) / "results"
+        stopper = tune.stopper.TrialPlateauStopper(
+            metric=optim_metric,
+            mode=optim_mode,
+            grace_period=hparams['hpopt_params']['limit_warmup'],
+            num_results=hparams['grace_period'] # correct order, semantics from SB
+        )
 
-            if hparams["continue_exp"]:
-                print(f"Continuing hyperparameter optimization from {storage_path}")
-                resume="AUTO+RESTART_ERRORED"
-            else:
-                resume=False
-                if storage_path.exists():
-                    shutil.rmtree(storage_path)
+        storage_path = Path(base_output_folder) / "results"
 
-            # Run hyperparameter optimization
-            analysis = tune.run(
-                trainable,
-                config=search_space,
-                num_samples=tune_config.get("num_samples", 10),
-                resume=resume,
-                stop=stopper,
-                progress_reporter=reporter,
-                storage_path=storage_path.as_posix(),
-                name="hp_optimization",
-                search_alg=search_alg,
-                resources_per_trial=resources_per_trial,
-            )
+        if hparams["continue_exp"]:
+            print(f"Continuing hyperparameter optimization from {storage_path}")
+            resume="AUTO+RESTART_ERRORED"
+        else:
+            resume=False
+            if storage_path.exists():
+                shutil.rmtree(storage_path)
 
-            trial_id = analysis.get_best_trial(metric=optim_metric, mode=optim_mode, scope="all").trial_id
+        # Run hyperparameter optimization
+        analysis = tune.run(
+            trainable,
+            config=search_space,
+            num_samples=tune_config.get("num_samples", 10),
+            resume=resume,
+            stop=stopper,
+            progress_reporter=reporter,
+            storage_path=storage_path.as_posix(),
+            name="hp_optimization",
+            search_alg=search_alg,
+            resources_per_trial=resources_per_trial,
+        )
 
-            # Print best hyperparameters
-            best_config = analysis.get_best_config(metric=optim_metric, mode=optim_mode, scope="all")
-            print(f"\nBest hyperparameters found: {best_config}")
-            best_config["trial_id"] = trial_id
+        trial_id = analysis.get_best_trial(metric=optim_metric, mode=optim_mode, scope="all").trial_id
 
-            # Save best config
-            best_config_path = os.path.join(base_output_folder, "best_hparams.yaml")
-            with open(best_config_path, "w") as f:
-                yaml.dump(best_config, f)
-        finally:
-            ray.shutdown()
+        # Print best hyperparameters
+        best_config = analysis.get_best_config(metric=optim_metric, mode=optim_mode, scope="all")
+        print(f"\nBest hyperparameters found: {best_config}")
+        best_config["trial_id"] = trial_id
+
+        # Save best config
+        best_config_path = os.path.join(base_output_folder, "best_hparams.yaml")
+        with open(best_config_path, "w") as f:
+            yaml.dump(best_config, f)
+
+        ray.shutdown()
 
     if best_config is None:
         # Try to load best config
@@ -429,8 +459,7 @@ if __name__ == "__main__":
     datasets = dataio_prep(hparams)
     brain.evaluate(
         test_set=datasets["test"],
-        test_loader_kwargs=hparams["test_dataloader_options"],
-        min_key="loss",
+        test_loader_kwargs=hparams["test_dataloader_options"]
     )
 
     # Write test results to file
@@ -438,12 +467,6 @@ if __name__ == "__main__":
     with open(results_path, "w") as f:
         for name, score in brain.test_stats.items():
             f.write(f"{name}: {score}\n")
-
-    # Drop Ray Tune storage now that test eval is on disk.
-    ray_storage = Path(base_output_folder) / "results"
-    if ray_storage.exists():
-        shutil.rmtree(ray_storage, ignore_errors=True)
-        print(f"Cleaned {ray_storage}")
 
 
 

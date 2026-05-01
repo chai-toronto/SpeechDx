@@ -19,53 +19,39 @@ from training.dataio.cache_dynamic_item import CachedHDF5DynamicItem
 
 def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
     train_dynamic_items, val_dynamic_items = [], []
-    output_keys = ["id", "path", "pid"]
+    output_keys = ["id", "path"]
 
     sample_rate = hparams.get("sample_rate", 16000)
 
     max_samples = hparams.get("max_length", 10e5) * sample_rate  # default to longest
     min_samples = hparams.get("min_length", 3) * sample_rate  # default to torgo's avg lengths
 
-    # Reader-mode jobs (cache_encoder=True, warm_cache=False) never invoke the
-    # audio chain — output_keys excludes "signal" so audio_pipeline/augment are
-    # dead. Skip building the augment objects: SpeedPerturb's per-speed Resample
-    # kernels alone can balloon to 25 GB+ for fine-grained speed grids.
-    cache_encoder = hparams["cache_encoder"]
-    warm_cache = hparams.get("warm_cache", False)
-    build_augment = warm_cache or not cache_encoder
+    noise_folder = hparams.get("noise_folder", None)
+    noise_folder = os.path.abspath(noise_folder)
 
-    noisifier = reverb = perturbator = None
-    if build_augment:
-        noise_folder = hparams.get("noise_folder", None)
-        noise_folder = os.path.abspath(noise_folder)
-        if noise_folder is None:
-            raise ValueError("Noise folder must be specified in hparams for this task.")
-        noisifier = AddNoise(os.path.join(noise_folder, 'noises.csv'),
-                             replacements={'noise_folder': os.path.join(noise_folder, 'audio')},
-                             snr_low=hparams["data_params"]["snr_low"],
-                             snr_high=hparams["data_params"]["snr_high"],
-                             noise_sample_rate=sample_rate,
-                             clean_sample_rate=sample_rate)
+    if noise_folder is None:
+        raise ValueError("Noise folder must be specified in hparams for this task.")
 
-        rir_folder = hparams.get("rir_folder", None)
-        if rir_folder is None:
-            raise ValueError("RIR folder must be specified in hparams for this task.")
-        reverb = AddReverb(os.path.join(rir_folder, 'rirs.csv'),
-                           replacements={'rir_folder': os.path.join(rir_folder, 'audio')},
-                           reverb_sample_rate=sample_rate,
-                           clean_sample_rate=sample_rate,
-                           )
+    noisifier = AddNoise(os.path.join(noise_folder, 'noises.csv'),
+                         replacements={'noise_folder': os.path.join(noise_folder, 'audio')},
+                         snr_low=hparams["data_params"]["snr_low"],
+                         snr_high=hparams["data_params"]["snr_high"],
+                         noise_sample_rate=sample_rate,
+                         clean_sample_rate=sample_rate)
 
-        perturbator = SpeedPerturb(orig_freq=sample_rate,
-                                   speeds=hparams["data_params"]["speed"])
+    rir_folder = hparams.get("rir_folder", None)
+    if rir_folder is None:
+        raise ValueError("RIR folder must be specified in hparams for this task.")
 
-    @sb.utils.data_pipeline.takes("Participant_ID")
-    @sb.utils.data_pipeline.provides("pid")
-    def get_pid(pid: str):
-        return pid
+    reverb = AddReverb(os.path.join(rir_folder, 'rirs.csv'),
+                       replacements={'rir_folder': os.path.join(rir_folder, 'audio')},
+                       reverb_sample_rate=sample_rate,
+                       clean_sample_rate=sample_rate,
+                       )
 
-    train_dynamic_items.append(get_pid)
-    val_dynamic_items.append(get_pid)
+    # 90% to 109% speed perturbation
+    perturbator = SpeedPerturb(orig_freq=sample_rate,
+                               speeds=hparams["data_params"]["speed"])
 
     # Define audio pipeline
     @sb.utils.data_pipeline.takes("path")
@@ -262,7 +248,7 @@ def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
                             # T dim is always -2
                             emb = torch.cat([e.squeeze(0) for e in embs], dim=-2).cpu()
                             if cache_pool == "mean":
-                                emb = emb.mean(dim=-2, keepdim=False)
+                                emb = emb.mean(dim=-2, keepdim=True)
                     return emb
 
                 return cache_emb
@@ -365,57 +351,41 @@ def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
 
 def master_dataio_prep_cross(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
     train_dynamic_items, val_dynamic_items, test_dynamic_items = [], [], []
-    output_keys = ["id", "path", "pid"]
+    output_keys = ["id", "path"]
 
     sample_rate = hparams.get("sample_rate", 16000)
     max_samples = hparams.get("max_length", 10e5) * sample_rate
     min_samples = hparams.get("min_length", 3) * sample_rate
 
-    # Reader-mode jobs skip the augment chain — see master_dataio_prep for why
-    # SpeedPerturb's per-speed Resample kernels can otherwise eat tens of GB.
-    cache_encoder = hparams["cache_encoder"]
-    warm_cache = hparams.get("warm_cache", False)
-    build_augment = warm_cache or not cache_encoder
+    noise_folder = hparams.get("noise_folder", None)
+    noise_folder = os.path.abspath(noise_folder)
+    if noise_folder is None:
+        raise ValueError("Noise folder must be specified in hparams for this task.")
 
-    noisifier = reverb = perturbator = None
-    if build_augment:
-        noise_folder = hparams.get("noise_folder", None)
-        noise_folder = os.path.abspath(noise_folder)
-        if noise_folder is None:
-            raise ValueError("Noise folder must be specified in hparams for this task.")
-        noisifier = AddNoise(
-            os.path.join(noise_folder, "noises.csv"),
-            replacements={"noise_folder": os.path.join(noise_folder, "audio")},
-            snr_low=hparams["data_params"]["snr_low"],
-            snr_high=hparams["data_params"]["snr_high"],
-            noise_sample_rate=sample_rate,
-            clean_sample_rate=sample_rate,
-        )
+    noisifier = AddNoise(
+        os.path.join(noise_folder, "noises.csv"),
+        replacements={"noise_folder": os.path.join(noise_folder, "audio")},
+        snr_low=hparams["data_params"]["snr_low"],
+        snr_high=hparams["data_params"]["snr_high"],
+        noise_sample_rate=sample_rate,
+        clean_sample_rate=sample_rate,
+    )
 
-        rir_folder = hparams.get("rir_folder", None)
-        if rir_folder is None:
-            raise ValueError("RIR folder must be specified in hparams for this task.")
+    rir_folder = hparams.get("rir_folder", None)
+    if rir_folder is None:
+        raise ValueError("RIR folder must be specified in hparams for this task.")
 
-        reverb = AddReverb(
-            os.path.join(rir_folder, "rirs.csv"),
-            replacements={"rir_folder": os.path.join(rir_folder, "audio")},
-            reverb_sample_rate=sample_rate,
-            clean_sample_rate=sample_rate,
-        )
+    reverb = AddReverb(
+        os.path.join(rir_folder, "rirs.csv"),
+        replacements={"rir_folder": os.path.join(rir_folder, "audio")},
+        reverb_sample_rate=sample_rate,
+        clean_sample_rate=sample_rate,
+    )
 
-        perturbator = SpeedPerturb(
-            orig_freq=sample_rate,
-            speeds=hparams["data_params"]["speed"],
-        )
-
-    @sb.utils.data_pipeline.takes("Participant_ID")
-    @sb.utils.data_pipeline.provides("pid")
-    def get_pid(pid: str):
-        return pid
-
-    train_dynamic_items.append(get_pid)
-    val_dynamic_items.append(get_pid)
-    test_dynamic_items.append(get_pid)
+    perturbator = SpeedPerturb(
+        orig_freq=sample_rate,
+        speeds=hparams["data_params"]["speed"],
+    )
 
     @sb.utils.data_pipeline.takes("path")
     @sb.utils.data_pipeline.provides("signal", "raw_duration")
@@ -694,4 +664,144 @@ def master_dataio_prep_cross(data_dict: dict[str, Any], hparams) -> dict[Any, An
         ),
     }
 
+    return datasets
+
+
+def master_dataio_prep_cross_category(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
+    """Category-cross dataio with per-dataset precomputed cache reads.
+
+    Expects each manifest item to include:
+      - id (unique manifest key)
+      - cache_uid (key used inside per-dataset cache)
+      - source_dataset
+      - num_aug_ver (train only; per-dataset augmentation versions)
+      - label
+      - path
+
+    Cache roots are read from:
+      - train_cache_dir_1 (train split root)
+      - val_cache_dir_1 (val/test split root)
+    with final layout:
+      <root>/<dataset>/<model_name>/<split>/<cache_mode>/cache.hdf5
+    """
+    output_keys = ["id", "path"]
+
+    @sb.utils.data_pipeline.takes("label")
+    @sb.utils.data_pipeline.provides("label_encoded")
+    def label_pipeline(label):
+        if isinstance(label, list):
+            label_encoded = torch.tensor(label, dtype=torch.float)
+        else:
+            label_encoded = label
+        yield label_encoded
+
+    output_keys.append("label_encoded")
+
+    speech_encoder = hparams["encoder"]
+    num_layers = hparams["num_layers"]
+    num_outputs = num_layers if speech_encoder.output_hidden_states else 1
+    output_vars = [f"emb_{i}" for i in range(num_outputs)]
+    output_keys += output_vars
+
+    cache_pool = hparams.get("cache_pool", "none")
+    if speech_encoder.output_hidden_states:
+        cache_mode = f"multi_L{num_layers}"
+    elif cache_pool == "mean":
+        cache_mode = "single_avg"
+    else:
+        cache_mode = "single"
+
+    model_name = hparams["model_name"]
+    train_root = hparams.get("train_cache_dir_1")
+    eval_root = hparams.get("val_cache_dir_1")
+    if train_root is None or eval_root is None:
+        raise ValueError(
+            "Category-cross requires train_cache_dir_1 and val_cache_dir_1 roots in hparams."
+        )
+
+    def make_read_cache(cache_dir, num_ver):
+        @CachedHDF5DynamicItem.cache(cache_dir, "r", num_ver)
+        @sb.utils.data_pipeline.takes("id")
+        @sb.utils.data_pipeline.provides(*output_vars)
+        def read_cache(id):
+            raise RuntimeError(
+                f"Cache miss for id={id!r} at {cache_dir} with num_ver={num_ver}. "
+                f"Expected v{num_ver - 1} to exist."
+            )
+
+        return read_cache
+
+    # Build train readers keyed by (dataset, num_versions) so category mixes can
+    # keep per-dataset augmentation settings while sharing the same cache roots.
+    train_versions_by_dataset = {}
+    for item in data_dict["train"].values():
+        ds = item.get("source_dataset")
+        if not ds:
+            continue
+        num_ver = int(item.get("num_aug_ver", 1))
+        train_versions_by_dataset.setdefault(ds, set()).add(max(1, num_ver))
+    if not train_versions_by_dataset:
+        raise ValueError("No source_dataset values found in category train manifest.")
+
+    eval_datasets = {
+        item.get("source_dataset")
+        for item in data_dict["val"].values()
+    } | {
+        item.get("source_dataset")
+        for item in data_dict["test"].values()
+    }
+    eval_datasets = {d for d in eval_datasets if d}
+    if not eval_datasets:
+        raise ValueError("No source_dataset values found in category val/test manifests.")
+
+    train_readers = {}
+    eval_readers = {}
+    for ds in sorted(eval_datasets):
+        eval_dir = os.path.join(eval_root, ds, model_name, "val", cache_mode)
+        eval_readers[ds] = make_read_cache(eval_dir, 1)
+
+    for ds in sorted(train_versions_by_dataset):
+        train_dir = os.path.join(train_root, ds, model_name, "train", cache_mode)
+        versions = sorted(train_versions_by_dataset[ds])
+        for num_ver in versions:
+            train_readers[(ds, num_ver)] = make_read_cache(train_dir, num_ver)
+
+    @sb.utils.data_pipeline.takes("cache_uid", "source_dataset", "num_aug_ver")
+    @sb.utils.data_pipeline.provides(*output_vars)
+    def train_emb_pipeline(cache_uid, source_dataset, num_aug_ver):
+        num_ver = max(1, int(num_aug_ver))
+        reader_key = (source_dataset, num_ver)
+        if reader_key not in train_readers:
+            raise KeyError(
+                "No train cache reader configured for "
+                f"source_dataset={source_dataset!r}, num_aug_ver={num_ver}."
+            )
+        return train_readers[reader_key](cache_uid)
+
+    @sb.utils.data_pipeline.takes("cache_uid", "source_dataset")
+    @sb.utils.data_pipeline.provides(*output_vars)
+    def eval_emb_pipeline(cache_uid, source_dataset):
+        if source_dataset not in eval_readers:
+            raise KeyError(
+                f"No eval cache reader configured for source_dataset={source_dataset!r}"
+            )
+        return eval_readers[source_dataset](cache_uid)
+
+    datasets = {
+        "train": sb.dataio.dataset.DynamicItemDataset(
+            data=data_dict["train"],
+            dynamic_items=[label_pipeline, train_emb_pipeline],
+            output_keys=output_keys,
+        ),
+        "val": sb.dataio.dataset.DynamicItemDataset(
+            data=data_dict["val"],
+            dynamic_items=[label_pipeline, eval_emb_pipeline],
+            output_keys=output_keys,
+        ),
+        "test": sb.dataio.dataset.DynamicItemDataset(
+            data=data_dict["test"],
+            dynamic_items=[label_pipeline, eval_emb_pipeline],
+            output_keys=output_keys,
+        ),
+    }
     return datasets
