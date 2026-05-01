@@ -19,39 +19,53 @@ from training.dataio.cache_dynamic_item import CachedHDF5DynamicItem
 
 def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
     train_dynamic_items, val_dynamic_items = [], []
-    output_keys = ["id", "path"]
+    output_keys = ["id", "path", "pid"]
 
     sample_rate = hparams.get("sample_rate", 16000)
 
     max_samples = hparams.get("max_length", 10e5) * sample_rate  # default to longest
     min_samples = hparams.get("min_length", 3) * sample_rate  # default to torgo's avg lengths
 
-    noise_folder = hparams.get("noise_folder", None)
-    noise_folder = os.path.abspath(noise_folder)
+    # Reader-mode jobs (cache_encoder=True, warm_cache=False) never invoke the
+    # audio chain — output_keys excludes "signal" so audio_pipeline/augment are
+    # dead. Skip building the augment objects: SpeedPerturb's per-speed Resample
+    # kernels alone can balloon to 25 GB+ for fine-grained speed grids.
+    cache_encoder = hparams["cache_encoder"]
+    warm_cache = hparams.get("warm_cache", False)
+    build_augment = warm_cache or not cache_encoder
 
-    if noise_folder is None:
-        raise ValueError("Noise folder must be specified in hparams for this task.")
+    noisifier = reverb = perturbator = None
+    if build_augment:
+        noise_folder = hparams.get("noise_folder", None)
+        noise_folder = os.path.abspath(noise_folder)
+        if noise_folder is None:
+            raise ValueError("Noise folder must be specified in hparams for this task.")
+        noisifier = AddNoise(os.path.join(noise_folder, 'noises.csv'),
+                             replacements={'noise_folder': os.path.join(noise_folder, 'audio')},
+                             snr_low=hparams["data_params"]["snr_low"],
+                             snr_high=hparams["data_params"]["snr_high"],
+                             noise_sample_rate=sample_rate,
+                             clean_sample_rate=sample_rate)
 
-    noisifier = AddNoise(os.path.join(noise_folder, 'noises.csv'),
-                         replacements={'noise_folder': os.path.join(noise_folder, 'audio')},
-                         snr_low=hparams["data_params"]["snr_low"],
-                         snr_high=hparams["data_params"]["snr_high"],
-                         noise_sample_rate=sample_rate,
-                         clean_sample_rate=sample_rate)
+        rir_folder = hparams.get("rir_folder", None)
+        if rir_folder is None:
+            raise ValueError("RIR folder must be specified in hparams for this task.")
+        reverb = AddReverb(os.path.join(rir_folder, 'rirs.csv'),
+                           replacements={'rir_folder': os.path.join(rir_folder, 'audio')},
+                           reverb_sample_rate=sample_rate,
+                           clean_sample_rate=sample_rate,
+                           )
 
-    rir_folder = hparams.get("rir_folder", None)
-    if rir_folder is None:
-        raise ValueError("RIR folder must be specified in hparams for this task.")
+        perturbator = SpeedPerturb(orig_freq=sample_rate,
+                                   speeds=hparams["data_params"]["speed"])
 
-    reverb = AddReverb(os.path.join(rir_folder, 'rirs.csv'),
-                       replacements={'rir_folder': os.path.join(rir_folder, 'audio')},
-                       reverb_sample_rate=sample_rate,
-                       clean_sample_rate=sample_rate,
-                       )
+    @sb.utils.data_pipeline.takes("Participant_ID")
+    @sb.utils.data_pipeline.provides("pid")
+    def get_pid(pid: str):
+        return pid
 
-    # 90% to 109% speed perturbation
-    perturbator = SpeedPerturb(orig_freq=sample_rate,
-                               speeds=hparams["data_params"]["speed"])
+    train_dynamic_items.append(get_pid)
+    val_dynamic_items.append(get_pid)
 
     # Define audio pipeline
     @sb.utils.data_pipeline.takes("path")
@@ -351,41 +365,57 @@ def master_dataio_prep(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
 
 def master_dataio_prep_cross(data_dict: dict[str, Any], hparams) -> dict[Any, Any]:
     train_dynamic_items, val_dynamic_items, test_dynamic_items = [], [], []
-    output_keys = ["id", "path"]
+    output_keys = ["id", "path", "pid"]
 
     sample_rate = hparams.get("sample_rate", 16000)
     max_samples = hparams.get("max_length", 10e5) * sample_rate
     min_samples = hparams.get("min_length", 3) * sample_rate
 
-    noise_folder = hparams.get("noise_folder", None)
-    noise_folder = os.path.abspath(noise_folder)
-    if noise_folder is None:
-        raise ValueError("Noise folder must be specified in hparams for this task.")
+    # Reader-mode jobs skip the augment chain — see master_dataio_prep for why
+    # SpeedPerturb's per-speed Resample kernels can otherwise eat tens of GB.
+    cache_encoder = hparams["cache_encoder"]
+    warm_cache = hparams.get("warm_cache", False)
+    build_augment = warm_cache or not cache_encoder
 
-    noisifier = AddNoise(
-        os.path.join(noise_folder, "noises.csv"),
-        replacements={"noise_folder": os.path.join(noise_folder, "audio")},
-        snr_low=hparams["data_params"]["snr_low"],
-        snr_high=hparams["data_params"]["snr_high"],
-        noise_sample_rate=sample_rate,
-        clean_sample_rate=sample_rate,
-    )
+    noisifier = reverb = perturbator = None
+    if build_augment:
+        noise_folder = hparams.get("noise_folder", None)
+        noise_folder = os.path.abspath(noise_folder)
+        if noise_folder is None:
+            raise ValueError("Noise folder must be specified in hparams for this task.")
+        noisifier = AddNoise(
+            os.path.join(noise_folder, "noises.csv"),
+            replacements={"noise_folder": os.path.join(noise_folder, "audio")},
+            snr_low=hparams["data_params"]["snr_low"],
+            snr_high=hparams["data_params"]["snr_high"],
+            noise_sample_rate=sample_rate,
+            clean_sample_rate=sample_rate,
+        )
 
-    rir_folder = hparams.get("rir_folder", None)
-    if rir_folder is None:
-        raise ValueError("RIR folder must be specified in hparams for this task.")
+        rir_folder = hparams.get("rir_folder", None)
+        if rir_folder is None:
+            raise ValueError("RIR folder must be specified in hparams for this task.")
 
-    reverb = AddReverb(
-        os.path.join(rir_folder, "rirs.csv"),
-        replacements={"rir_folder": os.path.join(rir_folder, "audio")},
-        reverb_sample_rate=sample_rate,
-        clean_sample_rate=sample_rate,
-    )
+        reverb = AddReverb(
+            os.path.join(rir_folder, "rirs.csv"),
+            replacements={"rir_folder": os.path.join(rir_folder, "audio")},
+            reverb_sample_rate=sample_rate,
+            clean_sample_rate=sample_rate,
+        )
 
-    perturbator = SpeedPerturb(
-        orig_freq=sample_rate,
-        speeds=hparams["data_params"]["speed"],
-    )
+        perturbator = SpeedPerturb(
+            orig_freq=sample_rate,
+            speeds=hparams["data_params"]["speed"],
+        )
+
+    @sb.utils.data_pipeline.takes("Participant_ID")
+    @sb.utils.data_pipeline.provides("pid")
+    def get_pid(pid: str):
+        return pid
+
+    train_dynamic_items.append(get_pid)
+    val_dynamic_items.append(get_pid)
+    test_dynamic_items.append(get_pid)
 
     @sb.utils.data_pipeline.takes("path")
     @sb.utils.data_pipeline.provides("signal", "raw_duration")
