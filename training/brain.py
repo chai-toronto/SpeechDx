@@ -419,6 +419,18 @@ class DiagnosticsBrain(sb.Brain):
             lab = lab.float()
             if lab.dim() == 1 and self.task_type in ("R", "B"):
                 lab = lab.unsqueeze(1)
+        # Some encoders/probes can emit extra singleton trailing dimensions
+        # (e.g., [B, 1, 1] instead of [B, 1]) for B/R tasks. Normalize both
+        # tensors so BCE/MSE losses receive identical shapes.
+        if self.task_type in ("R", "B") and getattr(self.hparams, "cache_pool", None) == "mean":
+            while predictions.dim() > 2 and predictions.shape[-1] == 1:
+                predictions = predictions.squeeze(-1)
+            while lab.dim() > 2 and lab.shape[-1] == 1:
+                lab = lab.squeeze(-1)
+            if predictions.dim() == 1:
+                predictions = predictions.unsqueeze(1)
+            if lab.dim() == 1:
+                lab = lab.unsqueeze(1)
 
         # Class weighting is a training-time gradient-shaping trick: val/test
         # should report the unweighted loss so early stopping / HP selection
