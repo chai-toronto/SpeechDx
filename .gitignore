@@ -1,1 +1,36 @@
 /data_extra/
+
+# OS / editor
+.DS_Store
+.idea/
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+.python-version
+
+# Local launchd / sync helpers (machine-specific paths)
+script/com.lkieu.sync-embeddings.plist
+script/sync_embeddings_to_drive.sh
+
+# Output / runtime artifacts
+logs/
+tmp/
+exps/
+exps_*/
+cross_cat_exps/
+data_eff_exps/
+data_eff_exps_old/
+embeddings_avg_*/
+embeddings_avg_*.tar.zst
+cks/
+
+# Datasets and generated metadata (large; READMEs are tracked separately)
+data/*
+!data/README.md
+!data/dbank/
+data/dbank/*
+!data/dbank/README.md
+metadata/*
+!metadata/README.md

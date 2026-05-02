@@ -1,0 +1,6 @@
+# Ray reads this like .gitignore to filter files uploaded as working_dir.
+# Strategy: exclude everything at the project root, then re-include only the
+# directories Ray workers actually need to import (training/ + model/).
+/*
+!/training/
+!/model/

@@ -8,7 +8,7 @@ experiment_tag: run1
 
 data_folder: ./data/
 #slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
-slurm_tmpdir: ./embeddings_avg_final/
+slurm_tmpdir: ./embeddings_avg_finalv2/
 #----------------------------------
 # Most of the knobs you should change
 data_params: !include:tasks/c9s_t2.yaml

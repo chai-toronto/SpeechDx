@@ -10,9 +10,9 @@ ratio: [80, 20]
 cross_eval: false
 cross_eval_category: true
 
-data_folder: /nvmepool/aina10/
+data_folder: ./data/
 #slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
-slurm_tmpdir: /nvmepool/aina10/
+slurm_tmpdir: ./embeddings_avg_finalv2/
 
 #----------------------------------
 # Most of the knobs you should change
@@ -23,7 +23,7 @@ encoder_params: !include:encoders/emotion2vec.yaml
 num_layers: !ref <encoder_params[num_layers]>
 num_labels: !ref <data_params[num_labels]>
 
-probe_params: !include:probes/AvgTProbe.yaml
+probe_params: !include:probes/Probe.yaml
   feature_dim: !ref <encoder_params[feature_dim]>
   num_labels: !ref <num_labels>
   num_layers: !ref <num_layers>
@@ -81,13 +81,13 @@ data_io_script: !ref <data_params[data_io_script]>
 prepare_data_fn: !ref <data_params[prepare_data_fn]>
 label_key: !ref <data_params[label_key]>
 
-output_folder: !ref ./exps/<dataset>_<task>/<model_name>-<probe_name>-<experiment_tag>/
+output_folder: !ref ./cross_cat_exps/<dataset>_<task>/<model_name>-<probe_name>-<experiment_tag>/
 save_folder: !ref <output_folder>/save
 train_log_dir: !ref <output_folder>/
 
-train_annotation: !ref ./exps/<dataset>_<task>/manifest/train.json
-val_annotation: !ref ./exps/<dataset>_<task>/manifest/valid.json
-test_annotation: !ref ./exps/<dataset>_<task>/manifest/test.json
+train_annotation: !ref ./cross_cat_exps/<dataset>_<task>/manifest/train.json
+val_annotation: !ref ./cross_cat_exps/<dataset>_<task>/manifest/valid.json
+test_annotation: !ref ./cross_cat_exps/<dataset>_<task>/manifest/test.json
 
 skip_prep: !ref <data_params[skip_prep]>
 
@@ -154,6 +154,12 @@ opt_class: !name:torch.optim.AdamW
 
 loss: !ref <data_params[loss]>
 
+# Auto-compute pos_weight / class weight from the training manifest at brain
+# init. Overrides any pos_weight set in the task YAML. Skipped for regression.
+auto_class_weights: true
+
+# HP Optimizer
+# Enable Ray Tune hyperparameter optimization
 continue_exp: !ref <hpopt_params[continue_exp]>
 optim_metric: !ref <hpopt_params[optim_metric]>
 optim_mode: !ref <hpopt_params[optim_mode]>
@@ -172,5 +178,5 @@ ckpt_interval_minutes: 15
 checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
   checkpoints_dir: !ref <save_folder>
   recoverables:
-    model: !ref <model>
+    probe: !ref <probe_params[probe]>
     counter: !ref <epoch_counter>

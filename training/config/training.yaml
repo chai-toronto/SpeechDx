@@ -1,4 +1,4 @@
-num_workers: 2 # 22 Change when on HPC, this is for DataLoader
+num_workers: 0 # 22 Change when on HPC, this is for DataLoader
 batch_size: 16
 persistent_workers: False
 progressbar: True

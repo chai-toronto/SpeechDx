@@ -9,9 +9,9 @@ experiment_tag: run1
 ratio: [80, 20]
 cross_eval: true
 
-data_folder: /nvmepool/aina10/
+data_folder: ./data/
 #slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
-slurm_tmpdir: /nvmepool/aina10/
+slurm_tmpdir: ./embeddings_avg_finalv2/
 #----------------------------------
 # Most of the knobs you should change
 data_params: !include:tasks/torgo_dysC.yaml
@@ -72,14 +72,14 @@ wav_folder_test: !ref <data_folder>/<test_dataset>/processed/audio
 metadata_path_test: !ref <data_folder>/<test_dataset>/processed/<test_dataset>.csv
 
 # Output folder structure
-output_folder: !ref ./exps/<dataset>_<task>/<model_name>-<probe_name>-<experiment_tag>/
+output_folder: !ref ./exps_cross/<dataset>_<task>/<model_name>-<probe_name>-<experiment_tag>/
 save_folder: !ref <output_folder>/save
 train_log_dir: !ref <output_folder>/
 
 # Manifest files created by prepare_data_fn
-train_annotation: !ref ./exps/<dataset>_<task>/manifest/train.json
-val_annotation: !ref ./exps/<dataset>_<task>/manifest/valid.json
-test_annotation: !ref ./exps/<dataset>_<task>/manifest/test.json
+train_annotation: !ref ./exps_cross/<dataset>_<task>/manifest/train.json
+val_annotation: !ref ./exps_cross/<dataset>_<task>/manifest/valid.json
+test_annotation: !ref ./exps_cross/<dataset>_<task>/manifest/test.json
 
 # Data preparation
 skip_prep: !ref <data_params[skip_prep]>

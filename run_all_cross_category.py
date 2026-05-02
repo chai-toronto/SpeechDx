@@ -9,6 +9,7 @@ import run_all_cross as cross_runner
 def configure_category_cross() -> None:
     """Pin run_all_cross to category-only tasks and config."""
     cross_runner.BASE_CONFIG = Path("training/config/main_cross_category.yaml")
+    cross_runner.EXPS_ROOT = Path("./cross_cat_exps")
     cross_runner.TASK = sorted(
         p.stem for p in cross_runner.TASKS_DIR.glob("category_*.yaml")
     )

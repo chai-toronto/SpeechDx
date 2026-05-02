@@ -25,15 +25,15 @@ ENCODERS_DIR = Path("training/config/encoders")
 
 # Cross-run preset requested by user.
 TASK = [
-    "torgo_uaspeech_dysC",
-    "uaspeech_torgo_dysC",
-    "torgo_mvdr_dysC_parkC",
-    "uaspeech_mvdr_dysC_parkC",
-    "mvdr_torgo_parkC_dysC",
-    "mvdr_uaspeech_parkC_dysC",
+    # "torgo_uaspeech_dysC",
+    # "uaspeech_torgo_dysC",
+    # "torgo_mvdr_dysC_parkC",
+    # "uaspeech_mvdr_dysC_parkC",
+    # "mvdr_torgo_parkC_dysC",
+    # "mvdr_uaspeech_parkC_dysC",
 ]
 EXCLUDE_DATASETS = set()
-EXCLUDE_ENCODERS = {"mms", "clap"}
+EXCLUDE_ENCODERS = {}
 ENCODER_NAME_OVERRIDES = {"qwen3_voice": "qwen3voice"}
 
 
@@ -54,10 +54,18 @@ PROBE_NAME = "Probe"
 PROBE_YAML = "Probe.yaml"
 EXPERIMENT_TAG = "run1"
 
+# Output root for manifests + per-trial folders. Overridden by
+# run_all_cross_category.py so category-cross writes don't mingle with
+# regular cross-task outputs.
+EXPS_ROOT = Path("./exps_cross")
+
 # Per-task log delegation.
 LOGS_ROOT = Path("logs/run_all_cross")
-NVME_TMPDIR = Path("/nvmepool/aina10/tmp")
-NVME_RAY_TMPDIR = Path("/nvmepool/aina10/ray_tmp")
+# Ray plasma_store socket path is AF_UNIX-bound to ~103 bytes; Ray appends
+# ~/ray/session_<ts>/sockets/plasma_store (~67 chars), so the base must be
+# short. Keep both under /tmp so we never blow the socket limit.
+NVME_TMPDIR = Path(os.environ.get("AHB_TMPDIR", "/tmp/ahb_tmp"))
+NVME_RAY_TMPDIR = Path(os.environ.get("AHB_RAY_TMPDIR", "/tmp/ahb_ray"))
 ROLE_W = 7
 _terminal_lock = threading.Lock()
 
@@ -135,7 +143,13 @@ def discover_tasks(datasets: list[str] | None = None,
     if TASK:
         stems = TASK
     else:
-        stems = sorted(p.stem for p in TASKS_DIR.glob("*.yaml"))
+        # Auto-detect regular cross-task yamls. Skip category_* — those
+        # belong to run_all_cross_category.py and have a different schema
+        # (plural train_datasets / test_datasets, setting_N entries).
+        stems = sorted(
+            p.stem for p in TASKS_DIR.glob("*.yaml")
+            if not p.stem.startswith("category_")
+        )
     allowed_ds = set(datasets) if datasets else None
     allowed_tasks = set(tasks) if tasks else None
     out = []
@@ -161,7 +175,7 @@ def get_task_info(task_stem: str) -> tuple[str, str]:
 
 
 def get_output_folder(dataset: str, task: str, model_name: str, tag: str = EXPERIMENT_TAG) -> Path:
-    return Path(f"./exps/{dataset}_{task}/{model_name}-{PROBE_NAME}-{tag}")
+    return EXPS_ROOT / f"{dataset}_{task}" / f"{model_name}-{PROBE_NAME}-{tag}"
 
 
 _task_yaml_cache: dict[str, dict] = {}
@@ -204,7 +218,7 @@ def _load_task_yaml(task_stem: str) -> dict:
 
 def manifest_paths(task_stem: str) -> tuple[Path, Path, Path]:
     dataset, task = get_task_info(task_stem)
-    base = Path(f"./exps/{dataset}_{task}/manifest")
+    base = EXPS_ROOT / f"{dataset}_{task}" / "manifest"
     return base / "train.json", base / "valid.json", base / "test.json"
 
 
@@ -239,8 +253,6 @@ def ensure_manifest(task_stem: str) -> None:
     mcfg = _load_main_yaml()
     dataset = tcfg["dataset"]
     task = tcfg["task"]
-    train_dataset = tcfg["train_dataset"]
-    test_dataset = tcfg["test_dataset"]
     data_folder = mcfg.get("data_folder", "./data/")
 
     module = importlib.import_module(tcfg["data_io_script"])
@@ -262,19 +274,57 @@ def ensure_manifest(task_stem: str) -> None:
             + ", ".join(str(p) for p in candidates)
         )
 
-    all_kwargs = {
-        "wav_folder_train": f"{data_folder}/{train_dataset}/processed/audio",
-        "metadata_path_train": _resolve_metadata_path(train_dataset),
-        "wav_folder_test": f"{data_folder}/{test_dataset}/processed/audio",
-        "metadata_path_test": _resolve_metadata_path(test_dataset),
-        "manifest_train_path": str(tr),
-        "manifest_val_path": str(va),
-        "manifest_test_path": str(te),
-        "ratio": mcfg.get("ratio"),
-        "random_seed": mcfg.get("random_seed"),
-        "dataset": dataset,
-        "task": task,
-    }
+    if isinstance(tcfg.get("train_datasets"), list):
+        # Category-cross: task yaml lists multiple train/test datasets and
+        # setting_N entries. prepare_category() needs per-dataset path dicts
+        # plus settings sorted by numeric suffix (matches train.py).
+        train_datasets = list(tcfg["train_datasets"])
+        test_datasets = list(tcfg.get("test_datasets", []))
+        all_ds = list(dict.fromkeys(train_datasets + test_datasets))
+        category_settings = [
+            v for _, v in sorted(
+                (
+                    (int(k.split("_", 1)[1]), v)
+                    for k, v in tcfg.items()
+                    if k.startswith("setting_")
+                ),
+                key=lambda kv: kv[0],
+            )
+        ]
+        all_kwargs = {
+            "manifest_train_path": str(tr),
+            "manifest_val_path": str(va),
+            "manifest_test_path": str(te),
+            "ratio": mcfg.get("ratio"),
+            "random_seed": mcfg.get("random_seed"),
+            "dataset": dataset,
+            "task": task,
+            "train_datasets": train_datasets,
+            "test_datasets": test_datasets,
+            "category_settings": category_settings,
+            "dataset_audio_roots": {
+                ds: f"{data_folder}/{ds}/processed/audio" for ds in all_ds
+            },
+            "dataset_metadata_paths": {
+                ds: _resolve_metadata_path(ds) for ds in all_ds
+            },
+        }
+    else:
+        train_dataset = tcfg["train_dataset"]
+        test_dataset = tcfg["test_dataset"]
+        all_kwargs = {
+            "wav_folder_train": f"{data_folder}/{train_dataset}/processed/audio",
+            "metadata_path_train": _resolve_metadata_path(train_dataset),
+            "wav_folder_test": f"{data_folder}/{test_dataset}/processed/audio",
+            "metadata_path_test": _resolve_metadata_path(test_dataset),
+            "manifest_train_path": str(tr),
+            "manifest_val_path": str(va),
+            "manifest_test_path": str(te),
+            "ratio": mcfg.get("ratio"),
+            "random_seed": mcfg.get("random_seed"),
+            "dataset": dataset,
+            "task": task,
+        }
     sig = inspect.signature(fn)
     kwargs = {k: v for k, v in all_kwargs.items() if k in sig.parameters}
     fn(**kwargs)
@@ -419,6 +469,12 @@ def run_one(task_stem: str, model_name: str, encoder_yaml: str, device=None,
     env = {
         **os.environ,
         "PYTHONUNBUFFERED": "1",
+        # Ray workers don't inherit the driver's `python -m`-injected cwd
+        # entry on sys.path, so `import training` fails on actor unpickle
+        # without an explicit PYTHONPATH.
+        "PYTHONPATH": os.pathsep.join(
+            filter(None, [os.getcwd(), os.environ.get("PYTHONPATH", "")])
+        ),
         "TMPDIR": str(NVME_TMPDIR),
         "TEMP": str(NVME_TMPDIR),
         "TMP": str(NVME_TMPDIR),
@@ -773,8 +829,9 @@ def main() -> None:
                                help="Report CI-presence status instead of completion status")
 
     summary_parser = sub.add_parser("summary", help="Collect results into per-metric CSVs")
-    summary_parser.add_argument("--out-dir", type=str, default="exps/_summary_cross",
-                                help="Directory to write metric CSVs (default: exps/_summary_cross)")
+    summary_default = str(EXPS_ROOT / "_summary_cross")
+    summary_parser.add_argument("--out-dir", type=str, default=summary_default,
+                                help=f"Directory to write metric CSVs (default: {summary_default})")
     summary_parser.add_argument("--tag", type=str, default=EXPERIMENT_TAG,
                                 help=f"Experiment tag to scan (default: {EXPERIMENT_TAG})")
 

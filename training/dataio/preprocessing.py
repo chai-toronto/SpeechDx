@@ -457,6 +457,20 @@ def master_dataio_prep_cross(data_dict: dict[str, Any], hparams) -> dict[Any, An
     val_dynamic_items.append(passthrough_duration)
     test_dynamic_items.append(passthrough_duration)
 
+    @sb.utils.data_pipeline.takes("label")
+    @sb.utils.data_pipeline.provides("label_encoded")
+    def label_pipeline(label):
+        if isinstance(label, list):
+            label_encoded = torch.tensor(label, dtype=torch.float)
+        else:
+            label_encoded = label
+        yield label_encoded
+
+    train_dynamic_items.append(label_pipeline)
+    val_dynamic_items.append(label_pipeline)
+    test_dynamic_items.append(label_pipeline)
+    output_keys.append("label_encoded")
+
     @sb.utils.data_pipeline.takes("signal", "duration")
     @sb.utils.data_pipeline.provides("signal", "duration")
     def process_signal(signal, duration):
@@ -472,20 +486,6 @@ def master_dataio_prep_cross(data_dict: dict[str, Any], hparams) -> dict[Any, An
     val_dynamic_items.append(process_signal)
     test_dynamic_items.append(process_signal)
     output_keys += ["signal"]
-
-    @sb.utils.data_pipeline.takes("label")
-    @sb.utils.data_pipeline.provides("label_encoded")
-    def label_pipeline(label):
-        if isinstance(label, list):
-            label_encoded = torch.tensor(label, dtype=torch.float)
-        else:
-            label_encoded = label
-        yield label_encoded
-
-    train_dynamic_items.append(label_pipeline)
-    val_dynamic_items.append(label_pipeline)
-    test_dynamic_items.append(label_pipeline)
-    output_keys.append("label_encoded")
 
     if hparams["cache_encoder"]:
         split_by_boundary = hparams["data_params"].get("split_by_boundary", False)

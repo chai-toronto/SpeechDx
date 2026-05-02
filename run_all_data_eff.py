@@ -35,14 +35,14 @@ ENCODERS = {
     "qwen3voice": "qwen3_voice.yaml",
     "wavlm": "wavlm.yaml",
     "ast": "ast.yaml",
-    "audiomae": "audiomae.yaml",
-    "clap": "clap.yaml",  # reserved, run later (needs -j 1 due to 48kHz memory)
-    "emotion2vec": "emotion2vec.yaml",
-    "hubert": "hubert.yaml",
-    "mms": "mms.yaml",
-    "opera_gt": "opera_gt.yaml",
-    "w2v2": "w2v2.yaml",
-    "wavjepa": "wavjepa.yaml",
+    # "audiomae": "audiomae.yaml",
+    # "clap": "clap.yaml",  # reserved, run later (needs -j 1 due to 48kHz memory)
+    # "emotion2vec": "emotion2vec.yaml",
+    # "hubert": "hubert.yaml",
+    # "mms": "mms.yaml",
+    # "opera_gt": "opera_gt.yaml",
+    # "w2v2": "w2v2.yaml",
+    # "wavjepa": "wavjepa.yaml",
     "whisper": "whisper.yaml",
 }
 
@@ -637,6 +637,37 @@ def cmd_summary(args: argparse.Namespace) -> None:
 
     grand_found, grand_missing, written_paths = 0, 0, []
 
+    # Track values across all levels (incl. "100" pulled from ./exps/) so
+    # we can emit a combined progression CSV at out_root.
+    # metric_key -> task -> encoder -> level_dir -> value
+    progression: dict[str, dict[str, dict[str, dict[str, float | str]]]] = {
+        k: defaultdict(lambda: defaultdict(dict)) for k in CSV_LAYOUT.values()
+    }
+    progression_completion: dict[str, dict[str, dict[str, int]]] = defaultdict(
+        lambda: defaultdict(dict)
+    )
+
+    def _full_output_folder(dataset: str, task: str, model: str, tag: str) -> Path:
+        return Path(f"./exps/{dataset}_{task}/{model}-{PROBE_NAME}-{tag}")
+
+    full_level = "100"
+    combined_levels = [d for d, _ in LEVELS] + [full_level]
+
+    # Gather the full-data ("100") metrics from ./exps/ regardless of which
+    # data-eff levels the user filtered to, so the progression CSV is whole.
+    for task_stem in tasks:
+        dataset, task = get_task_info(task_stem)
+        for model_name in encoders:
+            folder = _full_output_folder(dataset, task, model_name, args.tag)
+            metrics = load_metrics(folder, task_stem)
+            if metrics is not None:
+                for metric_key in CSV_LAYOUT.values():
+                    if metric_key in metrics:
+                        progression[metric_key][task_stem][model_name][full_level] = metrics[metric_key]
+            progression_completion[task_stem][model_name][full_level] = (
+                1 if is_complete(folder, task_stem) else 0
+            )
+
     for level_dir, _ in levels:
         # metric_key -> {task_stem: {encoder: value}}
         matrices: dict[str, dict[str, dict[str, float]]] = {
@@ -655,6 +686,7 @@ def cmd_summary(args: argparse.Namespace) -> None:
                 for metric_key in CSV_LAYOUT.values():
                     if metric_key in metrics:
                         matrices[metric_key][task_stem][model_name] = metrics[metric_key]
+                        progression[metric_key][task_stem][model_name][level_dir] = metrics[metric_key]
 
         grand_found += found
         grand_missing += missing
@@ -699,9 +731,80 @@ def cmd_summary(args: argparse.Namespace) -> None:
                     row.append("1" if done else "0")
                     if done:
                         totals[enc] += 1
+                    progression_completion[task_stem][enc][level_dir] = 1 if done else 0
                 writer.writerow(row)
             writer.writerow(["TOTAL", *(str(totals[e]) for e in encoders)])
         written_paths.append(comp_path)
+
+    # ── Combined progression CSVs at out_root ───────────────────────────
+    # Two-row header: row 1 has each model name in its first level slot,
+    # row 2 has the level under that slot. First column is "task".
+    def _write_progression(path: Path, value_for):
+        with path.open("w", newline="") as f:
+            writer = csv.writer(f)
+            header_models = [""]
+            header_levels = ["task"]
+            for enc in encoders:
+                for i, lvl in enumerate(combined_levels):
+                    header_models.append(enc if i == 0 else "")
+                    header_levels.append(lvl)
+            writer.writerow(header_models)
+            writer.writerow(header_levels)
+            for task_stem in task_rows:
+                row = [task_stem]
+                for enc in encoders:
+                    for lvl in combined_levels:
+                        row.append(value_for(task_stem, enc, lvl))
+                writer.writerow(row)
+
+    for csv_name, metric_key in CSV_LAYOUT.items():
+        pool = regression_tasks if metric_key in REGRESSION_METRICS else classification_tasks
+        task_rows = sorted(pool)
+        if not task_rows:
+            continue
+        data = progression[metric_key]
+
+        def _val(task_stem, enc, lvl, _data=data):
+            v = _data[task_stem].get(enc, {}).get(lvl, "")
+            if isinstance(v, float):
+                return f"{v:.4f}"
+            if isinstance(v, str):
+                return v
+            return ""
+
+        csv_path = out_root / f"{csv_name}.csv"
+        _write_progression(csv_path, _val)
+        written_paths.append(csv_path)
+
+    # Combined completion across data-eff levels + 100.
+    task_rows = list(tasks)
+    comp_path = out_root / "completion.csv"
+    with comp_path.open("w", newline="") as f:
+        writer = csv.writer(f)
+        header_models = [""]
+        header_levels = ["task"]
+        for enc in encoders:
+            for i, lvl in enumerate(combined_levels):
+                header_models.append(enc if i == 0 else "")
+                header_levels.append(lvl)
+        writer.writerow(header_models)
+        writer.writerow(header_levels)
+        totals = {(enc, lvl): 0 for enc in encoders for lvl in combined_levels}
+        for task_stem in task_rows:
+            row = [task_stem]
+            for enc in encoders:
+                for lvl in combined_levels:
+                    done = progression_completion[task_stem].get(enc, {}).get(lvl, 0)
+                    row.append("1" if done else "0")
+                    if done:
+                        totals[(enc, lvl)] += 1
+            writer.writerow(row)
+        total_row = ["TOTAL"]
+        for enc in encoders:
+            for lvl in combined_levels:
+                total_row.append(str(totals[(enc, lvl)]))
+        writer.writerow(total_row)
+    written_paths.append(comp_path)
 
     print(f"\nParsed {grand_found} result files, {grand_missing} missing")
     print(f"Wrote {len(written_paths)} CSV(s) under {out_root}/")

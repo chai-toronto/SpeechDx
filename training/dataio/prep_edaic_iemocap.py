@@ -51,6 +51,7 @@ def _iemocap_emo_bc_df(wav_folder, metadata_path):
     df["path"] = Path(wav_folder).resolve() / df["path"]
     df = df[df["label"].isin(IEMOCAP_BINARY_EMOTIONS.keys())].reset_index(drop=True)
     df["label"] = df["label"].map(IEMOCAP_BINARY_EMOTIONS).astype(int)
+    df["boundaries"] = None
     return _iemocap_stratify_cols(df)
 
 

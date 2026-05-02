@@ -57,6 +57,7 @@ def _ravdess_emo_bc_df(wav_folder, metadata_path):
     df = pd.read_csv(metadata_path)
     df["path"] = Path(wav_folder).resolve() / df["path"]
     df["label"] = df["label"].map(RAVDESS_BINARY_EMOTIONS).astype(int)
+    df["boundaries"] = None
     return _ravdess_stratify_cols(df)
 
 

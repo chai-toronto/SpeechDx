@@ -39,6 +39,11 @@ ENCODERS = {
 TASK = []
 EXCLUDE_DATASETS = {"daic_woz"}  # permanent dead task; edaic is live
 
+EXCLUDE_PAIRS: set[tuple[str, str]] = {
+    # ("c9s", "whisper"),
+    # ("edaic", "wavlm"),
+}
+
 # Tasks listed on the paper "Task Characteristics" sheet — kept in sync with
 # run_all_data_eff.PAPER_TASKS so the full benchmark and the data-efficiency
 # sweep evaluate the same task set.
@@ -728,6 +733,10 @@ def cmd_run(args: argparse.Namespace) -> None:
     for task_stem in tasks:
         dataset, task = get_task_info(task_stem)
         for model_name, encoder_yaml in encoders.items():
+            if (dataset, model_name) in EXCLUDE_PAIRS:
+                _emit(f"[{_now()}] SKIP (excluded pair)   : {task_stem} × {model_name}")
+                skipped += 1
+                continue
             folder = get_output_folder(dataset, task, model_name)
             if cache_only:
                 # cache_only produces no result files, so result-based skip
