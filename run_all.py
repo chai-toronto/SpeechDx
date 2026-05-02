@@ -18,7 +18,10 @@ from pathlib import Path
 
 import yaml
 
+from bench.encoder_params import build_stub_encoder_params as _build_stub_encoder_params
 from bench.logutil import ROLE_W, _emit, _now, _Progress, _slug, _tail, _terminal_lock
+from bench.results import expected_ci_keys as _expected_ci_keys
+from bench.yaml_io import TolerantLoader as _TolerantLoader
 from training import registry
 
 # ─── Global configuration ──────────────────────────────────────────────
@@ -102,24 +105,6 @@ def get_output_folder(dataset: str, task: str, model_name: str, tag: str = EXPER
 _task_yaml_cache: dict[str, dict] = {}
 _task_ids_cache: dict[str, frozenset[str]] = {}
 _main_yaml_cache: dict | None = None
-
-
-class _TolerantLoader(yaml.SafeLoader):
-    """SafeLoader that ignores hyperpyyaml tags (!new:, !ref, !include:, !apply:, !name:)."""
-
-
-def _ignore_unknown(loader, tag_suffix, node):
-    if isinstance(node, yaml.ScalarNode):
-        return loader.construct_scalar(node)
-    if isinstance(node, yaml.SequenceNode):
-        return loader.construct_sequence(node, deep=True)
-    if isinstance(node, yaml.MappingNode):
-        return loader.construct_mapping(node, deep=True)
-    return None
-
-
-_TolerantLoader.add_multi_constructor("!", _ignore_unknown)
-_TolerantLoader.add_multi_constructor("tag:", _ignore_unknown)
 
 
 def _load_main_yaml() -> dict:
@@ -236,15 +221,6 @@ def is_complete(output_folder: Path, task_stem: str) -> bool:
     return (output_folder / get_results_file(task_stem)).exists()
 
 
-def _expected_ci_keys(task_type: str) -> tuple[str, str] | None:
-    """CI field names brain.py emits per task_type. None = no CI produced."""
-    if task_type == "R":
-        return ("MAE_CI_low", "MAE_CI_high")
-    if task_type in ("B", "C", "L"):
-        return ("AUROC_CI_low", "AUROC_CI_high")
-    return None
-
-
 def has_ci_results(output_folder: Path, task_stem: str) -> bool:
     """test_only skip gate: True iff results already contain CI fields (so a
     re-run would add nothing). mvdr (CV yaml) synthesizes CI from cross-fold
@@ -261,33 +237,6 @@ def has_ci_results(output_folder: Path, task_stem: str) -> bool:
     lo, hi = expected
     text = results_file.read_text()
     return lo in text and hi in text
-
-
-def _build_stub_encoder_params(encoder_yaml_path: Path) -> str:
-    """Inline encoder_params block that swaps the heavy encoder for StubEncoder.
-
-    Used for reader-only jobs whose embeddings come from cache: parsing the
-    real encoder yaml via !include would instantiate the multi-GB encoder via
-    !new: at YAML load time, even though forward() is never called. This
-    builds a minimal substitute carrying only the metadata fields the rest
-    of main.yaml refs (sample_rate, feature_dim, ...) and a stub encoder
-    that satisfies the .output_hidden_states attribute reads.
-    """
-    text = encoder_yaml_path.read_text()
-    m = re.search(r"output_hidden_states:\s*(true|false|True|False)", text)
-    ohs = (m.group(1).lower() if m else "false")
-    fields: dict[str, str] = {}
-    for key in ("sample_rate", "feature_dim", "num_layers", "layer_dim",
-                "max_length", "min_length"):
-        m = re.search(rf"^{key}:\s*(.+?)\s*(?:#.*)?$", text, re.MULTILINE)
-        if m:
-            fields[key] = m.group(1).strip()
-    lines = ["encoder_params:"]
-    for k, v in fields.items():
-        lines.append(f"  {k}: {v}")
-    lines.append("  encoder: !new:model.stub_encoder.StubEncoder")
-    lines.append(f"    output_hidden_states: {ohs}")
-    return "\n".join(lines)
 
 
 def make_config(model_name: str, encoder_yaml: str, task_yaml: str, config_id: str = "",
