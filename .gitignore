@@ -10,6 +10,9 @@ __pycache__/
 *.pyc
 .python-version
 
+# Generated per-run config snapshots (cleaned up after each run)
+training/config/_tmp_run_*.yaml
+
 # Local launchd / sync helpers (machine-specific paths)
 script/com.lkieu.sync-embeddings.plist
 script/sync_embeddings_to_drive.sh
