@@ -18,6 +18,7 @@ from pathlib import Path
 
 import yaml
 
+from bench.logutil import ROLE_W, _emit, _now, _Progress, _slug, _tail, _terminal_lock
 from training import registry
 
 # Keep in sync with run_all.py unless intentionally different.
@@ -45,60 +46,6 @@ LOGS_ROOT = Path("logs/run_all_cross")
 # short. Keep both under /tmp so we never blow the socket limit.
 NVME_TMPDIR = Path(os.environ.get("AHB_TMPDIR", "/tmp/ahb_tmp"))
 NVME_RAY_TMPDIR = Path(os.environ.get("AHB_RAY_TMPDIR", "/tmp/ahb_ray"))
-ROLE_W = 7
-_terminal_lock = threading.Lock()
-
-
-def _emit(*lines: str) -> None:
-    with _terminal_lock:
-        for ln in lines:
-            print(ln, flush=True)
-
-
-def _slug(s: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._-]+", "_", s).strip("_") or "x"
-
-
-def _now() -> str:
-    return datetime.now().strftime("%H:%M:%S")
-
-
-def _tail(path: Path, n: int = 20) -> list[str]:
-    try:
-        text = path.read_text(errors="replace")
-    except FileNotFoundError:
-        return ["(log not written)"]
-    except Exception as e:
-        return [f"(log unreadable: {e})"]
-    lines = text.splitlines()
-    return lines[-n:] if lines else ["(log empty)"]
-
-
-class _Progress:
-    def __init__(self, total: int):
-        self.total = total
-        self.active = 0
-        self.done = 0
-        self.failed = 0
-        self._lock = threading.Lock()
-
-    def start(self) -> None:
-        with self._lock:
-            self.active += 1
-
-    def finish(self, ok: bool) -> None:
-        with self._lock:
-            self.active = max(0, self.active - 1)
-            if ok:
-                self.done += 1
-            else:
-                self.failed += 1
-
-    def snap(self) -> str:
-        with self._lock:
-            queued = max(0, self.total - self.active - self.done - self.failed)
-            return (f"act={self.active} queued={queued} "
-                    f"done={self.done} fail={self.failed}/{self.total}")
 
 
 def discover_all_tasks() -> list[str]:
