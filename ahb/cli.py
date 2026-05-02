@@ -25,6 +25,13 @@ def _cmd_status(args: argparse.Namespace) -> None:
     run_all.cmd_status(args)
 
 
+def _cmd_prep(args: argparse.Namespace) -> None:
+    from ahb.prep.dispatch import ensure_manifest
+
+    for task in args.task:
+        ensure_manifest(task)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ahb",
@@ -39,6 +46,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Report CI-presence status instead of completion status",
     )
 
+    prep_parser = sub.add_parser(
+        "prep",
+        help="Build manifests for one or more tasks (no-op if already present)",
+    )
+    prep_parser.add_argument(
+        "task",
+        nargs="+",
+        help="Task stem(s) — looked up in training/config/{tasks,cross_tasks}/",
+    )
+
     return parser
 
 
@@ -47,6 +64,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "status":
         _cmd_status(args)
+    elif args.command == "prep":
+        _cmd_prep(args)
     else:
         parser.error(f"unknown command: {args.command}")
     return 0
