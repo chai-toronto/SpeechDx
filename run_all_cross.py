@@ -19,7 +19,7 @@ from pathlib import Path
 import yaml
 
 from bench.encoder_params import build_stub_encoder_params as _build_stub_encoder_params
-from bench.logutil import ROLE_W, _emit, _now, _Progress, _slug, _tail, _terminal_lock
+from bench.logutil import ROLE_W, _emit, _now, _Progress, _slug, _tail
 from bench.results import expected_ci_keys as _expected_ci_keys
 from bench.yaml_io import TolerantLoader as _TolerantLoader
 from training import registry
