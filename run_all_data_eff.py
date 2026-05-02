@@ -26,28 +26,20 @@ from pathlib import Path
 
 import yaml
 
+from training import registry
 from training.dataio.subsample import subsample_and_write
 
 # ─── Global configuration ──────────────────────────────────────────────
-# Encoders: model_name -> encoder YAML filename
-# Edit this dict to change which encoders are run.
-ENCODERS = {
-    "qwen3voice": "qwen3_voice.yaml",
-    "wavlm": "wavlm.yaml",
-    "ast": "ast.yaml",
-    # "audiomae": "audiomae.yaml",
-    # "clap": "clap.yaml",  # reserved, run later (needs -j 1 due to 48kHz memory)
-    # "emotion2vec": "emotion2vec.yaml",
-    # "hubert": "hubert.yaml",
-    # "mms": "mms.yaml",
-    # "opera_gt": "opera_gt.yaml",
-    # "w2v2": "w2v2.yaml",
-    # "wavjepa": "wavjepa.yaml",
-    "whisper": "whisper.yaml",
-}
-
-TASK = []
-EXCLUDE_DATASETS = {"daic_woz"}  # permanent dead task; edaic is live
+# Task/encoder enumeration comes from training/config/registry.yaml.
+_ALL_ENCODERS = registry.encoders()
+_DEFAULT_SUBSET = registry.data_eff_default_encoders()
+ENCODERS = (
+    {n: _ALL_ENCODERS[n] for n in _DEFAULT_SUBSET if n in _ALL_ENCODERS}
+    if _DEFAULT_SUBSET is not None
+    else _ALL_ENCODERS
+)
+PAPER_TASKS = registry.paper_tasks()
+EXCLUDE_DATASETS = registry.exclude_datasets()
 
 PROBE_NAME = "AvgTProbe"
 PROBE_YAML = "Probe.yaml"
@@ -61,30 +53,8 @@ ENCODERS_DIR = Path("training/config/encoders")
 # ─── Data-efficiency configuration ─────────────────────────────────────
 EXP_ROOT_BASE = "data_eff_exps"
 # (level_dir, level_value). level_dir becomes a path component, so no '.'.
-LEVELS = [
-    ("06p25", 0.0625),
-    ("12p5",  0.125),
-    ("25",    0.25),
-    ("50",    0.50),
-]
+LEVELS = registry.data_eff_levels()
 LEVEL_VALUE = {d: v for d, v in LEVELS}
-
-# Tasks listed on the paper "Task Characteristics" sheet — the only set
-# evaluated under data-efficiency.
-PAPER_TASKS = [
-    "edaic_depC", "edaic_phqR",
-    "ravdess_emoC", "ravdess_emoBC",
-    "iemocap_emoC", "iemocap_emoBC",
-    "dbank_adC", "dbank_mmseR",
-    "aphasia_pwaC",
-    "torgo_dysC", "torgo_sevR",
-    "uaspeech_dysC",
-    "mvdr_parkC", "mvdr_updrs5R", "mvdr_updrs18R", "mvdr_hyR",
-    "ksof_intC", "ksof_stutL",
-    "c9s_t1", "c9s_L_t1", "c9s_t2", "c9s_L_t2", "c9s_sympL",
-    "coswara_sympC", "coswara_covidC", "coswara_sympL",
-    "avfad_pathC",
-]
 
 # ─── Per-task log delegation ────────────────────────────────────────────
 LOGS_ROOT = Path("logs/run_all_data_eff")

@@ -18,37 +18,16 @@ from pathlib import Path
 
 import yaml
 
+from training import registry
+
 # Keep in sync with run_all.py unless intentionally different.
 BASE_CONFIG = Path("training/config/main_cross.yaml")
 TASKS_DIR = Path("training/config/cross_tasks")
 ENCODERS_DIR = Path("training/config/encoders")
 
-# Cross-run preset requested by user.
-TASK = [
-    # "torgo_uaspeech_dysC",
-    # "uaspeech_torgo_dysC",
-    # "torgo_mvdr_dysC_parkC",
-    # "uaspeech_mvdr_dysC_parkC",
-    # "mvdr_torgo_parkC_dysC",
-    # "mvdr_uaspeech_parkC_dysC",
-]
+TASK = list(registry.cross_pairs())
 EXCLUDE_DATASETS = set()
-EXCLUDE_ENCODERS = {}
-ENCODER_NAME_OVERRIDES = {"qwen3_voice": "qwen3voice"}
-
-
-def _default_encoders() -> dict[str, str]:
-    out: dict[str, str] = {}
-    for p in sorted(ENCODERS_DIR.glob("*.yaml")):
-        stem = p.stem
-        if stem.startswith("_") or stem in EXCLUDE_ENCODERS:
-            continue
-        model_name = ENCODER_NAME_OVERRIDES.get(stem, stem)
-        out[model_name] = p.name
-    return out
-
-
-ENCODERS = _default_encoders()
+ENCODERS = registry.encoders()
 
 PROBE_NAME = "Probe"
 PROBE_YAML = "Probe.yaml"

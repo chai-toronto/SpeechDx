@@ -1,0 +1,75 @@
+# Single source of truth for orchestrator task/encoder enumeration.
+# Edit this file (and the matching YAML in encoders/ or tasks/) when adding a
+# new encoder or task — not the run_all*.py scripts.
+
+# model_name -> encoder yaml filename. The model_name is what appears in
+# experiment folder names and is what --encoder flags accept.
+encoders:
+  qwen3voice:   qwen3_voice.yaml
+  wavlm:        wavlm.yaml
+  ast:          ast.yaml
+  audiomae:     audiomae.yaml
+  clap:         clap.yaml         # 48 kHz; serialize via -j 1
+  emotion2vec:  emotion2vec.yaml
+  hubert:       hubert.yaml
+  mms:          mms.yaml
+  opera_gt:     opera_gt.yaml
+  w2v2:         w2v2.yaml
+  wavjepa:      wavjepa.yaml
+  whisper:      whisper.yaml
+
+# Tasks listed on the paper "Task Characteristics" sheet. Used by both the
+# full benchmark (run_all.py) and the data-efficiency sweep
+# (run_all_data_eff.py).
+paper_tasks:
+  - edaic_depC
+  - edaic_phqR
+  - ravdess_emoC
+  - ravdess_emoBC
+  - iemocap_emoC
+  - iemocap_emoBC
+  - dbank_adC
+  - dbank_mmseR
+  - aphasia_pwaC
+  - torgo_dysC
+  - torgo_sevR
+  - uaspeech_dysC
+  - mvdr_parkC
+  - mvdr_updrs5R
+  - mvdr_updrs18R
+  - mvdr_hyR
+  - ksof_intC
+  - ksof_stutL
+  - c9s_t1
+  - c9s_L_t1
+  - c9s_t2
+  - c9s_L_t2
+  - c9s_sympL
+  - coswara_sympC
+  - coswara_covidC
+  - coswara_sympL
+  - avfad_pathC
+
+# Sub-sample levels for run_all_data_eff.py.
+# `name` is a path component (no '.'); `fraction` is the train participant fraction.
+data_eff_levels:
+  - {name: "06p25", fraction: 0.0625}
+  - {name: "12p5",  fraction: 0.125}
+  - {name: "25",    fraction: 0.25}
+  - {name: "50",    fraction: 0.50}
+
+# Default encoders for run_all_data_eff.py when --encoder is not passed.
+# Set to null to default to all encoders. Edit when iterating on a subset.
+data_eff_default_encoders:
+  - qwen3voice
+  - wavlm
+  - ast
+  - whisper
+
+# Cross-task pairs for run_all_cross.py. Currently driven by --task flags;
+# leave empty unless pinning a default set.
+cross_pairs: []
+
+# Datasets to skip across all modes.
+exclude_datasets:
+  - daic_woz
