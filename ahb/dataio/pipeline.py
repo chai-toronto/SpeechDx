@@ -169,6 +169,12 @@ def make_split_signal(max_samples: int, min_samples: int, sample_rate: int,
         @sb.utils.data_pipeline.takes(*takes)
         @sb.utils.data_pipeline.provides("signals")
         def split_signal(signal, boundaries, raw_duration, duration):
+            # Cross tasks set split_by_boundary=true at the task level for the
+            # boundary-bearing source dataset; the partner dataset's manifest
+            # rows carry boundaries=None. Fall back to plain length-chunking
+            # for those rows so warm-cross doesn't TypeError on test uids.
+            if boundaries is None:
+                return _chunk_signal(signal, max_samples, min_samples)
             pieces = _split_by_boundaries(signal, boundaries, raw_duration, duration, sample_rate)
             signals = []
             for p in pieces:

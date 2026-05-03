@@ -164,7 +164,11 @@ def compute_auto_class_weights(task_type, labels, num_labels, cutoffs=None):
                 edges = np.unique(np.quantile(y, np.linspace(0, 1, 11)[1:-1]))
                 if edges.size == 0:
                     return None
-        bins = np.digitize(y, bins=edges)
+        # searchsorted(side="left") matches torch.bucketize's default semantics
+        # (used in compute_objectives for the per-sample weight lookup); np.digitize
+        # disagrees on labels exactly equal to a cutoff, sending them to a different
+        # bin than the one they were counted in.
+        bins = np.searchsorted(edges, y, side="left")
         n_bins = len(edges) + 1
         counts = np.bincount(bins, minlength=n_bins).astype(np.float64)
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -583,28 +587,20 @@ class DiagnosticsBrain(sb.Brain):
                     self.test_stats["AUROC_CI_low"] = auc_lo
                     self.test_stats["AUROC_CI_high"] = auc_hi
                 elif self.task_type == "C":
-                    # For multiclass, compute one-vs-rest AUC CI for each class
-                    # and report macro-average CI
+                    # Bootstrap macro-AUC on one-hot labels. Averaging per-class
+                    # DeLong CI endpoints is not a valid CI for the macro-averaged
+                    # AUC (ignores the joint distribution of per-class estimators).
                     n_classes = all_preds.shape[1]
-                    auc_los, auc_his, auc_vals = [], [], []
-                    for c in range(n_classes):
-                        y_true_c = (all_labels == c).astype(int)
-                        y_score_c = all_preds[:, c]
-                        auc_c, (lo, hi) = delong_ci(y_true_c, y_score_c)
-                        if not np.isnan(lo):
-                            auc_los.append(lo)
-                            auc_his.append(hi)
-                            auc_vals.append(auc_c)
-                    if auc_los:
-                        auc_delong_macro = np.mean(auc_vals)
-                        auc_torchmetrics = self.test_stats.get("AUROC", None)
-                        # Note: torchmetrics uses weighted avg, DeLong uses macro avg
-                        if auc_torchmetrics is not None:
-                            diff = abs(auc_delong_macro - auc_torchmetrics)
-                            print(f"[AUC CHECK] torchmetrics(weighted)={auc_torchmetrics:.6f}, DeLong(macro)={auc_delong_macro:.6f}, diff={diff:.2e}")
-                            print(f"  (Note: weighted vs macro avg may differ)")
-                        self.test_stats["AUROC_CI_low"] = np.mean(auc_los)
-                        self.test_stats["AUROC_CI_high"] = np.mean(auc_his)
+                    y_onehot = np.eye(n_classes, dtype=int)[all_labels.astype(int)]
+                    auc_macro, (auc_lo, auc_hi) = bootstrap_macro_auc_ci(
+                        y_true=y_onehot, y_score=all_preds, seed=ci_seed,
+                    )
+                    auc_torchmetrics = self.test_stats.get("AUROC", None)
+                    if auc_torchmetrics is not None and not np.isnan(auc_macro):
+                        diff = abs(auc_macro - auc_torchmetrics)
+                        print(f"[AUC CHECK] torchmetrics(macro)={auc_torchmetrics:.6f}, sklearn(macro)={auc_macro:.6f}, diff={diff:.2e}")
+                    self.test_stats["AUROC_CI_low"] = auc_lo
+                    self.test_stats["AUROC_CI_high"] = auc_hi
                 elif self.task_type == "L":
                     # Multilabel: bootstrap CI for macro-AUC. Use a cluster
                     # (subject-level) bootstrap when the test set has multiple

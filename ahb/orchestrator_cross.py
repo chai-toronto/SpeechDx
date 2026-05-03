@@ -53,16 +53,14 @@ def discover_tasks(datasets: list[str] | None = None,
     runner). Set ``include_categories=True`` to flip that — used by
     ``ahb run-cross-category``.
     """
-    seed = list(cross_pairs())
-    if seed:
-        stems = seed
-    else:
-        stems = sorted(
-            p.stem for p in TASKS_DIR.glob("*.yaml")
-            if include_categories or not p.stem.startswith("category_")
-        )
     if include_categories:
         stems = sorted(p.stem for p in TASKS_DIR.glob("category_*.yaml"))
+    else:
+        seed = [s for s in cross_pairs() if not s.startswith("category_")]
+        stems = seed if seed else sorted(
+            p.stem for p in TASKS_DIR.glob("*.yaml")
+            if not p.stem.startswith("category_")
+        )
     allowed_ds = set(datasets) if datasets else None
     allowed_tasks = set(tasks) if tasks else None
     out = []

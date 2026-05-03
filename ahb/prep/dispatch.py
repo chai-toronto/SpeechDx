@@ -198,8 +198,9 @@ def ensure_manifest(task_stem: str) -> None:
 
     tr, va, te = manifest_paths(task_stem)
     # Single-dataset CV prep produces only train+valid; everyone else also test.
+    is_cv_single = kind == "single" and tcfg.get("num_fold") is not None
     if tr.exists() and va.exists():
-        if kind == "single" or te.exists():
+        if is_cv_single or te.exists():
             return
 
     module = _resolve_module(tcfg["data_io_script"])
