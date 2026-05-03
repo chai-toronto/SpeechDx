@@ -24,7 +24,12 @@ from ray.tune.search.optuna import OptunaSearch  # noqa: E402
 from ray.tune.search.searcher import ConcurrencyLimiter  # noqa: E402
 
 from ahb.brain import DiagnosticsBrain  # noqa: E402
-from ahb.config import CONFIG_DIR, compose_yaml_text  # noqa: E402
+from ahb.config import (  # noqa: E402
+    CONFIG_DIR,
+    MAIN_CROSS,
+    MAIN_CROSS_CATEGORY,
+    compose_yaml_text,
+)
 from ahb.config_fork import fork_trial_config  # noqa: E402
 from ahb.dataio.read import (  # noqa: E402
     assert_no_encoder_imports,
@@ -102,11 +107,16 @@ def cmd_train_cross(task: str, encoder: str, *,
     if encoder_yaml is None:
         raise KeyError(f"encoder {encoder!r} not in ahb/configs/registry.yaml")
 
+    task_yaml_path = CONFIG_DIR / "cross_tasks" / f"{task}.yaml"
+    is_category = "\ntrain_datasets:" in task_yaml_path.read_text()
+    base_main_yaml = MAIN_CROSS_CATEGORY if is_category else MAIN_CROSS
     text = compose_yaml_text(
         model_name=encoder, encoder_yaml=encoder_yaml,
         task_yaml=f"{task}.yaml", probe_yaml=probe_yaml, probe_name=probe,
         experiment_tag=tag,
         warm_cache_override=False, test_only=False, cache_only=False,
+        base_main_yaml=base_main_yaml,
+        task_include_prefix="cross_tasks",
     )
     base_yaml = CONFIG_DIR / f"_tmp_run_ahb_cross_{os.getpid()}.yaml"
     base_yaml.write_text(text)
