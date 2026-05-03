@@ -16,11 +16,14 @@ from __future__ import annotations
 
 import json
 import os
+import random
 from pathlib import Path
 from typing import Any
 
+import h5py
 import speechbrain as sb
 import torch
+from speechbrain.utils.data_pipeline import DynamicItem
 
 from ahb.dataio.cache import CachedHDF5DynamicItem
 
@@ -243,6 +246,164 @@ def build_read_datasets_cross(data_dict: dict[str, dict],
                    1, "val", val_cache_dir)
         _preflight(test_reader, list(data_dict["test"].keys()),
                    1, "test", test_cache_dir)
+    except Exception:
+        train_reader.close()
+        val_reader.close()
+        test_reader.close()
+        raise
+
+    return {
+        "train": sb.dataio.dataset.DynamicItemDataset(
+            data=data_dict["train"],
+            dynamic_items=[pid, label, train_reader],
+            output_keys=output_keys,
+        ),
+        "val": sb.dataio.dataset.DynamicItemDataset(
+            data=data_dict["val"],
+            dynamic_items=[pid, label, val_reader],
+            output_keys=output_keys,
+        ),
+        "test": sb.dataio.dataset.DynamicItemDataset(
+            data=data_dict["test"],
+            dynamic_items=[pid, label, test_reader],
+            output_keys=output_keys,
+        ),
+    }
+
+
+def _make_category_cache_reader(cache_root: Path, encoder_name: str,
+                                 split: str, cache_mode: str,
+                                 num_versions: int, output_vars: list[str]) -> DynamicItem:
+    """Per-id dispatching reader for category-cross caches.
+
+    Category manifest ids are ``<dataset>_<task>::<n>`` and each contributing
+    dataset has its own HDF5 cache at
+    ``<cache_root>/<dataset>/<encoder_name>/<split>/<cache_mode>/cache.hdf5``
+    keyed by the bare ``<n>``. This reader opens one h5py.File per dataset
+    on first lookup and dispatches by id prefix.
+
+    Returned ``DynamicItem`` has extra ``close()`` and ``uncached_ids()``
+    methods so it can be used interchangeably with ``CachedHDF5DynamicItem``
+    by ``build_read_datasets_category`` and the existing ``_preflight``
+    helper.
+    """
+    handles: dict[str, h5py.File] = {}
+
+    def _cache_path(dataset: str) -> Path:
+        return (cache_root / dataset / encoder_name / split / cache_mode
+                / "cache.hdf5")
+
+    def _open(dataset: str) -> h5py.File:
+        if dataset not in handles:
+            p = _cache_path(dataset)
+            if not p.exists():
+                raise RuntimeError(
+                    f"Category cache missing: {p} (needed for {split} ids "
+                    f"prefixed {dataset}_*). Re-warm the corresponding "
+                    f"single-dataset task with `ahb warm <{dataset}-task> "
+                    f"{encoder_name}`."
+                )
+            handles[dataset] = h5py.File(p, "r", locking=False)
+        return handles[dataset]
+
+    def _split_id(uid: str) -> tuple[str, str]:
+        try:
+            prefix, bare = uid.split("::", 1)
+        except ValueError:
+            raise RuntimeError(
+                f"Category id {uid!r} missing '::' separator"
+            ) from None
+        # Contributing dataset names ('edaic', 'iemocap', ...) don't contain
+        # underscores, so the dataset is the prefix up to the first '_'.
+        dataset = prefix.split("_", 1)[0]
+        return dataset, bare
+
+    def read_cache(id):
+        dataset, bare = _split_id(id)
+        f = _open(dataset)
+        v = random.randint(0, num_versions - 1) if num_versions > 1 else 0
+        key = f"{bare}/v{v}"
+        if key not in f:
+            raise RuntimeError(
+                f"Category cache miss: id={id!r} key={key!r} in {f.filename}. "
+                f"Re-warm with `ahb warm <{dataset}-task> {encoder_name}`."
+            )
+        # Single-output (cache_pool=mean) is the only category mode today.
+        # Multi-layer would need a tuple here matching len(output_vars).
+        return torch.from_numpy(f[key][:])
+
+    item = DynamicItem(
+        takes=["id"],
+        func=read_cache,
+        provides=list(output_vars),
+    )
+
+    def close():
+        for h in handles.values():
+            h.close()
+        handles.clear()
+
+    def uncached_ids(ids, version):
+        missing: list[str] = []
+        for uid in ids:
+            try:
+                dataset, bare = _split_id(uid)
+            except RuntimeError:
+                missing.append(uid)
+                continue
+            try:
+                f = _open(dataset)
+            except RuntimeError:
+                missing.append(uid)
+                continue
+            if f"{bare}/v{version}" not in f:
+                missing.append(uid)
+        return missing
+
+    item.close = close  # type: ignore[attr-defined]
+    item.uncached_ids = uncached_ids  # type: ignore[attr-defined]
+    return item
+
+
+def build_read_datasets_category(data_dict: dict[str, dict],
+                                  hparams: dict[str, Any]) -> dict[str, sb.dataio.dataset.DynamicItemDataset]:
+    """Reader-only datasets for category-cross tasks.
+
+    Category mode shares ``train_cache_dir_1`` and ``val_cache_dir_1`` (both
+    point at the embedding cache root). Per-id dispatch picks the right
+    per-dataset cache based on the manifest id's prefix.
+
+    Train ids draw augmented embeddings from each contributing dataset's
+    ``train`` cache (N versions); val and test ids read the unaugmented
+    ``val`` cache (1 version) of their respective datasets.
+    """
+    cache_root = Path(hparams["train_cache_dir_1"])
+    encoder_name = hparams["model_name"]
+    cache_mode = _cache_mode_for(hparams)
+    num_versions = int(hparams["data_params"].get("num_aug_ver", 1))
+    output_vars = _output_vars(hparams)
+
+    train_reader = _make_category_cache_reader(
+        cache_root, encoder_name, "train", cache_mode, num_versions, output_vars,
+    )
+    val_reader = _make_category_cache_reader(
+        cache_root, encoder_name, "val", cache_mode, 1, output_vars,
+    )
+    test_reader = _make_category_cache_reader(
+        cache_root, encoder_name, "val", cache_mode, 1, output_vars,
+    )
+
+    label = _label_pipeline_dynitem()
+    pid = _pid_pipeline_dynitem()
+    output_keys = ["id", "path", "pid", "label_encoded"] + output_vars
+
+    try:
+        _preflight(train_reader, list(data_dict["train"].keys()),
+                   num_versions, "train", cache_root)
+        _preflight(val_reader, list(data_dict["val"].keys()),
+                   1, "val", cache_root)
+        _preflight(test_reader, list(data_dict["test"].keys()),
+                   1, "test", cache_root)
     except Exception:
         train_reader.close()
         val_reader.close()

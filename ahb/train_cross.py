@@ -33,6 +33,7 @@ from ahb.config import (  # noqa: E402
 from ahb.config_fork import fork_trial_config  # noqa: E402
 from ahb.dataio.read import (  # noqa: E402
     assert_no_encoder_imports,
+    build_read_datasets_category,
     build_read_datasets_cross,
     load_manifest_data_cross,
 )
@@ -73,7 +74,10 @@ def _train_one_trial_cross(config: dict, hparams_file: str, run_opts: dict,
     )
 
     data_dict = load_manifest_data_cross(hparams)
-    datasets = build_read_datasets_cross(data_dict, hparams)
+    if hparams.get("cross_eval_category"):
+        datasets = build_read_datasets_category(data_dict, hparams)
+    else:
+        datasets = build_read_datasets_cross(data_dict, hparams)
 
     checkpointer = sb.utils.checkpoints.Checkpointer(
         checkpoints_dir=hparams["save_folder"],
@@ -245,7 +249,10 @@ def cmd_train_cross(task: str, encoder: str, *,
         )
 
         data_dict = load_manifest_data_cross(hparams)
-        datasets = build_read_datasets_cross(data_dict, hparams)
+        if hparams.get("cross_eval_category"):
+            datasets = build_read_datasets_category(data_dict, hparams)
+        else:
+            datasets = build_read_datasets_cross(data_dict, hparams)
         evaluate_kwargs = {
             "test_set": datasets["test"],
             "test_loader_kwargs": hparams["test_dataloader_options"],
