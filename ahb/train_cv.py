@@ -223,6 +223,7 @@ def cmd_train_cv(task: str, encoder: str, *,
     text = compose_yaml_text(
         model_name=encoder, encoder_yaml=encoder_yaml,
         task_yaml=f"{task}.yaml", probe_yaml=probe_yaml, probe_name=probe,
+        experiment_tag=tag,
         warm_cache_override=False, test_only=False, cache_only=False,
         level_dir=level_dir,
     )

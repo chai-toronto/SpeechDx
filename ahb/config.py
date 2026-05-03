@@ -83,6 +83,7 @@ def compose_yaml_text(
     *,
     probe_yaml: str = "Probe.yaml",
     probe_name: str = "AvgTProbe",
+    experiment_tag: str | None = None,
     warm_cache_override: bool | None = None,
     test_only: bool = False,
     cache_only: bool = False,
@@ -117,6 +118,8 @@ def compose_yaml_text(
         "data_params:":    f"data_params: !include:{task_include_prefix}/{task_yaml}",
         "skip_prep:":      "skip_prep: True",
     }
+    if experiment_tag is not None:
+        line_subs["experiment_tag:"] = f"experiment_tag: {experiment_tag}"
     if warm_cache_override is not None and not cache_only:
         line_subs["warm_cache:"] = f"warm_cache: {str(warm_cache_override).lower()}"
     if cache_only:
@@ -173,6 +176,7 @@ def compose_config(
     *,
     probe: str = "AvgTProbe",
     probe_yaml: str = "Probe.yaml",
+    tag: str | None = None,
     mode: str = "read",
     overrides: dict | None = None,
     level_dir: str | None = None,
@@ -199,6 +203,7 @@ def compose_config(
         task_yaml=task_yaml,
         probe_yaml=probe_yaml,
         probe_name=probe,
+        experiment_tag=tag,
         warm_cache_override=warm_override,
         test_only=test_only,
         cache_only=cache_only,
