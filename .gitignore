@@ -12,6 +12,7 @@ __pycache__/
 
 # Generated per-run config snapshots (cleaned up after each run)
 training/config/_tmp_run_*.yaml
+ahb/configs/_tmp_run_*.yaml
 
 # Local launchd / sync helpers (machine-specific paths)
 script/com.lkieu.sync-embeddings.plist
