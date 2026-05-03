@@ -40,6 +40,26 @@ def _cmd_warm(args: argparse.Namespace) -> None:
     run_warm(args.task, args.encoder, probe=args.probe, device=args.device)
 
 
+def _cmd_train(args: argparse.Namespace) -> None:
+    from ahb.train import cmd_train
+
+    cmd_train(
+        args.task, args.encoder,
+        probe=args.probe, probe_yaml=args.probe_yaml,
+        tag=args.tag, overrides=args.overrides or "",
+    )
+
+
+def _cmd_train_cv(args: argparse.Namespace) -> None:
+    from ahb.train_cv import cmd_train_cv
+
+    cmd_train_cv(
+        args.task, args.encoder,
+        probe=args.probe, probe_yaml=args.probe_yaml,
+        tag=args.tag, overrides=args.overrides or "",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ahb",
@@ -73,6 +93,30 @@ def build_parser() -> argparse.ArgumentParser:
     warm_parser.add_argument("--probe", default="AvgTProbe", help="Probe name (default: AvgTProbe)")
     warm_parser.add_argument("--device", default=None, help="Torch device override (e.g. cuda:0)")
 
+    train_parser = sub.add_parser(
+        "train",
+        help="Train probe with Ray Tune HP search; final eval on test set",
+    )
+    train_parser.add_argument("task", help="Task stem")
+    train_parser.add_argument("encoder", help="Encoder name (model_name in registry.yaml)")
+    train_parser.add_argument("--probe", default="AvgTProbe", help="Probe name (default: AvgTProbe)")
+    train_parser.add_argument("--probe-yaml", default="Probe.yaml",
+                              help="Probe yaml filename under training/config/probes/")
+    train_parser.add_argument("--tag", default="run1", help="Experiment tag (default: run1)")
+    train_parser.add_argument("--overrides", default="",
+                              help="Extra YAML overrides forwarded to load_hyperpyyaml")
+
+    train_cv_parser = sub.add_parser(
+        "train-cv",
+        help="Per-fold CV training (mvdr_*); aggregates fold metrics into test_results.yaml",
+    )
+    train_cv_parser.add_argument("task", help="Task stem (CV tasks have num_fold set)")
+    train_cv_parser.add_argument("encoder", help="Encoder name")
+    train_cv_parser.add_argument("--probe", default="AvgTProbe")
+    train_cv_parser.add_argument("--probe-yaml", default="Probe.yaml")
+    train_cv_parser.add_argument("--tag", default="run1")
+    train_cv_parser.add_argument("--overrides", default="")
+
     return parser
 
 
@@ -85,6 +129,10 @@ def main(argv: list[str] | None = None) -> int:
         _cmd_prep(args)
     elif args.command == "warm":
         _cmd_warm(args)
+    elif args.command == "train":
+        _cmd_train(args)
+    elif args.command == "train-cv":
+        _cmd_train_cv(args)
     else:
         parser.error(f"unknown command: {args.command}")
     return 0
