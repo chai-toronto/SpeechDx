@@ -18,10 +18,10 @@ from pathlib import Path
 
 import yaml
 
-from bench.encoder_params import build_stub_encoder_params as _build_stub_encoder_params
-from bench.logutil import ROLE_W, _emit, _now, _Progress, _slug, _tail
-from bench.results import expected_ci_keys as _expected_ci_keys
-from bench.yaml_io import TolerantLoader as _TolerantLoader
+from ahb.encoder_stub import build_stub_encoder_params as _build_stub_encoder_params
+from ahb.log import ROLE_W, _emit, _now, _Progress, _slug, _tail
+from ahb.results import expected_ci_keys as _expected_ci_keys
+from ahb.yaml_io import TolerantLoader as _TolerantLoader
 from training import registry
 
 # Keep in sync with run_all.py unless intentionally different.

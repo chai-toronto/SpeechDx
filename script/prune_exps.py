@@ -19,8 +19,8 @@ import sys
 from pathlib import Path
 
 # Reuse completion-detection logic from the orchestrator so the pruner stays
-# consistent with run_all.py's own skip-gating.
-from run_all import has_ci_results
+# consistent with the harness's own skip-gating.
+from ahb.orchestrator import has_ci_results
 
 # script/extract_layer_weights.py reads model.ckpt only from
 # exps/*/*CLTP-2*/brain-logs/save/CKPT*/ — a different naming pattern that the
