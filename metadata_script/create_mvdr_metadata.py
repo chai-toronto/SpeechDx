@@ -26,20 +26,28 @@ RANDOM_SEED = 42
 
 
 def stage_audio_from_raw():
-    """Copy ReadText/{HC,PD}/*.wav from raw/ → processed/audio/."""
+    """Copy ReadText/{HC,PD}/*.wav from raw/ → processed/audio/.
+
+    The MDVR-KCL zip extracts to raw/26-29_09_2017_KCL/ReadText/{HC,PD}/...,
+    but we tolerate any depth above ReadText/ in case a user already moved
+    the contents up.
+    """
     if not RAW_ROOT.is_dir():
         return
-    matches = list(RAW_ROOT.glob("ReadText/*/*.wav"))
+    matches = list(RAW_ROOT.glob("**/ReadText/*/*.wav"))
     if not matches:
         print(
             f"WARN: {RAW_ROOT} exists but contains no ReadText/{{HC,PD}}/*.wav. "
-            "Run script/download_mvdr.sh or extract 26_29_09_2017_KCL.zip there."
+            "Run scripts/download_mvdr.sh or extract 26_29_09_2017_KCL.zip there."
         )
         return
     PROCESSED_AUDIO.mkdir(parents=True, exist_ok=True)
     copied = skipped = 0
     for src in matches:
-        rel = src.relative_to(RAW_ROOT)
+        # Re-root the destination at processed/audio/ReadText/<HC|PD>/<file>
+        # — drop everything above ReadText/ in the source path.
+        idx = src.parts.index("ReadText")
+        rel = Path(*src.parts[idx:])
         dst = PROCESSED_AUDIO / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         if dst.exists():
