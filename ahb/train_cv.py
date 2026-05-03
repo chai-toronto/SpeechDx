@@ -131,7 +131,10 @@ def _run_fold_hp_optimization(fold_idx, hparams, hparams_file, run_opts,
             max_report_frequency=30,
         )
 
-        optuna_search = OptunaSearch(metric=optim_metric, mode=optim_mode)
+        optuna_search = OptunaSearch(
+            metric=optim_metric, mode=optim_mode,
+            seed=hparams.get("hp_search_seed"),
+        )
         search_alg = ConcurrencyLimiter(
             optuna_search,
             max_concurrent=hparams.get("max_concurrent_trials", 1),

@@ -183,7 +183,10 @@ def cmd_train(task: str, encoder: str, *,
                     metric_columns=metric_cols, max_report_frequency=30,
                 )
 
-                optuna_search = OptunaSearch(metric=optim_metric, mode=optim_mode)
+                optuna_search = OptunaSearch(
+                    metric=optim_metric, mode=optim_mode,
+                    seed=hparams.get("hp_search_seed"),
+                )
                 search_alg = ConcurrencyLimiter(
                     optuna_search,
                     max_concurrent=hparams.get("max_concurrent_trials", 1),

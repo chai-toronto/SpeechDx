@@ -93,15 +93,15 @@ def bootstrap_macro_auc_ci(
     return point_estimate, (lower, upper)
 
 
-def bootstrap_mae_ci(y_true, y_pred, n_resamples=1000, confidence_level=0.95):
+def bootstrap_mae_ci(y_true, y_pred, n_resamples=1000, confidence_level=0.95, seed=42):
     """Compute bootstrap confidence interval for MAE."""
     y_true = np.asarray(y_true)
     y_pred = np.asarray(y_pred)
-    
+
     def mae_statistic(indices):
         return np.mean(np.abs(y_true[indices] - y_pred[indices]))
-    
-    rng = np.random.default_rng(42)
+
+    rng = np.random.default_rng(seed)
     indices = np.arange(len(y_true))
     result = bootstrap(
         (indices,),
@@ -554,9 +554,12 @@ class DiagnosticsBrain(sb.Brain):
                 all_preds = torch.cat(self._test_preds, dim=0).numpy()
                 all_labels = torch.cat(self._test_labels, dim=0).numpy()
                 
+                ci_seed = getattr(self.hparams, "random_seed", 42)
                 if self.task_type == "R":
                     # Bootstrap CI for MAE
-                    mae, (mae_lo, mae_hi) = bootstrap_mae_ci(all_labels, all_preds)
+                    mae, (mae_lo, mae_hi) = bootstrap_mae_ci(
+                        all_labels, all_preds, seed=ci_seed,
+                    )
                     self.test_stats["MAE_CI_low"] = mae_lo
                     self.test_stats["MAE_CI_high"] = mae_hi
                 elif self.task_type == "B":
@@ -606,6 +609,7 @@ class DiagnosticsBrain(sb.Brain):
                         y_true=all_labels.astype(int),
                         y_score=all_preds,
                         subject_ids=subject_ids,
+                        seed=ci_seed,
                     )
                     auc_torchmetrics = self.test_stats.get("AUROC", None)
                     if auc_torchmetrics is not None and not np.isnan(auc_macro):
