@@ -107,6 +107,38 @@ def _cmd_run_data_eff(args: argparse.Namespace) -> None:
     cmd_run_data_eff(args)
 
 
+def _cmd_run_all(args: argparse.Namespace) -> None:
+    """Sequentially invoke run / run-cross / run-cross-category / run-data-eff.
+
+    Each underlying orchestrator skips already-complete jobs, so the chain
+    is idempotent. Filters (--encoder / --dataset / --task) apply uniformly;
+    a filter that matches no tasks in a given mode just records 0 pending.
+    """
+    modes = [
+        ("single",         _cmd_run),
+        ("cross",          _cmd_run_cross),
+        ("cross-category", _cmd_run_cross_category),
+        ("data-eff",       _cmd_run_data_eff),
+    ]
+    skip = set(args.skip_mode or [])
+    failures: list[tuple[str, BaseException]] = []
+    for name, fn in modes:
+        if name in skip:
+            print(f"=== run-all: skipping mode {name!r} (--skip-mode) ===")
+            continue
+        print(f"\n=== run-all: starting mode {name!r} ===")
+        try:
+            fn(args)
+        except BaseException as e:
+            failures.append((name, e))
+            print(f"=== run-all: mode {name!r} FAILED: {e!r} ===")
+            if not args.continue_on_failure:
+                raise
+    if failures:
+        names = ", ".join(n for n, _ in failures)
+        raise SystemExit(f"run-all: {len(failures)} mode(s) failed: {names}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ahb",
@@ -249,6 +281,26 @@ def build_parser() -> argparse.ArgumentParser:
     de_parser.add_argument("--cache-only", action="store_true")
     de_parser.add_argument("--no-writer", action="store_true")
 
+    all_parser = sub.add_parser(
+        "run-all",
+        help="Run every mode in sequence (single → cross → cross-category → data-eff)",
+    )
+    all_parser.add_argument("--device", type=str, default=None)
+    all_parser.add_argument("--max-workers", "-j", type=int, default=3)
+    all_parser.add_argument("--encoder", type=str, default=None, action="append")
+    all_parser.add_argument("--dataset", type=str, default=None, action="append")
+    all_parser.add_argument("--task", type=str, default=None, action="append")
+    all_parser.add_argument("--level", type=str, default=None, action="append",
+                            help="(data-eff only) restrict to these level dirs")
+    all_parser.add_argument("--test-only", action="store_true")
+    all_parser.add_argument("--cache-only", action="store_true")
+    all_parser.add_argument("--no-writer", action="store_true")
+    all_parser.add_argument("--skip-mode", action="append", default=None,
+                            choices=["single", "cross", "cross-category", "data-eff"],
+                            help="Mode(s) to skip (repeatable)")
+    all_parser.add_argument("--continue-on-failure", action="store_true",
+                            help="Run later modes even if an earlier one raises")
+
     return parser
 
 
@@ -292,6 +344,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.cache_only and args.no_writer:
             parser.error("--cache-only and --no-writer are mutually exclusive")
         _cmd_run_data_eff(args)
+    elif args.command == "run-all":
+        if args.cache_only and args.test_only:
+            parser.error("--cache-only and --test-only are mutually exclusive")
+        if args.cache_only and args.no_writer:
+            parser.error("--cache-only and --no-writer are mutually exclusive")
+        _cmd_run_all(args)
     else:
         parser.error(f"unknown command: {args.command}")
     return 0
