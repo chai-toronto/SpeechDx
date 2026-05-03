@@ -432,12 +432,20 @@ class DiagnosticsBrain(sb.Brain):
                 sample_w = self._reg_bin_weights[sample_bins]
                 loss = (loss.squeeze(-1) * sample_w).mean()
 
+        # Pre-normalize predictions before handing to torchmetrics. Its
+        # `normalize_logits_if_needed` heuristic sigmoids/softmaxes per-batch
+        # only when any value lies outside [0,1]; mixing batches that pass
+        # the heuristic with batches that don't corrupts the AUROC ranking
+        # and the 0.5-threshold metrics. Pre-applying sigmoid/softmax keeps
+        # all stored values in [0,1] and makes the heuristic a no-op.
         if self.task_type == "R":
             self.error_metrics.update(predictions.squeeze(-1), lab.squeeze(-1))
+        elif self.task_type == "B":
+            self.error_metrics.update(torch.sigmoid(predictions), lab)
+        elif self.task_type == "C":
+            self.error_metrics.update(torch.softmax(predictions, dim=-1), lab)
         elif self.task_type == "L":
-            self.error_metrics.update(predictions, lab.int())
-        else:
-            self.error_metrics.update(predictions, lab)
+            self.error_metrics.update(torch.sigmoid(predictions), lab.int())
 
         # Store predictions and labels for CI calculation during test
         if stage == sb.Stage.TEST:
