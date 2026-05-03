@@ -18,8 +18,15 @@ RANDOM_SEED = 42
 
 
 def build_pid_to_dir(data_root):
-    """Scan date directories to map participant ID -> date_dir."""
+    """Scan date directories to map participant ID -> date_dir.
+
+    Returns an empty dict if data_root doesn't exist — callers may merge
+    multiple roots (e.g. raw Extracted_data/ + processed/audio/), and only
+    one needs to be present for the merge to succeed.
+    """
     pid_to_dir = {}
+    if not Path(data_root).is_dir():
+        return pid_to_dir
     for entry in sorted(os.listdir(data_root)):
         d = data_root / entry
         if d.is_dir() and entry.isdigit():
