@@ -79,17 +79,9 @@ You do **not** need to edit the orchestrator scripts.
 
 ## Probe / pool contract
 
-A probe takes encoder output and `lengths`, returns `(B, num_labels)`
+A probe takes encoder output and `lengths` (relative wrt batch's audio length), returns `(B, num_labels)`
 logits. Probes that pool temporally accept either a single tensor or a
 layer-wise tuple; layer probes additionally accept the layer dimension
 and apply a learned softmax. See `probe.py` and `pool.py` for the
 exact signatures — these are stable.
 
-## Custom large architectures
-
-`models/` (note the plural) hosts heavier custom architectures
-(`WavHJepa`, `Sejal`, …). They are not on the registry-driven path
-because they have non-standard initialization or load-time
-dependencies. If you need to integrate one, add a new entry under
-`models/<MyArch>/` and follow the encoder contract through a thin
-wrapper in `model/<wrapper>.py`.

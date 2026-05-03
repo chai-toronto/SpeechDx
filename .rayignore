@@ -2,10 +2,7 @@
 # Strategy: exclude everything at the project root, then re-include only the
 # directories Ray workers actually need to import.
 # - ahb/: the new harness package (Ray trials launched by ahb/train.py).
-# - training/: still required by run_all_cross.py + run_all_data_eff.py
-#   subprocesses (python -m training.train); will go once those are ported.
 # - model/: imported by the encoder yamls (!new: model.X.Y).
 /*
 !/ahb/
-!/training/
 !/model/

@@ -1,9 +1,10 @@
-## TODO:
-  The deferred list is now in project_ahb_rewrite_status.md memory:                                                                                                                                                                                                                                                       
+## Larry's TODO: 
   1. Drop the level/single_avg/single cache tag + class-level prune of probe/pool unreachables (cache → v3, drop output_hidden_state outside model wrappers)                                                                                                                                                            
-  2. Central seed propagation from ahb/configs/main.yaml                                                                                                                                                                                                                                                                  
-  3. Resumable stages (warm always, exps via knob, manifests once)                                                                                                                                                                                                                                                      
-  4. Byte parity for ahb train (subsumed by #2)                                                                                                                                                                                                                                                                           
+  2. Do a test only thru run2.
+
+  3. Resumable stages (warm always, exps via knob, manifests once) ensured                                                                                                                                                                 
+  4. Paralel cache gen
+  5. Rerun regression experiments for run1 (Optional, not run2) 
                                                  
 
 # Audio Health Benchmark
@@ -122,6 +123,7 @@ once into `cks/model/` and reused; replace it manually to pin.
 ├── model/                  Encoder + probe + pooling implementations
 ├── metadata_script/        One create_<dataset>_metadata.py per dataset
 ├── script/                 Operational helpers (slurm tracker, prune, layer-weight viz)
+├── scripts/                Per-dataset download scripts (open-access corpora)
 ├── slurm/                  SLURM job templates
 ├── third_party/OPERA/      Vendored OPERA encoder loader
 ├── data/                   Audio + per-dataset CSVs (gitignored, large)
@@ -148,13 +150,12 @@ the canonical name in the literature.
 
 | Local        | Upstream                                       | Access | Source                                                                                                                        |
 |--------------|------------------------------------------------|--------|-------------------------------------------------------------------------------------------------------------------------------|
-| `ravdess`    | RAVDESS (Speech)                               | open   | https://zenodo.org/records/1188976 — `script/download_ravdess.sh`                                                             |
-| `coswara`    | Project Coswara (IISc)                         | open   | https://github.com/iiscleap/Coswara-Data — `script/download_coswara.sh`                                                       |
-| `mvdr`       | MDVR-KCL (King's College London + Fraunhofer)  | open   | https://zenodo.org/records/2867216 — `script/download_mvdr.sh` (CC BY 4.0)                                                    |
+| `ravdess`    | RAVDESS (Speech)                               | open   | https://zenodo.org/records/1188976 — `scripts/download_ravdess.sh`                                                             |
+| `coswara`    | Project Coswara (IISc)                         | open   | https://github.com/iiscleap/Coswara-Data — `scripts/download_coswara.sh`                                                       |
+| `mvdr`       | MDVR-KCL (King's College London + Fraunhofer)  | open   | https://zenodo.org/records/2867216 — `scripts/download_mvdr.sh` (CC BY 4.0)                                                    |
 | `ksof`       | Kassel State of Fluency                        | EULA   | https://zenodo.org/records/6801844 — sign EULA at https://th-nuernberg.github.io/kassel-state-of-fluency/                     |
 | `torgo`      | TORGO Database of Dysarthric Articulation      | open   | http://www.cs.toronto.edu/~complingweb/data/TORGO/torgo.html (pending cluster shutdown to verify)                             |
 | `uaspeech`   | UASpeech                                       | email  | https://speechtechnology.web.illinois.edu/uaspeech/ — request via uaspeech-requests@lists.illinois.edu                        |
-| `nemours`    | Nemours Database of Dysarthric Speech          | contact | A.I. duPont Hospital for Children (Wilmington, DE) — distributed on CD/DVD on request                                         |
 | `iemocap`    | IEMOCAP                                        | release form | https://sail.usc.edu/iemocap/ — academic release form to USC SAIL                                                             |
 | `dbank`      | DementiaBank ADReSS-M (ICASSP 2023 SPGC)       | DTA    | https://luzs.gitlab.io/madress-2023/ — request via madress2023@ed.ac.uk; data on TalkBank                                     |
 | `aphasia`    | AphasiaBank (TalkBank)                         | registration | https://aphasia.talkbank.org/ — TalkBank account; some sub-corpora (APROCSA, Dysphagia) require extra approval                |
@@ -170,7 +171,7 @@ audio into `data/<name>/processed/audio/` and writes the CSV to
 
 All `create_<name>_metadata.py` scripts read from `data/<name>/raw/` by
 default. Drop the upstream archive there (or run the matching
-`script/download_*.sh` for the open ones), then run the metadata script —
+`scripts/download_*.sh` for the open ones), then run the metadata script —
 it stages audio into `processed/audio/` and writes the CSV.
 
 
