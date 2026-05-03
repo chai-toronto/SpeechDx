@@ -67,6 +67,38 @@ def _cmd_train_cv(args: argparse.Namespace) -> None:
     )
 
 
+def _cmd_warm_cross(args: argparse.Namespace) -> None:
+    from ahb.prep.dispatch import ensure_manifest
+    from ahb.warm_cross import run_warm_cross
+
+    ensure_manifest(args.task)
+    run_warm_cross(args.task, args.encoder,
+                   probe=args.probe, probe_yaml=args.probe_yaml,
+                   device=args.device)
+
+
+def _cmd_train_cross(args: argparse.Namespace) -> None:
+    from ahb.train_cross import cmd_train_cross
+
+    cmd_train_cross(
+        args.task, args.encoder,
+        probe=args.probe, probe_yaml=args.probe_yaml,
+        tag=args.tag, overrides=args.overrides or "",
+    )
+
+
+def _cmd_run_cross(args: argparse.Namespace) -> None:
+    from ahb.run_cross import cmd_run_cross
+
+    cmd_run_cross(args)
+
+
+def _cmd_run_cross_category(args: argparse.Namespace) -> None:
+    from ahb.run_cross_category import cmd_run_cross_category
+
+    cmd_run_cross_category(args)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ahb",
@@ -154,6 +186,41 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--no-writer", action="store_true",
                             help="Run every job as a reader (cache must already be warm)")
 
+    warm_cross_parser = sub.add_parser(
+        "warm-cross",
+        help="Warm cross-task HDF5 caches (3 caches per pair) — idempotent",
+    )
+    warm_cross_parser.add_argument("task", help="Cross task stem")
+    warm_cross_parser.add_argument("encoder", help="Encoder name")
+    warm_cross_parser.add_argument("--probe", default="Probe")
+    warm_cross_parser.add_argument("--probe-yaml", default="Probe.yaml")
+    warm_cross_parser.add_argument("--device", default=None)
+
+    train_cross_parser = sub.add_parser(
+        "train-cross",
+        help="Train probe on a cross task — Ray Tune HP search + final eval",
+    )
+    train_cross_parser.add_argument("task", help="Cross task stem")
+    train_cross_parser.add_argument("encoder", help="Encoder name")
+    train_cross_parser.add_argument("--probe", default="Probe")
+    train_cross_parser.add_argument("--probe-yaml", default="Probe.yaml")
+    train_cross_parser.add_argument("--tag", default="run1")
+    train_cross_parser.add_argument("--overrides", default="")
+
+    for name, helptext in [
+        ("run-cross", "Execute all incomplete cross-task runs"),
+        ("run-cross-category", "Execute all incomplete cross-category runs"),
+    ]:
+        p = sub.add_parser(name, help=helptext)
+        p.add_argument("--device", type=str, default=None)
+        p.add_argument("--max-workers", "-j", type=int, default=3)
+        p.add_argument("--encoder", type=str, default=None, action="append")
+        p.add_argument("--dataset", type=str, default=None, action="append")
+        p.add_argument("--task", type=str, default=None, action="append")
+        p.add_argument("--test-only", action="store_true")
+        p.add_argument("--cache-only", action="store_true")
+        p.add_argument("--no-writer", action="store_true")
+
     return parser
 
 
@@ -178,6 +245,19 @@ def main(argv: list[str] | None = None) -> int:
         if args.cache_only and args.no_writer:
             parser.error("--cache-only and --no-writer are mutually exclusive")
         _cmd_run(args)
+    elif args.command == "warm-cross":
+        _cmd_warm_cross(args)
+    elif args.command == "train-cross":
+        _cmd_train_cross(args)
+    elif args.command in ("run-cross", "run-cross-category"):
+        if args.cache_only and args.test_only:
+            parser.error("--cache-only and --test-only are mutually exclusive")
+        if args.cache_only and args.no_writer:
+            parser.error("--cache-only and --no-writer are mutually exclusive")
+        if args.command == "run-cross":
+            _cmd_run_cross(args)
+        else:
+            _cmd_run_cross_category(args)
     else:
         parser.error(f"unknown command: {args.command}")
     return 0

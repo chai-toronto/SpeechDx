@@ -211,6 +211,78 @@ def build_read_datasets_cv(train_fold: dict, val_fold: dict,
     }
 
 
+def build_read_datasets_cross(data_dict: dict[str, dict],
+                              hparams: dict[str, Any]) -> dict[str, sb.dataio.dataset.DynamicItemDataset]:
+    """Reader-only cross-task datasets.
+
+    Cross runs use three cache directories (vs two for single-dataset):
+    ``train_cache_dir_1`` (train, augmented N versions) and
+    ``val_cache_dir_1`` (val, no aug, 1 version) both under the train
+    dataset's cache root, plus ``val_cache_dir_2`` (test, no aug, 1
+    version) under the test dataset's root.
+    """
+    cache_mode = _cache_mode_for(hparams)
+    train_cache_dir = Path(hparams["train_cache_dir_1"]) / cache_mode
+    val_cache_dir = Path(hparams["val_cache_dir_1"]) / cache_mode
+    test_cache_dir = Path(hparams["val_cache_dir_2"]) / cache_mode
+    num_versions = int(hparams["data_params"].get("num_aug_ver", 1))
+    output_vars = _output_vars(hparams)
+
+    train_reader = _make_cache_reader(train_cache_dir, num_versions, output_vars)
+    val_reader = _make_cache_reader(val_cache_dir, 1, output_vars)
+    test_reader = _make_cache_reader(test_cache_dir, 1, output_vars)
+
+    label = _label_pipeline_dynitem()
+    pid = _pid_pipeline_dynitem()
+    output_keys = ["id", "path", "pid", "label_encoded"] + output_vars
+
+    try:
+        _preflight(train_reader, list(data_dict["train"].keys()),
+                   num_versions, "train", train_cache_dir)
+        _preflight(val_reader, list(data_dict["val"].keys()),
+                   1, "val", val_cache_dir)
+        _preflight(test_reader, list(data_dict["test"].keys()),
+                   1, "test", test_cache_dir)
+    except Exception:
+        train_reader.close()
+        val_reader.close()
+        test_reader.close()
+        raise
+
+    return {
+        "train": sb.dataio.dataset.DynamicItemDataset(
+            data=data_dict["train"],
+            dynamic_items=[pid, label, train_reader],
+            output_keys=output_keys,
+        ),
+        "val": sb.dataio.dataset.DynamicItemDataset(
+            data=data_dict["val"],
+            dynamic_items=[pid, label, val_reader],
+            output_keys=output_keys,
+        ),
+        "test": sb.dataio.dataset.DynamicItemDataset(
+            data=data_dict["test"],
+            dynamic_items=[pid, label, test_reader],
+            output_keys=output_keys,
+        ),
+    }
+
+
+def load_manifest_data_cross(hparams: dict[str, Any]) -> dict[str, dict]:
+    """Load train/val/test JSON manifests for cross tasks (same format as standard)."""
+    out: dict[str, dict] = {}
+    with open(hparams["train_annotation"]) as f:
+        out["train"] = json.load(f)
+    with open(hparams["val_annotation"]) as f:
+        out["val"] = json.load(f)
+    with open(hparams["test_annotation"]) as f:
+        out["test"] = json.load(f)
+    # all_train + all_test mirror the legacy data_dict expected by warm_cross.
+    out["all_train"] = out["train"] | out["val"]
+    out["all_test"] = out["test"]
+    return out
+
+
 def assert_no_encoder_imports() -> None:
     """Encoder-isolation invariant: trainer must not import any model.<encoder>.
 
