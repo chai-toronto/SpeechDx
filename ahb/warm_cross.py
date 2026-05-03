@@ -150,6 +150,15 @@ def run_warm_cross(task: str, encoder: str, *,
     """
     hparams_stub = compose_config(task, encoder, probe=probe, probe_yaml=probe_yaml,
                                   mode="read")
+    if hparams_stub.get("cross_eval_category", False):
+        # Category-cross caches are the per-dataset single-dataset caches at
+        # <slurm_tmpdir>/<dataset>/<encoder>/{train,val}/<cache_mode>/cache.hdf5.
+        # They are populated by `ahb warm <dataset-task> <encoder>` (run-all
+        # chains single before cross-cat). The category trainer's preflight
+        # raises a clear cache-miss error if any are still missing.
+        print(f"Skipping warm-cross for category task {task}: per-dataset "
+              f"caches are warmed by single-dataset `ahb warm`.")
+        return
     train_dir, val_dir, test_dir = _cross_cache_dirs(hparams_stub)
     for d in (train_dir, val_dir, test_dir):
         d.mkdir(parents=True, exist_ok=True)
