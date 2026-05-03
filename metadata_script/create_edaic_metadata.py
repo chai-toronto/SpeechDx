@@ -1,3 +1,4 @@
+import argparse
 import csv
 import shutil
 from pathlib import Path
@@ -5,7 +6,7 @@ from pathlib import Path
 # E-DAIC dataset
 # metadata_mapped.csv contains train (training_*) and dev (development_*) participants
 # labels/test_split.csv contains test participants
-# Raw audio: data/edaic/data/{Participant_ID}_P/{Participant_ID}_AUDIO.wav
+# Raw audio: <raw_root>/data/{Participant_ID}_P/{Participant_ID}_AUDIO.wav
 # Copied to: data/edaic/processed/audio/{Participant_ID}_P/{Participant_ID}_AUDIO.wav
 # Label: PHQ_Binary (0 = not depressed, 1 = depressed)
 
@@ -19,8 +20,17 @@ def load_csv(path):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--raw-root", type=Path, default=RAW_ROOT,
+                        help="Root containing metadata_mapped.csv, labels/, data/ "
+                             "(default: data/edaic/raw).")
+    parser.add_argument("--no-copy", action="store_true",
+                        help="Skip copying audio into processed/audio/; only build the CSV.")
+    args = parser.parse_args()
+    raw_root = args.raw_root
+
     # ---- Load metadata_mapped (train + dev) ----
-    meta_rows = load_csv(RAW_ROOT / "metadata_mapped.csv")
+    meta_rows = load_csv(raw_root / "metadata_mapped.csv")
 
     rows = []
     for r in meta_rows:
@@ -40,7 +50,7 @@ def main():
         })
 
     # ---- Load test split ----
-    test_rows = load_csv(RAW_ROOT / "labels" / "test_split.csv")
+    test_rows = load_csv(raw_root / "labels" / "test_split.csv")
 
     for r in test_rows:
         pid = r["Participant_ID"]
@@ -57,22 +67,25 @@ def main():
             "path": f"{pid}_P/{pid}_AUDIO.wav",
         })
 
-    # ---- Copy audio to processed/audio/ ----
-    raw_audio_dir = RAW_ROOT / "data"
-    dest_audio_dir = DATA_ROOT / "processed" / "audio"
-    dest_audio_dir.mkdir(parents=True, exist_ok=True)
+    # ---- Copy audio to processed/audio/ (unless --no-copy) ----
+    if not args.no_copy:
+        raw_audio_dir = raw_root / "data"
+        dest_audio_dir = DATA_ROOT / "processed" / "audio"
+        dest_audio_dir.mkdir(parents=True, exist_ok=True)
 
-    copied, skipped = 0, 0
-    for row in rows:
-        src = raw_audio_dir / row["path"]
-        dst = dest_audio_dir / row["path"]
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        if not dst.exists():
-            shutil.copy2(src, dst)
-            copied += 1
-        else:
-            skipped += 1
-    print(f"Audio: copied {copied}, skipped {skipped} (already exist)")
+        copied, skipped = 0, 0
+        for row in rows:
+            src = raw_audio_dir / row["path"]
+            dst = dest_audio_dir / row["path"]
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if not dst.exists():
+                shutil.copy2(src, dst)
+                copied += 1
+            else:
+                skipped += 1
+        print(f"Audio: copied {copied}, skipped {skipped} (already exist)")
+    else:
+        print("Audio: skipped (--no-copy)")
 
     # ---- Write CSV ----
     out_dir = DATA_ROOT / "processed"
