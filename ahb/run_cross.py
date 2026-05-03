@@ -66,15 +66,16 @@ def _run_subprocess(cmd: list[str], log_path: Path, label: str) -> bool:
 
 def _execute_job_cross(task_stem: str, model_name: str, role: str, *,
                        device: str | None, test_only: bool, cache_only: bool,
-                       log_path: Path) -> tuple[str, bool, float]:
+                       tag: str, log_path: Path) -> tuple[str, bool, float]:
     label = f"{task_stem} × {model_name}"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("w") as f:
         f.write(f"{'='*60}\n  Running: {label}\n")
-        f.write(f"  Role: {role}, test_only={test_only}, cache_only={cache_only}\n")
+        f.write(f"  Role: {role}, test_only={test_only}, cache_only={cache_only}, tag={tag}\n")
         f.write(f"  Started: {datetime.now().isoformat(timespec='seconds')}\n")
         f.write(f"{'='*60}\n")
 
+    train_tag_args = ["--tag", tag]
     start = time.time()
     success = True
 
@@ -85,6 +86,7 @@ def _execute_job_cross(task_stem: str, model_name: str, role: str, *,
         success = _run_subprocess(cmd, log_path, "warm-cross")
     elif test_only:
         cmd = ["python", "-m", "ahb", "train-cross", task_stem, model_name,
+               *train_tag_args,
                "--overrides", "test_only: true"]
         success = _run_subprocess(cmd, log_path, "test-cross")
     elif role == "writer":
@@ -94,10 +96,12 @@ def _execute_job_cross(task_stem: str, model_name: str, role: str, *,
         if not _run_subprocess(warm_cmd, log_path, "warm-cross"):
             success = False
         if success:
-            train_cmd = ["python", "-m", "ahb", "train-cross", task_stem, model_name]
+            train_cmd = ["python", "-m", "ahb", "train-cross", task_stem, model_name,
+                         *train_tag_args]
             success = _run_subprocess(train_cmd, log_path, "train-cross")
     else:  # reader
-        cmd = ["python", "-m", "ahb", "train-cross", task_stem, model_name]
+        cmd = ["python", "-m", "ahb", "train-cross", task_stem, model_name,
+               *train_tag_args]
         success = _run_subprocess(cmd, log_path, "train-cross")
 
     elapsed = time.time() - start
@@ -125,6 +129,7 @@ def cmd_run_cross(args: argparse.Namespace, *,
     test_only = getattr(args, "test_only", False)
     cache_only = getattr(args, "cache_only", False)
     no_writer = getattr(args, "no_writer", False)
+    tag = getattr(args, "tag", "run1")
 
     all_encoders = registry_encoders()
     if args.encoder:
@@ -141,7 +146,7 @@ def cmd_run_cross(args: argparse.Namespace, *,
     for task_stem in tasks:
         dataset, task = get_task_info(task_stem)
         for model_name in encoders:
-            folder = get_output_folder(dataset, task, model_name,
+            folder = get_output_folder(dataset, task, model_name, tag,
                                        exps_root=exps_root)
             if cache_only:
                 pass
@@ -193,6 +198,7 @@ def cmd_run_cross(args: argparse.Namespace, *,
         f"[{_now()}] Run start  : {total_jobs} pending, {skipped} skipped",
         f"           workers : up to {max_workers} concurrent",
         f"           mode    : {mode}  (cross)",
+        f"           tag     : {tag}",
         f"           logs    : {run_log_dir}/  (one file per job)",
         "",
     )
@@ -217,7 +223,7 @@ def cmd_run_cross(args: argparse.Namespace, *,
         result = _execute_job_cross(
             task_stem, model_name, role,
             device=args.device, test_only=test_only, cache_only=cache_only,
-            log_path=log_path,
+            tag=tag, log_path=log_path,
         )
         _, ok, elapsed = result
         progress.finish(ok)

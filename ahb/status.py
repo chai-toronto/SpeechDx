@@ -24,6 +24,7 @@ from ahb.results import expected_ci_keys
 def cmd_status(args: argparse.Namespace) -> None:
     tasks = discover_tasks()
     test_only = getattr(args, "test_only", False)
+    tag = getattr(args, "tag", "run1")
     complete = incomplete = absent = 0
 
     encoders = list(registry_encoders().keys())
@@ -35,7 +36,7 @@ def cmd_status(args: argparse.Namespace) -> None:
             expected_ci_keys(_load_task_yaml(task_stem).get("task_type", "")) is not None
         ) if test_only else True
         for model_name in encoders:
-            folder = get_output_folder(dataset, task, model_name)
+            folder = get_output_folder(dataset, task, model_name, tag)
             if test_only:
                 if not ci_applicable or not (folder / get_results_file(task_stem)).exists():
                     row.append(" ")

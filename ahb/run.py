@@ -59,7 +59,7 @@ def _run_subprocess(cmd: list[str], log_path: Path, label: str) -> bool:
 
 def _execute_job(task_stem: str, model_name: str, role: str, *,
                  device: str | None, test_only: bool, cache_only: bool,
-                 log_path: Path) -> tuple[str, bool, float]:
+                 tag: str, log_path: Path) -> tuple[str, bool, float]:
     """Run one (task, encoder) job by chaining ahb subcommands.
 
     - role="writer": ahb warm → ahb train (full pipeline).
@@ -71,11 +71,12 @@ def _execute_job(task_stem: str, model_name: str, role: str, *,
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("w") as f:
         f.write(f"{'='*60}\n  Running: {label}\n")
-        f.write(f"  Role: {role}, test_only={test_only}, cache_only={cache_only}\n")
+        f.write(f"  Role: {role}, test_only={test_only}, cache_only={cache_only}, tag={tag}\n")
         f.write(f"  Started: {datetime.now().isoformat(timespec='seconds')}\n")
         f.write(f"{'='*60}\n")
 
     train_subcommand = "train-cv" if is_cv(task_stem) else "train"
+    train_tag_args = ["--tag", tag]
 
     start = time.time()
     success = True
@@ -89,6 +90,7 @@ def _execute_job(task_stem: str, model_name: str, role: str, *,
     elif test_only:
         # Eval-only path: skip warm, train --overrides test_only=true.
         cmd = ["python", "-m", "ahb", train_subcommand, task_stem, model_name,
+               *train_tag_args,
                "--overrides", "test_only: true"]
         success = _run_subprocess(cmd, log_path, "test")
     elif role == "writer":
@@ -99,11 +101,13 @@ def _execute_job(task_stem: str, model_name: str, role: str, *,
         if not _run_subprocess(warm_cmd, log_path, "warm"):
             success = False
         if success:
-            train_cmd_args = ["python", "-m", "ahb", train_subcommand, task_stem, model_name]
+            train_cmd_args = ["python", "-m", "ahb", train_subcommand, task_stem, model_name,
+                              *train_tag_args]
             success = _run_subprocess(train_cmd_args, log_path, "train")
     else:  # reader
         # Reader: train only (cache assumed warm).
-        cmd = ["python", "-m", "ahb", train_subcommand, task_stem, model_name]
+        cmd = ["python", "-m", "ahb", train_subcommand, task_stem, model_name,
+               *train_tag_args]
         success = _run_subprocess(cmd, log_path, "train")
 
     elapsed = time.time() - start
@@ -123,6 +127,7 @@ def cmd_run(args: argparse.Namespace) -> None:
     test_only = getattr(args, "test_only", False)
     cache_only = getattr(args, "cache_only", False)
     no_writer = getattr(args, "no_writer", False)
+    tag = getattr(args, "tag", "run1")
 
     all_encoders = registry_encoders()
     if args.encoder:
@@ -140,7 +145,7 @@ def cmd_run(args: argparse.Namespace) -> None:
     for task_stem in tasks:
         dataset, task = get_task_info(task_stem)
         for model_name in encoders:
-            folder = get_output_folder(dataset, task, model_name)
+            folder = get_output_folder(dataset, task, model_name, tag)
             if cache_only:
                 pass  # always queue; cache_only emits no result file
             elif test_only:
@@ -192,6 +197,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         f"[{_now()}] Run start  : {total_jobs} pending, {skipped} skipped",
         f"           workers : up to {max_workers} concurrent",
         f"           mode    : {mode}",
+        f"           tag     : {tag}",
         f"           logs    : {run_log_dir}/  (one file per job)",
         "",
     )
@@ -216,7 +222,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         result = _execute_job(
             task_stem, model_name, role,
             device=args.device, test_only=test_only, cache_only=cache_only,
-            log_path=log_path,
+            tag=tag, log_path=log_path,
         )
         _, ok, elapsed = result
         progress.finish(ok)

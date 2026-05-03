@@ -152,6 +152,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Report CI-presence status instead of completion status",
     )
+    status_parser.add_argument(
+        "--tag", type=str, default="run1",
+        help="Experiment tag to scan (default: run1)",
+    )
 
     prep_parser = sub.add_parser(
         "prep",
@@ -231,6 +235,8 @@ def build_parser() -> argparse.ArgumentParser:
                             help="Warm caches and exit before training")
     run_parser.add_argument("--no-writer", action="store_true",
                             help="Run every job as a reader (cache must already be warm)")
+    run_parser.add_argument("--tag", type=str, default="run1",
+                            help="Experiment tag forwarded to ahb train (default: run1)")
 
     warm_cross_parser = sub.add_parser(
         "warm-cross",
@@ -266,6 +272,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--test-only", action="store_true")
         p.add_argument("--cache-only", action="store_true")
         p.add_argument("--no-writer", action="store_true")
+        p.add_argument("--tag", type=str, default="run1",
+                       help="Experiment tag forwarded to ahb train-cross (default: run1)")
 
     de_parser = sub.add_parser("run-data-eff",
                                help="Execute all incomplete data-efficiency runs (across levels)")
@@ -280,6 +288,8 @@ def build_parser() -> argparse.ArgumentParser:
     de_parser.add_argument("--test-only", action="store_true")
     de_parser.add_argument("--cache-only", action="store_true")
     de_parser.add_argument("--no-writer", action="store_true")
+    de_parser.add_argument("--tag", type=str, default="run1",
+                           help="Experiment tag forwarded to ahb train (default: run1)")
 
     all_parser = sub.add_parser(
         "run-all",
@@ -300,6 +310,8 @@ def build_parser() -> argparse.ArgumentParser:
                             help="Mode(s) to skip (repeatable)")
     all_parser.add_argument("--continue-on-failure", action="store_true",
                             help="Run later modes even if an earlier one raises")
+    all_parser.add_argument("--tag", type=str, default="run1",
+                            help="Experiment tag forwarded to every mode (default: run1)")
 
     return parser
 
