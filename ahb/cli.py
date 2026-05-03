@@ -15,14 +15,21 @@ import sys
 
 
 def _cmd_status(args: argparse.Namespace) -> None:
-    """Phase 1: forward to the existing run_all.cmd_status implementation.
+    from ahb.status import cmd_status
 
-    Will be replaced by an in-package implementation in Phase 5 once the
-    legacy ``run_all.py`` is retired.
-    """
-    import run_all
+    cmd_status(args)
 
-    run_all.cmd_status(args)
+
+def _cmd_summary(args: argparse.Namespace) -> None:
+    from ahb.summary import cmd_summary
+
+    cmd_summary(args)
+
+
+def _cmd_run(args: argparse.Namespace) -> None:
+    from ahb.run import cmd_run
+
+    cmd_run(args)
 
 
 def _cmd_prep(args: argparse.Namespace) -> None:
@@ -117,6 +124,36 @@ def build_parser() -> argparse.ArgumentParser:
     train_cv_parser.add_argument("--tag", default="run1")
     train_cv_parser.add_argument("--overrides", default="")
 
+    summary_parser = sub.add_parser(
+        "summary", help="Collect results into per-metric CSVs",
+    )
+    summary_parser.add_argument(
+        "--out-dir", type=str, default="exps/_summary",
+        help="Directory to write metric CSVs (default: exps/_summary)",
+    )
+    summary_parser.add_argument(
+        "--tag", type=str, default="run1",
+        help="Experiment tag to scan (default: run1)",
+    )
+
+    run_parser = sub.add_parser("run", help="Execute all incomplete runs")
+    run_parser.add_argument("--device", type=str, default=None,
+                            help="Device override (e.g. cuda:0)")
+    run_parser.add_argument("--max-workers", "-j", type=int, default=3,
+                            help="Max concurrent tasks (default: 3); writers serialize per (dataset, encoder)")
+    run_parser.add_argument("--encoder", type=str, default=None, action="append",
+                            help="Run only this encoder (repeatable)")
+    run_parser.add_argument("--dataset", type=str, default=None, action="append",
+                            help="Run only tasks whose dataset matches (repeatable)")
+    run_parser.add_argument("--task", type=str, default=None, action="append",
+                            help="Run only these task stems (repeatable)")
+    run_parser.add_argument("--test-only", action="store_true",
+                            help="Run inference only (no training); requires prior trained model")
+    run_parser.add_argument("--cache-only", action="store_true",
+                            help="Warm caches and exit before training")
+    run_parser.add_argument("--no-writer", action="store_true",
+                            help="Run every job as a reader (cache must already be warm)")
+
     return parser
 
 
@@ -133,6 +170,14 @@ def main(argv: list[str] | None = None) -> int:
         _cmd_train(args)
     elif args.command == "train-cv":
         _cmd_train_cv(args)
+    elif args.command == "summary":
+        _cmd_summary(args)
+    elif args.command == "run":
+        if args.cache_only and args.test_only:
+            parser.error("--cache-only and --test-only are mutually exclusive")
+        if args.cache_only and args.no_writer:
+            parser.error("--cache-only and --no-writer are mutually exclusive")
+        _cmd_run(args)
     else:
         parser.error(f"unknown command: {args.command}")
     return 0
