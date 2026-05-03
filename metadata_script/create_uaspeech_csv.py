@@ -2,7 +2,8 @@
 Create a metadata CSV for the UASpeech dataset.
 
 Source layout (after extracting the UASpeech archive into data/uaspeech/raw/):
-    data/uaspeech/raw/<speaker>/*.wav
+    data/uaspeech/raw/audio/normalized/<speaker>/*.wav   (canonical UA-Speech tree)
+    data/uaspeech/raw/<speaker>/*.wav                    (also accepted)
 
 Staged into data/uaspeech/processed/audio/<speaker>/*.wav, parses filenames,
 assigns labels and splits, and writes the CSV to
@@ -27,13 +28,25 @@ OUTPUT_CSV = PROJECT_ROOT / "data" / "uaspeech" / "processed" / "uaspeech.csv"
 
 
 def stage_audio_from_raw():
-    """Copy each <speaker>/*.wav from raw/ → processed/audio/."""
+    """Copy each <speaker>/*.wav from raw/ → processed/audio/<speaker>/.
+
+    Looks under raw/audio/normalized/ first (canonical UASpeech layout),
+    then falls back to a flat raw/<speaker>/<file>.wav in case the user
+    pre-flattened the tree.
+    """
     if not RAW_DIR.is_dir():
+        return
+    candidates = [RAW_DIR / "audio" / "normalized", RAW_DIR]
+    src_root = next((c for c in candidates if c.is_dir()), None)
+    if src_root is None:
+        return
+    matches = list(src_root.glob("*/*.wav"))
+    if not matches:
         return
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)
     copied = skipped = 0
-    for src in RAW_DIR.glob("*/*.wav"):
-        rel = src.relative_to(RAW_DIR)
+    for src in matches:
+        rel = src.relative_to(src_root)  # speaker/<file>.wav
         dst = AUDIO_DIR / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         if dst.exists():
@@ -41,7 +54,7 @@ def stage_audio_from_raw():
         else:
             shutil.copy2(src, dst)
             copied += 1
-    print(f"Staged from {RAW_DIR}: copied {copied}, skipped {skipped}")
+    print(f"Staged from {src_root}: copied {copied}, skipped {skipped}")
 
 # Dysarthric speakers (label=1)
 DYSARTHRIC = {
