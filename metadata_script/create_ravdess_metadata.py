@@ -1,10 +1,35 @@
 import os
 import csv
+import shutil
 import wave
 from pathlib import Path
 
-# Define the root directory
-root_dir = "data/ravdess/processed/audio"
+# Source (extracted Audio_Speech_Actors_01-24.zip) -> processed/audio/
+RAW_ROOT = Path("data/ravdess/raw")
+PROCESSED_ROOT = Path("data/ravdess/processed")
+root_dir = str(PROCESSED_ROOT / "audio")
+
+
+def stage_audio_from_raw():
+    """Copy Actor_*/<wav> from raw/ into processed/audio/ if not already there."""
+    if not RAW_ROOT.is_dir():
+        return
+    dst_root = Path(root_dir)
+    dst_root.mkdir(parents=True, exist_ok=True)
+    copied = skipped = 0
+    for src in RAW_ROOT.glob("Actor_*/*.wav"):
+        rel = src.relative_to(RAW_ROOT)
+        dst = dst_root / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if dst.exists():
+            skipped += 1
+        else:
+            shutil.copy2(src, dst)
+            copied += 1
+    print(f"Staged from {RAW_ROOT}: copied {copied}, skipped {skipped}")
+
+
+stage_audio_from_raw()
 
 def parse_filename(filename):
     """

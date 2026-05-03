@@ -6,11 +6,10 @@ from pathlib import Path
 # (Adler, Kansas, Kurland, SCALE, Wright). Label: Control=0, PWA=1.
 # No canonical split provided in the source metadata — all rows set to 0.
 
-SOURCE_ROOT = Path("/Users/lkieu/Downloads/aphasia")
+DATA_ROOT = Path("data/aphasia")
+SOURCE_ROOT = DATA_ROOT / "raw"
 SOURCE_CSV = SOURCE_ROOT / "metadata.csv"
 SOURCE_AUDIO_ROOT = SOURCE_ROOT / "data"
-
-DATA_ROOT = Path("data/aphasia")
 
 LABEL_MAP = {"Control": 0, "PWA": 1}
 

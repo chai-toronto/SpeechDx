@@ -9,8 +9,8 @@ from pathlib import Path
 # Label: Control=0, ProbableAD=1.
 # Splits: train (English) = 0, val (Greek sample-gr) = 1, test (Greek held-out) = 2.
 
-SOURCE_ROOT = Path("/Users/lkieu/Downloads/dementiabank_addressM")
 DATA_ROOT = Path("data/dbank")
+SOURCE_ROOT = DATA_ROOT / "raw"
 
 LABEL_MAP = {"Control": 0, "ProbableAD": 1}
 

@@ -1,3 +1,11 @@
+## TODO:
+  The deferred list is now in project_ahb_rewrite_status.md memory:                                                                                                                                                                                                                                                       
+  1. Drop the level/single_avg/single cache tag + class-level prune of probe/pool unreachables (cache → v3, drop output_hidden_state outside model wrappers)                                                                                                                                                            
+  2. Central seed propagation from ahb/configs/main.yaml                                                                                                                                                                                                                                                                  
+  3. Resumable stages (warm always, exps via knob, manifests once)                                                                                                                                                                                                                                                      
+  4. Byte parity for ahb train (subsumed by #2)                                                                                                                                                                                                                                                                           
+                                                 
+
 # Audio Health Benchmark
 
 A reproducible benchmark for self-supervised audio encoders on health-related
@@ -49,36 +57,54 @@ A single CLI entry point (`python -m ahb <subcommand>`) covers four modes:
 
 12 frozen backbones ship by default. The `Source` column is the identifier
 passed to `from_pretrained(...)`; the underlying weight files are downloaded
-on first use.
+on first use. Sizes / layer counts / sample rates live in the per-encoder yaml
+under [`ahb/configs/encoders/`](ahb/configs/encoders/) — that's the source of
+truth, not the table below.
 
-| Name (`--encoder`) | Source                                                     | Hub          | Notes                                                |
-|--------------------|------------------------------------------------------------|--------------|------------------------------------------------------|
-| `wavlm`            | `microsoft/wavlm-large`                                    | HF           | 1024-dim, 24 layers                                  |
-| `w2v2`             | `facebook/wav2vec2-large-960h-lv60-self`                   | HF           | 1024-dim, 24 layers                                  |
-| `hubert`           | `facebook/hubert-large-ls960-ft`                           | HF           | 1024-dim, 24 layers                                  |
-| `whisper`          | `openai/whisper-large-v3`                                  | HF           | 30 s audio, 1280-dim, 32 layers                      |
-| `ast`              | `MIT/ast-finetuned-audioset-10-10-0.4593`                  | HF           | 10 s audio, 768-dim                                  |
-| `audiomae`         | `hance-ai/audiomae`                                        | HF           | 10 s audio, 768-dim                                  |
-| `clap`             | `laion/larger_clap_general`                                | HF           | 48 kHz, 10 s, 1024-dim                               |
-| `mms`              | `facebook/mms-1b`                                          | HF           | 1280-dim, 48 layers                                  |
-| `wavjepa`          | `labhamlet/wavjepa-nat-base`                               | HF           | 768-dim, 12 layers                                   |
-| `qwen3voice`       | `Qwen/Qwen3-TTS-Tokenizer-12Hz`                            | HF           | 24 kHz, 512-dim                                      |
-| `emotion2vec`      | `iic/emotion2vec_plus_large`                               | ModelScope   | Loaded via FunASR                                    |
-| `opera_gt`         | `evelyn0414/OPERA` → `encoder-operaGT.ckpt`                | HF (ckpt)    | Vendored loader at `third_party/OPERA/`              |
-
-The yaml at `ahb/configs/encoders/<name>.yaml` is the source of truth — it
-holds the default `ssl_encoder_source`, sample rate, feature dim, layer count,
-and length window. Edit those to swap to a smaller variant (e.g. `wavlm-base`
-in place of `wavlm-large`).
+| Name (`--encoder`) | Source                                          | Hub        | Notes                                              |
+|--------------------|-------------------------------------------------|------------|----------------------------------------------------|
+| `wavlm`            | `microsoft/wavlm-large`                         | HF         | 1024-dim, 24 layers                                |
+| `w2v2`             | `facebook/wav2vec2-large-960h-lv60-self`        | HF         | 1024-dim, 24 layers                                |
+| `hubert`           | `facebook/hubert-large-ls960-ft`                | HF         | 1024-dim, 24 layers                                |
+| `whisper`          | `openai/whisper-large-v3`                       | HF         | 30 s audio, 1280-dim, 32 layers                    |
+| `ast`              | `MIT/ast-finetuned-audioset-10-10-0.4593`       | HF         | 10 s audio, 768-dim                                |
+| `audiomae`         | `hance-ai/audiomae`                             | HF         | 10 s audio, 768-dim                                |
+| `clap`             | `laion/larger_clap_general`                     | HF         | 48 kHz, 10 s, 1024-dim                             |
+| `mms`              | `facebook/mms-1b`                               | HF         | 1280-dim, 48 layers                                |
+| `wavjepa`          | `labhamlet/wavjepa-nat-base`                    | HF         | 768-dim, 12 layers                                 |
+| `qwen3voice`       | `Qwen/Qwen3-TTS-Tokenizer-12Hz`                 | HF         | 24 kHz, 512-dim                                    |
+| `emotion2vec`      | `emotion2vec/emotion2vec_plus_large`            | HF + FunASR| Loaded via FunASR; HF mirror of `iic/...` on ModelScope |
+| `opera_gt`         | `evelyn0414/OPERA` → `encoder-operaGT.ckpt`     | HF (ckpt)  | Vendored loader at `third_party/OPERA/`            |
 
 ### Pinning a revision
 
-`from_pretrained(...)` calls accept a `revision=` kwarg, but the encoder
-classes today don't forward one — they pull HEAD. To pin a specific commit
-for a backbone, either edit the encoder wrapper in `model/<name>.py` to pass
-`revision="<sha>"` through, or set `HF_HUB_REVISION` and use a per-repo
-override file. For `opera_gt` the checkpoint is downloaded once into
-`cks/model/` and reused; replace it manually to pin.
+The encoder wrappers call `from_pretrained(...)` without a `revision=` kwarg,
+so on a fresh clone you get whatever each repo's `main` HEAD is the day the
+cache is warmed. The table below records the current upstream HEAD per repo —
+**use these as the canonical pin** when reproducing results. Cached commits
+already on disk (`~/.cache/huggingface/hub/models--<org>--<repo>/snapshots/`)
+override what's downloaded fresh, so verify the hash there if a run pre-dates
+the date below.
+
+| Encoder       | Repo                                              | HEAD commit (2026-05-03)                  | Upstream last touched |
+|---------------|---------------------------------------------------|-------------------------------------------|------------------------|
+| `wavlm`       | `microsoft/wavlm-large`                           | `c1423ed94bb01d80a3f5ce5bc39f6026a0f4828c` | 2022-02-02 |
+| `w2v2`        | `facebook/wav2vec2-large-960h-lv60-self`          | `54074b1c16f4de6a5ad59affb4caa8f2ea03a119` | 2022-05-23 |
+| `hubert`      | `facebook/hubert-large-ls960-ft`                  | `ece5fabbf034c1073acae96d5401b25be96709d8` | 2022-05-24 |
+| `whisper`     | `openai/whisper-large-v3`                         | `06f233fe06e710322aca913c1bc4249a0d71fce1` | 2024-08-12 |
+| `ast`         | `MIT/ast-finetuned-audioset-10-10-0.4593`         | `f826b80d28226b62986cc218e5cec390b1096902` | 2023-09-06 |
+| `audiomae`    | `hance-ai/audiomae`                               | `c1379969532da421855d2f225f40c9c7b4959188` | 2024-08-16 |
+| `clap`        | `laion/larger_clap_general`                       | `ada0c23a36c4e8582805bb38fec3905903f18b41` | 2023-10-31 |
+| `mms`         | `facebook/mms-1b`                                 | `0d2f7adb9903d98894d70ae11f7fbdfc8cb71a69` | 2023-06-05 |
+| `wavjepa`     | `labhamlet/wavjepa-nat-base`                      | `15d95ff67fa98117b17e83a1653bbca97877ff6f` | 2025-11-06 |
+| `qwen3voice`  | `Qwen/Qwen3-TTS-Tokenizer-12Hz`                   | `7dd38ad4e9bad454aae9cd937d0cd577604fe229` | 2026-01-29 |
+| `emotion2vec` | `emotion2vec/emotion2vec_plus_large` (HF)         | `6c303ba987b86b93193de93e34bb2b077a6bedc4` | 2024-06-24 |
+| `opera_gt`    | `evelyn0414/OPERA`                                | `d8de4322870b596f0a6ff6ea907b9a6996cd243a` | 2024-11-15 |
+
+To make a pin authoritative across machines, edit the encoder wrapper in
+`model/<name>.py` to pass `revision="<sha>"` into `from_pretrained(...)`, or
+set `HF_HUB_REVISION` per repo. For `opera_gt` the checkpoint is downloaded
+once into `cks/model/` and reused; replace it manually to pin.
 
 ## Repository layout
 
@@ -111,6 +137,42 @@ override file. For `opera_gt` the checkpoint is downloaded once into
 ├── run_all_slurm.sh        SLURM submission template
 └── invalidate_caches.sh    Edit-and-run cache invalidator
 ```
+
+## Datasets
+
+13 health-speech corpora ship with prep modules and metadata builders. Most
+require a license / DTA / EULA — only RAVDESS, Coswara, and MDVR-KCL can be
+fetched without contacting the authors. The "Local" column is the directory
+name under `data/` and the prefix used in task ids; the "Upstream" column is
+the canonical name in the literature.
+
+| Local        | Upstream                                       | Access | Source                                                                                                                        |
+|--------------|------------------------------------------------|--------|-------------------------------------------------------------------------------------------------------------------------------|
+| `ravdess`    | RAVDESS (Speech)                               | open   | https://zenodo.org/records/1188976 — `script/download_ravdess.sh`                                                             |
+| `coswara`    | Project Coswara (IISc)                         | open   | https://github.com/iiscleap/Coswara-Data — `script/download_coswara.sh`                                                       |
+| `mvdr`       | MDVR-KCL (King's College London + Fraunhofer)  | open   | https://zenodo.org/records/2867216 — `script/download_mvdr.sh` (CC BY 4.0)                                                    |
+| `ksof`       | Kassel State of Fluency                        | EULA   | https://zenodo.org/records/6801844 — sign EULA at https://th-nuernberg.github.io/kassel-state-of-fluency/                     |
+| `torgo`      | TORGO Database of Dysarthric Articulation      | open   | http://www.cs.toronto.edu/~complingweb/data/TORGO/torgo.html (pending cluster shutdown to verify)                             |
+| `uaspeech`   | UASpeech                                       | email  | https://speechtechnology.web.illinois.edu/uaspeech/ — request via uaspeech-requests@lists.illinois.edu                        |
+| `nemours`    | Nemours Database of Dysarthric Speech          | contact | A.I. duPont Hospital for Children (Wilmington, DE) — distributed on CD/DVD on request                                         |
+| `iemocap`    | IEMOCAP                                        | release form | https://sail.usc.edu/iemocap/ — academic release form to USC SAIL                                                             |
+| `dbank`      | DementiaBank ADReSS-M (ICASSP 2023 SPGC)       | DTA    | https://luzs.gitlab.io/madress-2023/ — request via madress2023@ed.ac.uk; data on TalkBank                                     |
+| `aphasia`    | AphasiaBank (TalkBank)                         | registration | https://aphasia.talkbank.org/ — TalkBank account; some sub-corpora (APROCSA, Dysphagia) require extra approval                |
+| `edaic`      | E-DAIC (AVEC 2019 / DAIC-WOZ extended)         | DTA    | https://dcapswoz.ict.usc.edu/ — academic form to USC ICT                                                                      |
+| `c9s`        | COVID-19 Sounds (Cambridge)                    | DTA    | https://covid-19-sounds.org/ — DTA via covid-19-sounds@cl.cam.ac.uk                                                           |
+| `avfad`      | Advanced Voice Function Assessment Database    | email  | https://acsa.web.ua.pt/AVFAD.htm — request via ieeta-acsa@ua.pt                                                               |
+
+**Staging contract.** Once raw data is on disk, a metadata script copies the
+audio into `data/<name>/processed/audio/` and writes the CSV to
+`data/<name>/processed/<name>.csv`. The CSV must have at least
+`uid, Participant_ID, split, label, path` — see
+[`metadata_script/README.md`](metadata_script/README.md).
+
+All `create_<name>_metadata.py` scripts read from `data/<name>/raw/` by
+default. Drop the upstream archive there (or run the matching
+`script/download_*.sh` for the open ones), then run the metadata script —
+it stages audio into `processed/audio/` and writes the CSV.
+
 
 ## Adding a task
 

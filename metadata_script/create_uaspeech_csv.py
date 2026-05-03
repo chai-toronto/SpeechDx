@@ -1,22 +1,47 @@
 """
 Create a metadata CSV for the UASpeech dataset.
 
-Walks data/uaspeech/processed/audio/<speaker>/ directories, parses filenames,
-assigns labels and splits, and writes the CSV to data/uaspeech/processed/uaspeech.csv.
+Source layout (after extracting the UASpeech archive into data/uaspeech/raw/):
+    data/uaspeech/raw/<speaker>/*.wav
+
+Staged into data/uaspeech/processed/audio/<speaker>/*.wav, parses filenames,
+assigns labels and splits, and writes the CSV to
+data/uaspeech/processed/uaspeech.csv.
 """
 
 import os
 import re
+import shutil
 from collections import defaultdict
 from pathlib import Path
 
 import pandas as pd
 import soundfile as sf
 
-# Project root (two levels up from this script)
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# Repo root: this file lives at metadata_script/create_uaspeech_csv.py,
+# so parents[1] is the repo root.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+RAW_DIR = PROJECT_ROOT / "data" / "uaspeech" / "raw"
 AUDIO_DIR = PROJECT_ROOT / "data" / "uaspeech" / "processed" / "audio"
 OUTPUT_CSV = PROJECT_ROOT / "data" / "uaspeech" / "processed" / "uaspeech.csv"
+
+
+def stage_audio_from_raw():
+    """Copy each <speaker>/*.wav from raw/ → processed/audio/."""
+    if not RAW_DIR.is_dir():
+        return
+    AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+    copied = skipped = 0
+    for src in RAW_DIR.glob("*/*.wav"):
+        rel = src.relative_to(RAW_DIR)
+        dst = AUDIO_DIR / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if dst.exists():
+            skipped += 1
+        else:
+            shutil.copy2(src, dst)
+            copied += 1
+    print(f"Staged from {RAW_DIR}: copied {copied}, skipped {skipped}")
 
 # Dysarthric speakers (label=1)
 DYSARTHRIC = {
@@ -67,6 +92,7 @@ def assign_splits(speakers: list[str]) -> dict[str, int]:
 
 
 def main():
+    stage_audio_from_raw()
     all_speakers = sorted(os.listdir(AUDIO_DIR))
     # Only keep known speakers
     all_speakers = [s for s in all_speakers if s in DYSARTHRIC | CONTROL]

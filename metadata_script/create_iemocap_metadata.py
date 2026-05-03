@@ -1,8 +1,9 @@
 """
 Create IEMOCAP metadata CSV.
 
-Source: /Users/lkieu/Downloads/IEMOCAP_full_release
-Audio symlinked into data/iemocap/processed/audio/<subsession>/<sentence>.wav
+Source: data/iemocap/raw/Session{1..5}/...  (extracted IEMOCAP_full_release;
+contents placed directly under raw/, no extra IEMOCAP_full_release wrapper).
+Audio copied into data/iemocap/processed/audio/<subsession>/<sentence>.wav
 CSV written to data/iemocap/processed/iemocap.csv
 
 Participant_ID = subsession.split('_')[0] (e.g. Ses01F) -> 10 total.
@@ -27,7 +28,7 @@ from pathlib import Path
 
 import soundfile as sf
 
-SRC = Path("/Users/lkieu/Downloads/IEMOCAP_full_release")
+SRC = Path("data/iemocap/raw")
 DST_ROOT = Path("data/iemocap/processed")
 AUDIO_DST = DST_ROOT / "audio"
 CSV_PATH = DST_ROOT / "iemocap.csv"

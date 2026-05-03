@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 # AVFAD dataset (voice pathology)
-# Source: /Users/lkieu/Downloads/avfad (or passed as argv[1])
+# Source: data/avfad/raw/  (or passed as argv[1])
 # Metadata: AVFAD_01_00_00.xlsx
 # Audio: split across 4 folders (A_to_C, D_to_L, M, N_to_Z)
 # Files per participant: *004-*011 (CAPE-V sentences, reading, spontaneous speech)
@@ -15,6 +15,7 @@ import pandas as pd
 # Splits: 60/20/20 stratified by label, grouped by participant
 
 DATA_ROOT = Path("data/avfad")
+RAW_ROOT = DATA_ROOT / "raw"
 OUT_ROOT = DATA_ROOT / "processed"
 
 AUDIO_SUFFIXES = ["004", "005", "006", "007", "008", "009", "010", "011"]
@@ -57,7 +58,7 @@ def make_stratified_splits(participants, seed):
 
 def main():
     import sys
-    src_root = Path(sys.argv[1]) if len(sys.argv) > 1 else DATA_ROOT
+    src_root = Path(sys.argv[1]) if len(sys.argv) > 1 else RAW_ROOT
 
     # ---- Load metadata (all columns) ----
     df = pd.read_excel(src_root / "AVFAD_01_00_00.xlsx")

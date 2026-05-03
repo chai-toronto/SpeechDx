@@ -1,16 +1,56 @@
 import csv
 import random
 import re
+import shutil
 from pathlib import Path
 
-# Define the root directory for ReadText recordings
-root_dir = "data/mvdr/processed/audio/ReadText"
+# MDVR-KCL (Mobile Device Voice Recordings at King's College London) —
+# Jaeger, Trivedi, Stadtschnitzer (2019), Zenodo 10.5281/zenodo.2867216,
+# CC BY 4.0. Funded by the EU i-PROGNOSIS project.
+#
+# Expected raw layout (after `script/download_mvdr.sh`):
+#   data/mvdr/raw/ReadText/HC/ID*_hc_*.wav
+#   data/mvdr/raw/ReadText/PD/ID*_pd_*.wav
+# Staged into:
+#   data/mvdr/processed/audio/ReadText/{HC,PD}/...
+RAW_ROOT = Path("data/mvdr/raw")
+PROCESSED_ROOT = Path("data/mvdr/processed")
+PROCESSED_AUDIO = PROCESSED_ROOT / "audio"
+root_dir = str(PROCESSED_AUDIO / "ReadText")
 
 # Filename format: ID{nn}_{hc|pd}_{H&Y}_{UPDRS_II5}_{UPDRS_III18}.wav
 # Example: ID02_pd_1_2_1.wav
 # Label: HC=0, PD=1
 
 RANDOM_SEED = 42
+
+
+def stage_audio_from_raw():
+    """Copy ReadText/{HC,PD}/*.wav from raw/ → processed/audio/."""
+    if not RAW_ROOT.is_dir():
+        return
+    matches = list(RAW_ROOT.glob("ReadText/*/*.wav"))
+    if not matches:
+        print(
+            f"WARN: {RAW_ROOT} exists but contains no ReadText/{{HC,PD}}/*.wav. "
+            "Run script/download_mvdr.sh or extract 26_29_09_2017_KCL.zip there."
+        )
+        return
+    PROCESSED_AUDIO.mkdir(parents=True, exist_ok=True)
+    copied = skipped = 0
+    for src in matches:
+        rel = src.relative_to(RAW_ROOT)
+        dst = PROCESSED_AUDIO / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if dst.exists():
+            skipped += 1
+        else:
+            shutil.copy2(src, dst)
+            copied += 1
+    print(f"Staged from {RAW_ROOT}: copied {copied}, skipped {skipped}")
+
+
+stage_audio_from_raw()
 
 
 def make_stratified_splits(wav_files, seed):

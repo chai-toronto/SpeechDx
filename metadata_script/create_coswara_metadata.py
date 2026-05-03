@@ -11,6 +11,7 @@ from pathlib import Path
 # Splits: 60/20/20 stratified random by covid_status, grouped by participant
 
 DATA_ROOT = Path("data/coswara")
+RAW_ROOT = DATA_ROOT / "raw"
 OUT_ROOT = DATA_ROOT / "processed"
 AUDIO_FILES = ["counting-normal.wav", "counting-fast.wav"]
 RANDOM_SEED = 42
@@ -61,11 +62,19 @@ def make_stratified_splits(rows, seed):
 
 
 def main():
-    # Support reading raw data from an alternate source (e.g. external drive)
+    # Support reading raw data from an alternate source (e.g. external drive).
+    # Default layout assumes the upstream Coswara-Data repo is cloned into
+    # data/coswara/raw/ and its extract_data.py has been run, producing
+    # data/coswara/raw/Extracted_data/<YYYYMMDD>/<pid>/*.wav alongside
+    # data/coswara/raw/combined_data.csv.
     import sys
-    raw_root = Path(sys.argv[1]) if len(sys.argv) > 1 else DATA_ROOT
+    raw_root = Path(sys.argv[1]) if len(sys.argv) > 1 else RAW_ROOT
+    audio_root = raw_root / "Extracted_data"
+    if not audio_root.is_dir():
+        # Backwards compat: support callers who pass the Extracted_data dir directly.
+        audio_root = raw_root
 
-    pid_to_dir = build_pid_to_dir(raw_root)
+    pid_to_dir = build_pid_to_dir(audio_root)
     # Also scan processed/audio/ for existing date dirs
     processed_audio = OUT_ROOT / "audio"
     if processed_audio.is_dir():
@@ -166,7 +175,7 @@ def main():
     valid_rows = []
     copied, skipped, dropped = 0, 0, 0
     for row in rows:
-        src = raw_root / row["path"]
+        src = audio_root / row["path"]
         dst = dest_audio_dir / row["path"]
         dst.parent.mkdir(parents=True, exist_ok=True)
 

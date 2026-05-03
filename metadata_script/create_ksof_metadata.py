@@ -1,7 +1,7 @@
 """
 Create KSoF (Kassel State of Fluency) metadata and copy audio.
 
-Source: /Users/lkieu/Downloads/KSoF_release
+Source: data/ksof/raw/  (KSoF_release extracted)
   - kassel-state-of-fluency-labels.csv
   - segments/<segment_id>.wav  (5597 clips, 3 seconds, 16 kHz mono)
 
@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pandas as pd
 
-SRC_DIR = Path("/Users/lkieu/Downloads/KSoF_release")
+SRC_DIR = Path("data/ksof/raw")
 DST_DIR = Path("data/ksof/processed")
 AUDIO_DST = DST_DIR / "audio"
 CSV_DST = DST_DIR / "ksof.csv"

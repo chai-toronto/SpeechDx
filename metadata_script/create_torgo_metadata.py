@@ -1,9 +1,35 @@
 import os
 import csv
+import shutil
 from pathlib import Path
 
-# Define the root directory
-root_dir = "data/torgo"
+# Source: data/torgo/raw/<gender>/<pid>/Session*/wav_arrayMic/*.wav (TORGO release layout)
+# Staged into:  data/torgo/processed/audio/<gender>/<pid>/Session*/wav_arrayMic/*.wav
+RAW_ROOT = Path("data/torgo/raw")
+PROCESSED_ROOT = Path("data/torgo/processed")
+PROCESSED_AUDIO = PROCESSED_ROOT / "audio"
+root_dir = str(PROCESSED_AUDIO)
+
+
+def stage_audio_from_raw():
+    """Copy each <gender>/<pid>/Session*/wav_arrayMic/*.wav from raw/ → processed/audio/."""
+    if not RAW_ROOT.is_dir():
+        return
+    PROCESSED_AUDIO.mkdir(parents=True, exist_ok=True)
+    copied = skipped = 0
+    for src in RAW_ROOT.glob("*/*/Session*/wav_arrayMic/*.wav"):
+        rel = src.relative_to(RAW_ROOT)
+        dst = PROCESSED_AUDIO / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if dst.exists():
+            skipped += 1
+        else:
+            shutil.copy2(src, dst)
+            copied += 1
+    print(f"Staged from {RAW_ROOT}: copied {copied}, skipped {skipped}")
+
+
+stage_audio_from_raw()
 
 # Define splits
 train_set = {'FC02', 'F03', 'F01', 'MC04', 'MC03', 'M02'}
@@ -80,7 +106,8 @@ for gender_dir in Path(root_dir).iterdir():
 wav_files.sort(key=lambda x: x['path'])
 
 # Write to CSV
-output_file = "data/torgo/torgo_metadata.csv"
+output_file = str(PROCESSED_ROOT / "torgo.csv")
+PROCESSED_ROOT.mkdir(parents=True, exist_ok=True)
 with open(output_file, 'w', newline='') as csvfile:
     fieldnames = ['uid', 'gender', 'Participant_ID', 'split', 'label', 'severity', 'path']
     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)

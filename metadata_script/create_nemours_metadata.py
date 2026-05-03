@@ -10,13 +10,14 @@ from pathlib import Path
 # Splits: 0/1/2 (train/val/test) already assigned
 
 DATA_ROOT = Path("data/nemours")
+RAW_ROOT = DATA_ROOT / "raw"
 OUT_ROOT = DATA_ROOT / "processed"
 
 PATH_PREFIX = "./data_og/Nemours/wav/"
 
 
 def main():
-    with open(DATA_ROOT / "Nemours-metadata.csv", newline='') as f:
+    with open(RAW_ROOT / "Nemours-metadata.csv", newline='') as f:
         src_rows = list(csv.DictReader(f, delimiter=';'))
 
     rows = []
@@ -36,7 +37,7 @@ def main():
     copied, skipped, dropped = 0, 0, 0
     valid_rows = []
     for row in rows:
-        src = DATA_ROOT / row["path"]
+        src = RAW_ROOT / row["path"]
         dst = dest_audio_dir / row["path"]
         dst.parent.mkdir(parents=True, exist_ok=True)
 

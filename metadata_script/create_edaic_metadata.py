@@ -10,6 +10,7 @@ from pathlib import Path
 # Label: PHQ_Binary (0 = not depressed, 1 = depressed)
 
 DATA_ROOT = Path("data/edaic")
+RAW_ROOT = DATA_ROOT / "raw"
 
 
 def load_csv(path):
@@ -19,7 +20,7 @@ def load_csv(path):
 
 def main():
     # ---- Load metadata_mapped (train + dev) ----
-    meta_rows = load_csv(DATA_ROOT / "metadata_mapped.csv")
+    meta_rows = load_csv(RAW_ROOT / "metadata_mapped.csv")
 
     rows = []
     for r in meta_rows:
@@ -39,7 +40,7 @@ def main():
         })
 
     # ---- Load test split ----
-    test_rows = load_csv(DATA_ROOT / "labels" / "test_split.csv")
+    test_rows = load_csv(RAW_ROOT / "labels" / "test_split.csv")
 
     for r in test_rows:
         pid = r["Participant_ID"]
@@ -57,7 +58,7 @@ def main():
         })
 
     # ---- Copy audio to processed/audio/ ----
-    raw_audio_dir = DATA_ROOT / "data"
+    raw_audio_dir = RAW_ROOT / "data"
     dest_audio_dir = DATA_ROOT / "processed" / "audio"
     dest_audio_dir.mkdir(parents=True, exist_ok=True)
 

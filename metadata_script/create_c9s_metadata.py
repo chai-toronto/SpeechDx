@@ -4,11 +4,11 @@ Create unified COVID-19 Sounds (c9s) metadata CSV.
 Merges the 3 platform CSVs (android/ios/web) with task 1 and task 2
 split/label info. Copies voice audio from Covid19SoundFull.
 
-Source data:
-  - data/c9s/results_raw_20210426_lan_yamnet_{android,ios,web}_noloc.csv
-  - data/c9s/data_0426_en_task1.csv
-  - data/c9s/data_0426_en_task2.csv
-  - data/Covid19SoundFull/  (read-only audio)
+Source data (under data/c9s/raw/):
+  - results_raw_20210426_lan_yamnet_{android,ios,web}_noloc.csv
+  - data_0426_en_task1.csv
+  - data_0426_en_task2.csv
+  - Covid19SoundFull/   (audio tree)
 
 Output:
   - data/c9s/processed/c9s.csv
@@ -21,7 +21,8 @@ from pathlib import Path
 
 DATA_ROOT = Path("data")
 C9S_DIR = DATA_ROOT / "c9s"
-SRC_AUDIO = DATA_ROOT / "Covid19SoundFull"
+RAW_ROOT = C9S_DIR / "raw"
+SRC_AUDIO = RAW_ROOT / "Covid19SoundFull"
 FALLBACK_AUDIO = [
     DATA_ROOT / "c9s_t1" / "processed" / "audio",
     DATA_ROOT / "c9s_t2" / "processed" / "audio",
@@ -29,12 +30,12 @@ FALLBACK_AUDIO = [
 OUT_ROOT = C9S_DIR / "processed"
 
 PLATFORM_CSVS = {
-    "android": C9S_DIR / "results_raw_20210426_lan_yamnet_android_noloc.csv",
-    "ios": C9S_DIR / "results_raw_20210426_lan_yamnet_ios_noloc.csv",
-    "web": C9S_DIR / "results_raw_20210426_lan_yamnet_web_noloc.csv",
+    "android": RAW_ROOT / "results_raw_20210426_lan_yamnet_android_noloc.csv",
+    "ios": RAW_ROOT / "results_raw_20210426_lan_yamnet_ios_noloc.csv",
+    "web": RAW_ROOT / "results_raw_20210426_lan_yamnet_web_noloc.csv",
 }
-TASK1_CSV = C9S_DIR / "data_0426_en_task1.csv"
-TASK2_CSV = C9S_DIR / "data_0426_en_task2.csv"
+TASK1_CSV = RAW_ROOT / "data_0426_en_task1.csv"
+TASK2_CSV = RAW_ROOT / "data_0426_en_task2.csv"
 
 KEEP_COLS = [
     "Uid", "Age", "Sex", "Medhistory", "Smoking", "Language", "Date",
