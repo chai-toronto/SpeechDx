@@ -1,0 +1,23 @@
+task: pathC
+task_type: B
+
+dataset: avfad_test
+
+data_io_script: training.dataio.prep_avfad
+prepare_data_fn: prepare_avfad_pathC
+
+label_key: label_encoded
+skip_prep: False
+
+num_labels: 1
+
+loss: !new:torch.nn.BCEWithLogitsLoss
+
+num_aug_ver: 1
+snr_low: 0
+snr_high: 15
+speed: !new:builtins.list
+  - !new:builtins.range
+    - 100
+    - 101
+    - 1
