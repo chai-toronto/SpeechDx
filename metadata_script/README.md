@@ -23,9 +23,10 @@ metadata CSV that the training pipeline understands.
 | `create_torgo_metadata.py`            | TORGO         | `data/torgo/processed/torgo.csv`                |
 | `create_uaspeech_csv.py`              | UASpeech      | `data/uaspeech/processed/uaspeech.csv`          |
 
-`add_chapters.py`, `build_edaic_transcript_chunks.py`, and
-`convert_to_soundfile_compat.py` are dataset-specific helpers used by
-the scripts above.
+`convert_to_soundfile_compat.py` is a dataset-specific helper used by
+the scripts above. The previous transcript-chunking step
+(`build_edaic_transcript_chunks.py`) has been folded into
+`create_edaic_metadata.py --chunk`.
 
 ## Required output schema
 
