@@ -30,8 +30,8 @@ from ahb.encoder_stub import build_stub_encoder_params as _build_stub_encoder_pa
 from ahb.log import ROLE_W, _emit, _now, _Progress, _slug, _tail
 from ahb.results import expected_ci_keys as _expected_ci_keys
 from ahb.yaml_io import TolerantLoader as _TolerantLoader
-from training import registry
-from training.dataio.subsample import subsample_and_write
+from ahb import registry
+from ahb.prep.subsample import subsample_and_write
 
 # ─── Global configuration ──────────────────────────────────────────────
 # Task/encoder enumeration comes from training/config/registry.yaml.

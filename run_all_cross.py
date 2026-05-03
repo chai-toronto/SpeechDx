@@ -22,7 +22,7 @@ from ahb.encoder_stub import build_stub_encoder_params as _build_stub_encoder_pa
 from ahb.log import ROLE_W, _emit, _now, _Progress, _slug, _tail
 from ahb.results import expected_ci_keys as _expected_ci_keys
 from ahb.yaml_io import TolerantLoader as _TolerantLoader
-from training import registry
+from ahb import registry
 
 # Keep in sync with run_all.py unless intentionally different.
 BASE_CONFIG = Path("training/config/main_cross.yaml")
