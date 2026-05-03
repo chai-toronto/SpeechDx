@@ -146,12 +146,12 @@ def compose_yaml_text(
 
     composed = "\n".join(out_lines)
     if level_dir:
-        # Data-efficiency runs reroute every ./exps/ literal in main.yaml
-        # to ./data_eff_exps/<level_dir>/. Affects output_folder,
+        # Data-efficiency runs reroute every ./exps/single_task/ literal in
+        # main.yaml to ./exps/data_eff/<level_dir>/. Affects output_folder,
         # train/val/test_annotation — the only literals starting with
-        # ./exps/ in main.yaml. Cache paths (slurm_tmpdir/...) are
-        # unchanged: data-eff reuses the full-benchmark encoder cache.
-        composed = composed.replace("./exps/", f"./data_eff_exps/{level_dir}/")
+        # ./exps/single_task/ in main.yaml. Cache paths (slurm_tmpdir/...)
+        # are unchanged: data-eff reuses the full-benchmark encoder cache.
+        composed = composed.replace("./exps/single_task/", f"./exps/data_eff/{level_dir}/")
     if cache_only:
         composed += "\ncache_only: True\n"
     return composed

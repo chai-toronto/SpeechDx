@@ -1,4 +1,4 @@
-"""``ahb status`` — completion table over ./exps/.
+"""``ahb status`` — completion table over ./exps/single_task/.
 
 Salvaged from ``run_all.py:cmd_status`` (lines 505-561). Output format
 unchanged so existing tooling that greps the table keeps working.

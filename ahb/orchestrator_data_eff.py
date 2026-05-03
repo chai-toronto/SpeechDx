@@ -3,8 +3,8 @@
 Salvaged from ``run_all_data_eff.py`` (lines 38-294). Same
 single-dataset task discovery as ``ahb.orchestrator`` but adds the
 ``level_dir`` axis: each (task, encoder, level) tuple is its own job
-under ``./data_eff_exps/<level_dir>/``. Manifests are subsampled into
-the level dir from the source ``./exps/<...>/manifest/`` tree on demand.
+under ``./exps/data_eff/<level_dir>/``. Manifests are subsampled into
+the level dir from the source ``./exps/single_task/<...>/manifest/`` tree on demand.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from ahb.registry import (
 )
 from ahb.results import expected_ci_keys
 
-EXP_ROOT_BASE = "data_eff_exps"
+EXP_ROOT_BASE = "exps/data_eff"
 LOGS_ROOT = Path("logs/run_all_data_eff")
 TASKS_DIR = Path("training/config/tasks")
 
@@ -81,9 +81,9 @@ def get_output_folder(dataset: str, task: str, model_name: str, level_dir: str,
 
 
 def src_manifest_paths(task_stem: str) -> tuple[Path, Path, Path]:
-    """Original (full) manifest paths under exps/<dataset>_<task>/manifest/."""
+    """Original (full) manifest paths under exps/single_task/<dataset>_<task>/manifest/."""
     dataset, task = get_task_info(task_stem)
-    base = Path(f"./exps/{dataset}_{task}/manifest")
+    base = Path(f"./exps/single_task/{dataset}_{task}/manifest")
     return base / "train.json", base / "valid.json", base / "test.json"
 
 
@@ -99,11 +99,11 @@ def is_cv(task_stem: str) -> bool:
 
 
 def ensure_manifest_data_eff(task_stem: str, level_dir: str) -> None:
-    """Subsample the source manifest into ``data_eff_exps/<level>/.../manifest/``.
+    """Subsample the source manifest into ``exps/data_eff/<level>/.../manifest/``.
 
     Idempotent: skips when the destination already has the expected files.
-    Source manifests under ``exps/<...>/manifest/`` are produced on demand
-    via ``ahb.prep.dispatch.ensure_manifest``.
+    Source manifests under ``exps/single_task/<...>/manifest/`` are produced
+    on demand via ``ahb.prep.dispatch.ensure_manifest``.
     """
     src_tr, src_va, src_te = src_manifest_paths(task_stem)
     dst_tr, dst_va, dst_te = manifest_paths(task_stem, level_dir)

@@ -63,14 +63,14 @@ wav_folder: !ref <data_folder>/<dataset>/processed/audio
 metadata_path: !ref <data_folder>/<dataset>/processed/<dataset>.csv
 
 # Output folder structure
-output_folder: !ref ./exps/<dataset>_<task>/<model_name>-<probe_name>-<experiment_tag>/
+output_folder: !ref ./exps/single_task/<dataset>_<task>/<model_name>-<probe_name>-<experiment_tag>/
 save_folder: !ref <output_folder>/save
 train_log_dir: !ref <output_folder>/
 
 # Manifest files created by prepare_data_fn
-train_annotation: !ref ./exps/<dataset>_<task>/manifest/train.json
-val_annotation: !ref ./exps/<dataset>_<task>/manifest/valid.json
-test_annotation: !ref ./exps/<dataset>_<task>/manifest/test.json
+train_annotation: !ref ./exps/single_task/<dataset>_<task>/manifest/train.json
+val_annotation: !ref ./exps/single_task/<dataset>_<task>/manifest/valid.json
+test_annotation: !ref ./exps/single_task/<dataset>_<task>/manifest/test.json
 
 # Data preparation
 skip_prep: !ref <data_params[skip_prep]>

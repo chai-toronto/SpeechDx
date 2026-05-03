@@ -30,9 +30,9 @@ MAIN_SINGLE = CONFIG_DIR / "main.yaml"
 MAIN_CROSS = CONFIG_DIR / "main_cross.yaml"
 MAIN_CROSS_CATEGORY = CONFIG_DIR / "main_cross_category.yaml"
 
-EXPS_SINGLE_ROOT = Path("./exps")
-EXPS_CROSS_ROOT = Path("./exps_cross")
-EXPS_CROSS_CATEGORY_ROOT = Path("./cross_cat_exps")
+EXPS_SINGLE_ROOT = Path("./exps/single_task")
+EXPS_CROSS_ROOT = Path("./exps/cross")
+EXPS_CROSS_CATEGORY_ROOT = Path("./exps/cross_cat")
 
 
 @lru_cache(maxsize=None)

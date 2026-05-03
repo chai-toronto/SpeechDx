@@ -13,7 +13,7 @@ from pathlib import Path
 
 from ahb.run_cross import cmd_run_cross
 
-CATEGORY_EXPS_ROOT = Path("./cross_cat_exps")
+CATEGORY_EXPS_ROOT = Path("./exps/cross_cat")
 CATEGORY_LOGS_ROOT = Path("logs/run_all_cross_category")
 
 

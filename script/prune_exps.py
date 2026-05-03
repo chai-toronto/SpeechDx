@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Prune redundant artifacts from completed experiments under exps/.
+"""Prune redundant artifacts from completed experiments under exps/single_task/.
 
 Targets the bloat documented in /Users/lkieu/.claude/plans/we-need-a-strategy-snuggly-hopper.md:
 - Per-trial save/CKPT*/model.ckpt files (650 MB - 2.4 GB each from full-model checkpoints)
 - ray_results/ (CV) or results/ (non-CV) Ray Tune storage
 
-Only acts on dirs matching the experiment shape `exps/<task>/<encoder>-<probe>-<tag>/`
-that already have a final results file (test_results.yaml or test_results.txt with CI).
+Only acts on dirs matching the experiment shape
+`exps/single_task/<task>/<encoder>-<probe>-<tag>/` that already have a final
+results file (test_results.yaml or test_results.txt with CI).
 
 Usage:
-    python -m script.prune_exps --dry-run            # report what would be deleted
-    python -m script.prune_exps                      # execute
-    python -m script.prune_exps --root exps_old      # prune the old-runs dir
+    python -m script.prune_exps --dry-run                # report what would be deleted
+    python -m script.prune_exps                          # execute
+    python -m script.prune_exps --root exps/cross        # prune a different mode dir
 """
 import argparse
 import shutil
@@ -23,13 +24,13 @@ from pathlib import Path
 from ahb.orchestrator import has_ci_results
 
 # script/extract_layer_weights.py reads model.ckpt only from
-# exps/*/*CLTP-2*/brain-logs/save/CKPT*/ — a different naming pattern that the
+# exps/single_task/*/*CLTP-2*/brain-logs/save/CKPT*/ — a different naming pattern that the
 # structural guard below does not match (no `CLTP-2` substring in any current
 # encoder-probe-tag combo). Those CKPTs are never touched.
 
 
 def is_experiment_dir(p: Path) -> bool:
-    """Structural guard: True iff `p` looks like exps/<task>/<encoder>-<probe>-<tag>/.
+    """Structural guard: True iff `p` looks like exps/single_task/<task>/<encoder>-<probe>-<tag>/.
 
     Requires:
       - p is a directory
@@ -140,7 +141,8 @@ def prune_root(root: Path, dry_run: bool) -> tuple[int, int]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--root", default="exps", help="Experiments root to walk (default: exps)")
+    ap.add_argument("--root", default="exps/single_task",
+                    help="Experiments root to walk (default: exps/single_task)")
     ap.add_argument("--dry-run", action="store_true", help="Report what would be deleted, do not delete")
     args = ap.parse_args()
 

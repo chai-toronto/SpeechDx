@@ -12,7 +12,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 TASKS_DIR = REPO / "training" / "config" / "tasks"
 DATA_FOLDER = REPO / "data"
-EXPS_FOLDER = REPO / "exps"
+EXPS_FOLDER = REPO / "exps" / "single_task"
 RATIO = [70, 10, 20]
 RANDOM_SEED = 2026
 

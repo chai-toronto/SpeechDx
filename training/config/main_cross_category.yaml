@@ -81,13 +81,13 @@ data_io_script: !ref <data_params[data_io_script]>
 prepare_data_fn: !ref <data_params[prepare_data_fn]>
 label_key: !ref <data_params[label_key]>
 
-output_folder: !ref ./cross_cat_exps/<dataset>_<task>/<model_name>-<probe_name>-<experiment_tag>/
+output_folder: !ref ./exps/cross_cat/<dataset>_<task>/<model_name>-<probe_name>-<experiment_tag>/
 save_folder: !ref <output_folder>/save
 train_log_dir: !ref <output_folder>/
 
-train_annotation: !ref ./cross_cat_exps/<dataset>_<task>/manifest/train.json
-val_annotation: !ref ./cross_cat_exps/<dataset>_<task>/manifest/valid.json
-test_annotation: !ref ./cross_cat_exps/<dataset>_<task>/manifest/test.json
+train_annotation: !ref ./exps/cross_cat/<dataset>_<task>/manifest/train.json
+val_annotation: !ref ./exps/cross_cat/<dataset>_<task>/manifest/valid.json
+test_annotation: !ref ./exps/cross_cat/<dataset>_<task>/manifest/test.json
 
 skip_prep: !ref <data_params[skip_prep]>
 

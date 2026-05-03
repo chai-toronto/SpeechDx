@@ -56,7 +56,7 @@ python -m bench single summary
 ```
 
 `status` prints a task × encoder grid of `☑ / ☐` completion marks.
-`summary` writes per-metric CSVs under `exps/_summary/`.
+`summary` writes per-metric CSVs under `exps/single_task/_summary/`.
 
 ## Repository layout
 
@@ -76,10 +76,12 @@ python -m bench single summary
 ├── metadata_script/        One create_<dataset>_metadata.py per dataset
 ├── script/                 Operational helpers (SLURM tracker, cache utilities)
 ├── data/                   Audio + per-dataset CSVs (gitignored, large)
-├── exps/                   Single-mode results — one folder per task per encoder
-├── exps_cross/             cross-mode results
-├── cross_cat_exps/         cross-category-mode results
-├── data_eff_exps/          data-eff results, one per (level, task, encoder)
+├── exps/                   All experiment results, grouped by mode
+│   ├── single_task/        single-mode — one folder per task per encoder
+│   ├── cross/              cross-mode results
+│   ├── cross_cat/          cross-category-mode results
+│   ├── data_eff/           data-eff results, one subdir per level
+│   └── slurm_logs/         SLURM stdout/stderr (top-level; spans modes)
 ├── embeddings_avg_finalv*/ Pre-computed encoder caches (HDF5)
 ├── logs/                   Per-run training logs
 ├── run_all.py              Legacy entry: single mode (still works; SLURM-friendly)
@@ -133,7 +135,7 @@ You do **not** need to edit the orchestrator scripts.
 
 Each completed `(task, encoder)` job writes:
 
-- `exps/<task>/<encoder>-AvgTProbe-run1/test_results.txt` — flat `key:
+- `exps/single_task/<task>/<encoder>-AvgTProbe-run1/test_results.txt` — flat `key:
   value` pairs (AUROC, F1, accuracy, AUROC_CI_low/high, MAE, …).
   Cross-validation tasks write `test_results.yaml` with per-fold detail.
 - `events.out.tfevents.*` — TensorBoard scalar logs.
@@ -143,7 +145,7 @@ Aggregate everything into per-metric CSVs:
 
 ```bash
 python -m bench single summary
-ls exps/_summary/    # AUROC.csv, MAE.csv, completion.csv, …
+ls exps/single_task/_summary/    # AUROC.csv, MAE.csv, completion.csv, …
 ```
 
 ## Cache invalidation

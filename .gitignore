@@ -21,10 +21,6 @@ script/sync_embeddings_to_drive.sh
 logs/
 tmp/
 exps/
-exps_*/
-cross_cat_exps/
-data_eff_exps/
-data_eff_exps_old/
 embeddings_avg_*/
 embeddings_avg_*.tar.zst
 cks/

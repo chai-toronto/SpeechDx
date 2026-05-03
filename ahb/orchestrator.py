@@ -79,7 +79,7 @@ def get_task_info(task_stem: str) -> tuple[str, str]:
 
 def get_output_folder(dataset: str, task: str, model_name: str,
                       tag: str = DEFAULT_EXPERIMENT_TAG) -> Path:
-    return Path(f"./exps/{dataset}_{task}/{model_name}-{DEFAULT_PROBE_NAME}-{tag}")
+    return Path(f"./exps/single_task/{dataset}_{task}/{model_name}-{DEFAULT_PROBE_NAME}-{tag}")
 
 
 _task_yaml_cache: dict[str, dict] = {}
@@ -106,7 +106,7 @@ def _load_task_yaml(task_stem: str) -> dict:
 
 def manifest_paths(task_stem: str) -> tuple[Path, Path, Path]:
     dataset, task = get_task_info(task_stem)
-    base = Path(f"./exps/{dataset}_{task}/manifest")
+    base = Path(f"./exps/single_task/{dataset}_{task}/manifest")
     return base / "train.json", base / "valid.json", base / "test.json"
 
 

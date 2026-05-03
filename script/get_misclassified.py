@@ -15,7 +15,7 @@ import importlib
 
 
 def main():
-    exp_dir = "exps/c9s_t1/qwen3voice-CLTP-t/brain-logs/final_model"
+    exp_dir = "exps/single_task/c9s_t1/qwen3voice-CLTP-t/brain-logs/final_model"
     hparams_file = os.path.join(exp_dir, "hyperparams.yaml")
 
     with open(hparams_file) as f:

@@ -154,7 +154,7 @@ def build_parser() -> argparse.ArgumentParser:
                               help="Extra YAML overrides forwarded to load_hyperpyyaml")
     train_parser.add_argument("--level-dir", default=None,
                               help="Reroute output_folder + manifest paths from "
-                                   "./exps/ to ./data_eff_exps/<level_dir>/ "
+                                   "./exps/single_task/ to ./exps/data_eff/<level_dir>/ "
                                    "(used by ahb run-data-eff)")
 
     train_cv_parser = sub.add_parser(
@@ -174,8 +174,8 @@ def build_parser() -> argparse.ArgumentParser:
         "summary", help="Collect results into per-metric CSVs",
     )
     summary_parser.add_argument(
-        "--out-dir", type=str, default="exps/_summary",
-        help="Directory to write metric CSVs (default: exps/_summary)",
+        "--out-dir", type=str, default="exps/single_task/_summary",
+        help="Directory to write metric CSVs (default: exps/single_task/_summary)",
     )
     summary_parser.add_argument(
         "--tag", type=str, default="run1",

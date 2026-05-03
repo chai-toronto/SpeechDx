@@ -110,7 +110,7 @@ def cmd_train(task: str, encoder: str, *,
     raises ``RuntimeError`` with an actionable message otherwise.
 
     If ``level_dir`` is given, output paths and manifest paths are
-    rerouted from ``./exps/`` to ``./data_eff_exps/<level_dir>/`` —
+    rerouted from ``./exps/single_task/`` to ``./exps/data_eff/<level_dir>/`` —
     used by ``ahb run-data-eff`` so subsampled-manifest results land
     in the data-efficiency tree (cache paths are unchanged; data-eff
     reuses the full-benchmark encoder cache).

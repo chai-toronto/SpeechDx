@@ -3,12 +3,12 @@
 Salvaged from ``run_all_data_eff.py:cmd_run`` (lines 374-571). Same
 writer/reader lock semantics as ``ahb/run.py`` but operates on
 (task, encoder, level) triples: each level gets its own subsampled
-manifest under ``./data_eff_exps/<level>/`` and shares the encoder
+manifest under ``./exps/data_eff/<level>/`` and shares the encoder
 cache with the full benchmark.
 
 Subprocess chain per job:
 - writer: ``ahb warm`` (the regular cache, shared across levels) →
-          ``ahb train --level-dir <level>`` (writes to data_eff_exps/...)
+          ``ahb train --level-dir <level>`` (writes to exps/data_eff/...)
 - reader: just ``ahb train --level-dir <level>``
 - cache_only: just ``ahb warm``
 - test_only: ``ahb train --level-dir <level> --overrides "test_only: true"``

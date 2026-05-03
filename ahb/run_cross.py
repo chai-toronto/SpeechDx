@@ -7,7 +7,7 @@ tasks (3 caches per pair instead of 2) and dispatches to
 
 The ``exps_root`` parameter lets ``ahb/run_cross_category.py`` reuse
 this entry point with the category-specific output root
-(``./cross_cat_exps``) and tasks subset (``category_*``).
+(``./exps/cross_cat``) and tasks subset (``category_*``).
 """
 
 from __future__ import annotations

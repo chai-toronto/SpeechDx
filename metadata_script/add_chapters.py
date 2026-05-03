@@ -161,7 +161,7 @@ import pandas as pd
 dataset = "torgo"
 root = Path(f"/Users/lkieu/PycharmProjects/Audio-Health-Benchmark/data/{dataset}/processed/audio/")
 csv_path = f"/Users/lkieu/PycharmProjects/Audio-Health-Benchmark/data/{dataset}/processed/{dataset}.csv"
-scores_path = Path("/Users/lkieu/PycharmProjects/Audio-Health-Benchmark/exps/torgo/wavlm-basep-all-chunkAtt_LTprobe-upsampler-t0.1-regs-chunk4-guarantee/brain-logs/final_model/test_diagnostics.pt")
+scores_path = Path("/Users/lkieu/PycharmProjects/Audio-Health-Benchmark/exps/single_task/torgo/wavlm-basep-all-chunkAtt_LTprobe-upsampler-t0.1-regs-chunk4-guarantee/brain-logs/final_model/test_diagnostics.pt")
 outroot = scores_path.parent / "with_chapters"
 
 # Load CSV and filter for split == 2

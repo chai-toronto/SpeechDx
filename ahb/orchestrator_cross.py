@@ -3,7 +3,7 @@
 Salvaged from ``run_all_cross.py`` (lines 28-256) — same shape as the
 single-dataset orchestrator helpers but reads task yamls from
 ``training/config/cross_tasks/`` and writes outputs under
-``./exps_cross/``. Probe defaults to ``Probe`` instead of ``AvgTProbe``.
+``./exps/cross/``. Probe defaults to ``Probe`` instead of ``AvgTProbe``.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from ahb.yaml_io import TolerantLoader
 TASKS_DIR = Path("training/config/cross_tasks")
 ENCODERS_DIR = Path("training/config/encoders")
 BASE_CONFIG = Path("training/config/main_cross.yaml")
-EXPS_ROOT = Path("./exps_cross")
+EXPS_ROOT = Path("./exps/cross")
 LOGS_ROOT = Path("logs/run_all_cross")
 
 # Cross-task default probe differs from single-dataset.

@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
-EXPS = ROOT / "exps"
+EXPS = ROOT / "exps" / "single_task"
 OUT_DIR = EXPS / "layer_weight_plots"
 
 # Encoder display names and expected layer counts
