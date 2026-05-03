@@ -82,13 +82,13 @@ def build_base_rows(raw_root):
     return rows
 
 
-def copy_audio_verbatim(rows, raw_root):
+def copy_audio_verbatim(rows, raw_root, dst_audio):
     src_dir = raw_root / "data"
-    DST_AUDIO.mkdir(parents=True, exist_ok=True)
+    dst_audio.mkdir(parents=True, exist_ok=True)
     copied = skipped = 0
     for row in rows:
         src = src_dir / row["path"]
-        dst = DST_AUDIO / row["path"]
+        dst = dst_audio / row["path"]
         dst.parent.mkdir(parents=True, exist_ok=True)
         if dst.exists():
             skipped += 1
@@ -138,7 +138,7 @@ def chunk_one(src_wav, transcript_csv):
     return np.concatenate(chunks), sr, boundaries
 
 
-def chunk_audio_by_transcript(rows, raw_root):
+def chunk_audio_by_transcript(rows, raw_root, dst_audio):
     """For each row, cut audio along transcript & write a chunked wav. Adds `boundaries`.
 
     Drops rows whose audio or transcript is missing, or whose transcript yielded
@@ -147,7 +147,7 @@ def chunk_audio_by_transcript(rows, raw_root):
     import soundfile as sf
 
     src_dir = raw_root / "data"
-    DST_AUDIO.mkdir(parents=True, exist_ok=True)
+    dst_audio.mkdir(parents=True, exist_ok=True)
     kept = []
     n_ok = n_skip = 0
 
@@ -172,7 +172,7 @@ def chunk_audio_by_transcript(rows, raw_root):
             continue
 
         out_audio, sr, boundaries = result
-        out_path = DST_AUDIO / f"{pid}_P" / f"{pid}_AUDIO.wav"
+        out_path = dst_audio / f"{pid}_P" / f"{pid}_AUDIO.wav"
         out_path.parent.mkdir(parents=True, exist_ok=True)
         sf.write(str(out_path), out_audio, sr, subtype="PCM_16")
 
@@ -185,18 +185,18 @@ def chunk_audio_by_transcript(rows, raw_root):
     return kept
 
 
-def write_csv(rows, with_boundaries):
-    DST_ROOT.mkdir(parents=True, exist_ok=True)
+def write_csv(rows, with_boundaries, out_csv):
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = list(BASE_FIELDS)
     if with_boundaries:
         fieldnames.append("boundaries")
-    with open(DST_CSV, "w", newline="") as f:
+    with open(out_csv, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
         for uid, row in enumerate(rows):
             row["uid"] = uid
             w.writerow({k: row.get(k, "") for k in fieldnames})
-    print(f"Wrote {DST_CSV}: {len(rows)} rows")
+    print(f"Wrote {out_csv}: {len(rows)} rows")
 
 
 def main():
@@ -204,6 +204,10 @@ def main():
     parser.add_argument("--raw-root", type=Path, default=RAW_ROOT,
                         help="Root containing metadata_mapped.csv, labels/, data/ "
                              "(default: data/edaic/raw).")
+    parser.add_argument("--out-csv", type=Path, default=DST_CSV,
+                        help=f"Output CSV path (default: {DST_CSV}).")
+    parser.add_argument("--out-audio", type=Path, default=DST_AUDIO,
+                        help=f"Output audio dir (default: {DST_AUDIO}).")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--no-copy", action="store_true",
                       help="Skip copying audio; write CSV only.")
@@ -215,14 +219,14 @@ def main():
     rows = build_base_rows(args.raw_root)
 
     if args.chunk:
-        rows = chunk_audio_by_transcript(rows, args.raw_root)
-        write_csv(rows, with_boundaries=True)
+        rows = chunk_audio_by_transcript(rows, args.raw_root, args.out_audio)
+        write_csv(rows, with_boundaries=True, out_csv=args.out_csv)
     else:
         if not args.no_copy:
-            copy_audio_verbatim(rows, args.raw_root)
+            copy_audio_verbatim(rows, args.raw_root, args.out_audio)
         else:
             print("Audio: skipped (--no-copy)")
-        write_csv(rows, with_boundaries=False)
+        write_csv(rows, with_boundaries=False, out_csv=args.out_csv)
 
     print(f"  Train (0): {sum(1 for r in rows if r['split'] == 0)}")
     print(f"  Val   (1): {sum(1 for r in rows if r['split'] == 1)}")
