@@ -1,9 +1,0 @@
-sample_rate: 16000
-feature_dim: 768
-max_length: 10  # 10 seconds * 16000 Hz = 160000 samples
-num_layers: 12
-layer_dim: 1
-
-encoder: !new:model.wav_hjepa_infer.WavHJepaInfer
-  model_ckpt: "./step-step=235000.ckpt"
-  freeze_encoder: True
