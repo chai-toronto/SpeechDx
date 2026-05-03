@@ -7,13 +7,13 @@ sys.path.insert(0, str(ROOT))
 
 import tempfile
 
-from training.dataio.prep_aphasia import prepare_aphasia_pwaC
-from training.dataio.prep_default import prepare_data as prepare_default
-from training.dataio.prep_dbank import prepare_dbank_mmseR
-from training.dataio.prep_edaic import prepare_edaic_phqR
-from training.dataio.prep_ksof import prepare_ksof_stutL
-from training.dataio.prep_mvdr import prepare_data as prepare_mvdr
-from training.dataio.prep_utils import save_task_csv
+from ahb.prep.aphasia import prepare_aphasia_pwaC
+from ahb.prep.standard import prepare_data as prepare_default
+from ahb.prep.dbank import prepare_dbank_mmseR
+from ahb.prep.edaic import prepare_edaic_phqR
+from ahb.prep.ksof import prepare_ksof_stutL
+from ahb.prep.mvdr import prepare_data as prepare_mvdr
+from ahb.prep.utils import save_task_csv
 import pandas as pd
 
 

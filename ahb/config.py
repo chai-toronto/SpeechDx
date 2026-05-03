@@ -88,6 +88,7 @@ def compose_yaml_text(
     cache_only: bool = False,
     base_main_yaml: Path | None = None,
     task_include_prefix: str = "tasks",
+    level_dir: str | None = None,
 ) -> str:
     """Compose the per-job main yaml text.
 
@@ -141,6 +142,13 @@ def compose_yaml_text(
             out_lines.append(line)
 
     composed = "\n".join(out_lines)
+    if level_dir:
+        # Data-efficiency runs reroute every ./exps/ literal in main.yaml
+        # to ./data_eff_exps/<level_dir>/. Affects output_folder,
+        # train/val/test_annotation — the only literals starting with
+        # ./exps/ in main.yaml. Cache paths (slurm_tmpdir/...) are
+        # unchanged: data-eff reuses the full-benchmark encoder cache.
+        composed = composed.replace("./exps/", f"./data_eff_exps/{level_dir}/")
     if cache_only:
         composed += "\ncache_only: True\n"
     return composed
@@ -167,6 +175,7 @@ def compose_config(
     probe_yaml: str = "Probe.yaml",
     mode: str = "read",
     overrides: dict | None = None,
+    level_dir: str | None = None,
 ) -> dict:
     """Produce the resolved hparams dict for one (task, encoder, probe) job.
 
@@ -195,6 +204,7 @@ def compose_config(
         cache_only=cache_only,
         base_main_yaml=base_main_yaml,
         task_include_prefix=task_subdir.name,
+        level_dir=level_dir,
     )
     overrides_str = _format_overrides(overrides) if overrides else ""
     with _temp_main_yaml(text) as path:

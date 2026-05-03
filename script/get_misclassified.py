@@ -10,7 +10,7 @@ import torch
 import pandas as pd
 import speechbrain as sb
 from hyperpyyaml import load_hyperpyyaml
-from training.brain import DiagnosticsBrain
+from ahb.brain import DiagnosticsBrain
 import importlib
 
 

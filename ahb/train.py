@@ -102,11 +102,18 @@ def _train_one_trial(config: dict, hparams_file: str, run_opts: dict,
 
 def cmd_train(task: str, encoder: str, *,
               probe: str = "AvgTProbe", probe_yaml: str = "Probe.yaml",
-              tag: str = "run1", overrides: str = "") -> None:
+              tag: str = "run1", overrides: str = "",
+              level_dir: str | None = None) -> None:
     """Run HP search + final eval for one (task, encoder, probe) triple.
 
     Cache must be warm; ``build_read_datasets_standard``'s pre-flight
     raises ``RuntimeError`` with an actionable message otherwise.
+
+    If ``level_dir`` is given, output paths and manifest paths are
+    rerouted from ``./exps/`` to ``./data_eff_exps/<level_dir>/`` —
+    used by ``ahb run-data-eff`` so subsampled-manifest results land
+    in the data-efficiency tree (cache paths are unchanged; data-eff
+    reuses the full-benchmark encoder cache).
     """
     ensure_manifest(task)
 
@@ -120,8 +127,10 @@ def cmd_train(task: str, encoder: str, *,
         model_name=encoder, encoder_yaml=encoder_yaml,
         task_yaml=f"{task}.yaml", probe_yaml=probe_yaml, probe_name=probe,
         warm_cache_override=False, test_only=False, cache_only=False,
+        level_dir=level_dir,
     )
-    base_yaml = CONFIG_DIR / f"_tmp_run_ahb_{os.getpid()}.yaml"
+    suffix = f"_de{level_dir}" if level_dir else ""
+    base_yaml = CONFIG_DIR / f"_tmp_run_ahb_{os.getpid()}{suffix}.yaml"
     base_yaml.write_text(text)
 
     run_opts: dict = {}

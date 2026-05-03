@@ -54,6 +54,7 @@ def _cmd_train(args: argparse.Namespace) -> None:
         args.task, args.encoder,
         probe=args.probe, probe_yaml=args.probe_yaml,
         tag=args.tag, overrides=args.overrides or "",
+        level_dir=getattr(args, "level_dir", None),
     )
 
 
@@ -64,6 +65,7 @@ def _cmd_train_cv(args: argparse.Namespace) -> None:
         args.task, args.encoder,
         probe=args.probe, probe_yaml=args.probe_yaml,
         tag=args.tag, overrides=args.overrides or "",
+        level_dir=getattr(args, "level_dir", None),
     )
 
 
@@ -97,6 +99,12 @@ def _cmd_run_cross_category(args: argparse.Namespace) -> None:
     from ahb.run_cross_category import cmd_run_cross_category
 
     cmd_run_cross_category(args)
+
+
+def _cmd_run_data_eff(args: argparse.Namespace) -> None:
+    from ahb.run_data_eff import cmd_run_data_eff
+
+    cmd_run_data_eff(args)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -144,6 +152,10 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--tag", default="run1", help="Experiment tag (default: run1)")
     train_parser.add_argument("--overrides", default="",
                               help="Extra YAML overrides forwarded to load_hyperpyyaml")
+    train_parser.add_argument("--level-dir", default=None,
+                              help="Reroute output_folder + manifest paths from "
+                                   "./exps/ to ./data_eff_exps/<level_dir>/ "
+                                   "(used by ahb run-data-eff)")
 
     train_cv_parser = sub.add_parser(
         "train-cv",
@@ -155,6 +167,8 @@ def build_parser() -> argparse.ArgumentParser:
     train_cv_parser.add_argument("--probe-yaml", default="Probe.yaml")
     train_cv_parser.add_argument("--tag", default="run1")
     train_cv_parser.add_argument("--overrides", default="")
+    train_cv_parser.add_argument("--level-dir", default=None,
+                                 help="See ahb train --level-dir")
 
     summary_parser = sub.add_parser(
         "summary", help="Collect results into per-metric CSVs",
@@ -221,6 +235,20 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--cache-only", action="store_true")
         p.add_argument("--no-writer", action="store_true")
 
+    de_parser = sub.add_parser("run-data-eff",
+                               help="Execute all incomplete data-efficiency runs (across levels)")
+    de_parser.add_argument("--device", type=str, default=None)
+    de_parser.add_argument("--max-workers", "-j", type=int, default=3)
+    de_parser.add_argument("--encoder", type=str, default=None, action="append")
+    de_parser.add_argument("--dataset", type=str, default=None, action="append")
+    de_parser.add_argument("--task", type=str, default=None, action="append")
+    de_parser.add_argument("--level", type=str, default=None, action="append",
+                           help="Restrict to these level dirs (repeatable; "
+                                "default: all levels in registry.yaml:data_eff_levels)")
+    de_parser.add_argument("--test-only", action="store_true")
+    de_parser.add_argument("--cache-only", action="store_true")
+    de_parser.add_argument("--no-writer", action="store_true")
+
     return parser
 
 
@@ -258,6 +286,12 @@ def main(argv: list[str] | None = None) -> int:
             _cmd_run_cross(args)
         else:
             _cmd_run_cross_category(args)
+    elif args.command == "run-data-eff":
+        if args.cache_only and args.test_only:
+            parser.error("--cache-only and --test-only are mutually exclusive")
+        if args.cache_only and args.no_writer:
+            parser.error("--cache-only and --no-writer are mutually exclusive")
+        _cmd_run_data_eff(args)
     else:
         parser.error(f"unknown command: {args.command}")
     return 0

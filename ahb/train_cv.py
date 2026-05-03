@@ -205,11 +205,14 @@ def _run_fold_hp_optimization(fold_idx, hparams, hparams_file, run_opts,
 
 def cmd_train_cv(task: str, encoder: str, *,
                  probe: str = "AvgTProbe", probe_yaml: str = "Probe.yaml",
-                 tag: str = "run1", overrides: str = "") -> None:
+                 tag: str = "run1", overrides: str = "",
+                 level_dir: str | None = None) -> None:
     """Run per-fold HP optimization for one (task, encoder, probe).
 
     Cache must be warm; ``build_read_datasets_cv``'s pre-flight raises
     ``RuntimeError`` with an actionable message otherwise.
+
+    See ``ahb.train.cmd_train`` for ``level_dir``.
     """
     ensure_manifest(task)
 
@@ -221,8 +224,10 @@ def cmd_train_cv(task: str, encoder: str, *,
         model_name=encoder, encoder_yaml=encoder_yaml,
         task_yaml=f"{task}.yaml", probe_yaml=probe_yaml, probe_name=probe,
         warm_cache_override=False, test_only=False, cache_only=False,
+        level_dir=level_dir,
     )
-    base_yaml = CONFIG_DIR / f"_tmp_run_ahb_cv_{os.getpid()}.yaml"
+    suffix = f"_de{level_dir}" if level_dir else ""
+    base_yaml = CONFIG_DIR / f"_tmp_run_ahb_cv_{os.getpid()}{suffix}.yaml"
     base_yaml.write_text(text)
 
     run_opts: dict = {}
