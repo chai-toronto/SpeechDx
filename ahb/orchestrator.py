@@ -23,11 +23,11 @@ from ahb.registry import exclude_datasets, paper_tasks
 from ahb.results import expected_ci_keys
 from ahb.yaml_io import TolerantLoader
 
-# Repo-relative paths that the legacy code uses literally.
-TASKS_DIR = Path("training/config/tasks")
-CROSS_TASKS_DIR = Path("training/config/cross_tasks")
-ENCODERS_DIR = Path("training/config/encoders")
-BASE_CONFIG = Path("training/config/main.yaml")
+_CONFIGS = Path(__file__).resolve().parent / "configs"
+TASKS_DIR = _CONFIGS / "tasks"
+CROSS_TASKS_DIR = _CONFIGS / "cross_tasks"
+ENCODERS_DIR = _CONFIGS / "encoders"
+BASE_CONFIG = _CONFIGS / "main.yaml"
 LOGS_ROOT = Path("logs/run_all")
 
 

@@ -12,7 +12,7 @@ flag combinations:
 - ``mode="test"``    — encoder yaml included; warm_cache=False, test_only=True. Used by the final-eval pass.
 - ``mode="cache"``   — encoder yaml included; warm_cache=True, cache_only=True. Used by ``ahb run --cache-only`` (legacy parity).
 
-The composed text is written to a temp file under ``training/config/`` so
+The composed text is written to a temp file under ``ahb/configs/`` so
 HyperPyYAML's ``!include:`` directives resolve relative to it.
 """
 
@@ -30,8 +30,7 @@ from hyperpyyaml import load_hyperpyyaml
 from ahb.encoder_stub import build_stub_encoder_params
 from ahb.registry import encoders as registry_encoders
 
-REPO = Path(__file__).resolve().parent.parent
-CONFIG_DIR = REPO / "training" / "config"
+CONFIG_DIR = Path(__file__).resolve().parent / "configs"
 ENCODERS_DIR = CONFIG_DIR / "encoders"
 PROBES_DIR = CONFIG_DIR / "probes"
 TASKS_DIR = CONFIG_DIR / "tasks"
@@ -71,7 +70,7 @@ def _task_yaml_include(task_subdir: Path, task_yaml: str) -> str:
 
     Single-dataset main.yaml uses ``tasks/<task>.yaml``; cross main yamls
     use ``cross_tasks/<task>.yaml``. The path is *relative to the main yaml's
-    parent directory* (i.e. ``training/config/``).
+    parent directory* (i.e. ``ahb/configs/``).
     """
     return f"{task_subdir.name}/{task_yaml}"
 
@@ -193,7 +192,7 @@ def compose_config(
 
     encoder_yaml = registry_encoders().get(encoder)
     if encoder_yaml is None:
-        raise KeyError(f"encoder {encoder!r} not found in training/config/registry.yaml")
+        raise KeyError(f"encoder {encoder!r} not found in ahb/configs/registry.yaml")
 
     base_main_yaml, task_subdir = _resolve_task_subdir(task)
     task_yaml = f"{task}.yaml"

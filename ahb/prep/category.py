@@ -3,7 +3,7 @@
 Salvaged from ``training/dataio/prep_category_common.py``. The 6 legacy
 shim modules (``prep_category_c<i>_c<j>.py``) were aliases that re-exported
 ``prepare_category`` under per-direction names referenced by the YAMLs in
-``training/config/cross_tasks/``. Those 12 alias bindings are appended at
+``ahb/configs/cross_tasks/``. Those 12 alias bindings are appended at
 the bottom of this module so a single import target serves every direction.
 
 The single ``prepare_category`` function loads any combination of supported

@@ -1,6 +1,6 @@
 """Single source of truth for orchestrator task/encoder enumeration.
 
-Reads ``training/config/registry.yaml``. The harness subcommands call into
+Reads ``ahb/configs/registry.yaml``. The harness subcommands call into
 here so the same ``paper_tasks``, ``data_eff_levels``, and exclusion lists
 are not forked across files.
 
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import yaml
 
-REGISTRY_PATH = Path(__file__).parent.parent / "training" / "config" / "registry.yaml"
+REGISTRY_PATH = Path(__file__).resolve().parent / "configs" / "registry.yaml"
 
 
 @lru_cache(maxsize=1)

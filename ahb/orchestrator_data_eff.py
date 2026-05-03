@@ -34,7 +34,7 @@ from ahb.results import expected_ci_keys
 
 EXP_ROOT_BASE = "exps/data_eff"
 LOGS_ROOT = Path("logs/run_all_data_eff")
-TASKS_DIR = Path("training/config/tasks")
+TASKS_DIR = Path(__file__).resolve().parent / "configs" / "tasks"
 
 # Levels are (level_dir, level_value) — level_dir is a path component (no
 # '.' so subdirs work cleanly), level_value is the float fraction in [0, 1].

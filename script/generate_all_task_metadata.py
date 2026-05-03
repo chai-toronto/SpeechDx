@@ -1,6 +1,6 @@
 """Run every task's prepare_data_fn to regenerate metadata CSVs + SB manifests.
 
-Mirrors the paths used by training/config/main.yaml so outputs land where
+Mirrors the paths used by ahb/configs/main.yaml so outputs land where
 training expects them.
 """
 import importlib

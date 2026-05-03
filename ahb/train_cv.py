@@ -218,7 +218,7 @@ def cmd_train_cv(task: str, encoder: str, *,
 
     encoder_yaml = registry_encoders().get(encoder)
     if encoder_yaml is None:
-        raise KeyError(f"encoder {encoder!r} not in training/config/registry.yaml")
+        raise KeyError(f"encoder {encoder!r} not in ahb/configs/registry.yaml")
 
     text = compose_yaml_text(
         model_name=encoder, encoder_yaml=encoder_yaml,

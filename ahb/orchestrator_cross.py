@@ -2,7 +2,7 @@
 
 Salvaged from ``run_all_cross.py`` (lines 28-256) — same shape as the
 single-dataset orchestrator helpers but reads task yamls from
-``training/config/cross_tasks/`` and writes outputs under
+``ahb/configs/cross_tasks/`` and writes outputs under
 ``./exps/cross/``. Probe defaults to ``Probe`` instead of ``AvgTProbe``.
 """
 
@@ -18,9 +18,10 @@ from ahb.registry import cross_pairs, encoders as registry_encoders
 from ahb.results import expected_ci_keys
 from ahb.yaml_io import TolerantLoader
 
-TASKS_DIR = Path("training/config/cross_tasks")
-ENCODERS_DIR = Path("training/config/encoders")
-BASE_CONFIG = Path("training/config/main_cross.yaml")
+_CONFIGS = Path(__file__).resolve().parent / "configs"
+TASKS_DIR = _CONFIGS / "cross_tasks"
+ENCODERS_DIR = _CONFIGS / "encoders"
+BASE_CONFIG = _CONFIGS / "main_cross.yaml"
 EXPS_ROOT = Path("./exps/cross")
 LOGS_ROOT = Path("logs/run_all_cross")
 

@@ -20,7 +20,7 @@ def _ignore(loader, tag_suffix, node):
 _Tolerant.add_multi_constructor("!", _ignore)
 
 ROOT = Path("/Users/lkieu/PycharmProjects/Audio-Health-Benchmark")
-TASK_DIR = ROOT / "training/config/tasks"
+TASK_DIR = ROOT / "ahb/configs/tasks"
 META_DIR = ROOT / "metadata"
 
 

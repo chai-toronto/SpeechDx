@@ -38,7 +38,7 @@ or layer pooling; the encoder does not pool.
    encoders boil down to a `transformers.AutoModel.from_pretrained(...)`
    call followed by a `.last_hidden_state` extraction; see
    `model/wavlm.py` for the reference pattern.
-2. Create the matching yaml at `training/config/encoders/<name>.yaml`.
+2. Create the matching yaml at `ahb/configs/encoders/<name>.yaml`.
    It declares the encoder's metadata and constructs the module:
 
    ```yaml
@@ -56,7 +56,7 @@ or layer pooling; the encoder does not pool.
      sample_rate: !ref <sample_rate>
    ```
 
-3. Register the encoder in `training/config/registry.yaml` under
+3. Register the encoder in `ahb/configs/registry.yaml` under
    `encoders:`:
 
    ```yaml
@@ -71,8 +71,8 @@ or layer pooling; the encoder does not pool.
 4. Verify:
 
    ```bash
-   python -c "from training import registry; print('<model_name>' in registry.encoders())"
-   python -m bench single status   # the new encoder column appears
+   python -c "from ahb import registry; print('<model_name>' in registry.encoders())"
+   python -m ahb status   # the new encoder column appears
    ```
 
 You do **not** need to edit the orchestrator scripts.

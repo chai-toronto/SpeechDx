@@ -20,8 +20,7 @@ import yaml
 from ahb.prep import OLD_TO_NEW_MODULE
 from ahb.yaml_io import TolerantLoader
 
-REPO = Path(__file__).resolve().parent.parent.parent
-CONFIG_DIR = REPO / "training" / "config"
+CONFIG_DIR = Path(__file__).resolve().parent.parent / "configs"
 
 TASKS_SINGLE_DIR = CONFIG_DIR / "tasks"
 TASKS_CROSS_DIR = CONFIG_DIR / "cross_tasks"

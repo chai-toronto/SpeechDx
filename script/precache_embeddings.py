@@ -7,7 +7,7 @@ to disk. This allows parallel training to use pre-computed embeddings instead
 of running the encoder on-the-fly.
 
 Usage:
-    python script/precache_embeddings.py training/config/main.yaml
+    python script/precache_embeddings.py ahb/configs/main.yaml
 
 """
 import sys

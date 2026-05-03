@@ -128,7 +128,7 @@ def build_parser() -> argparse.ArgumentParser:
     prep_parser.add_argument(
         "task",
         nargs="+",
-        help="Task stem(s) — looked up in training/config/{tasks,cross_tasks}/",
+        help="Task stem(s) — looked up in ahb/configs/{tasks,cross_tasks}/",
     )
 
     warm_parser = sub.add_parser(
@@ -148,7 +148,7 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("encoder", help="Encoder name (model_name in registry.yaml)")
     train_parser.add_argument("--probe", default="AvgTProbe", help="Probe name (default: AvgTProbe)")
     train_parser.add_argument("--probe-yaml", default="Probe.yaml",
-                              help="Probe yaml filename under training/config/probes/")
+                              help="Probe yaml filename under ahb/configs/probes/")
     train_parser.add_argument("--tag", default="run1", help="Experiment tag (default: run1)")
     train_parser.add_argument("--overrides", default="",
                               help="Extra YAML overrides forwarded to load_hyperpyyaml")

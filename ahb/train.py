@@ -48,7 +48,7 @@ def _train_one_trial(config: dict, hparams_file: str, run_opts: dict,
 
     The fork lives at ``<trial_dir>/config/main.yaml`` so a SLURM resume
     sees exactly the config the trial originally launched under (no drift
-    from edits to ``training/config/*.yaml`` between runs).
+    from edits to ``ahb/configs/*.yaml`` between runs).
     """
     trial_id = tune.get_context().get_trial_id() or "default"
     trial_dir = Path(resolved_paths["output_folder"]) / trial_id
@@ -120,7 +120,7 @@ def cmd_train(task: str, encoder: str, *,
     encoder_yaml = registry_encoders().get(encoder)
     if encoder_yaml is None:
         raise KeyError(
-            f"encoder {encoder!r} not in training/config/registry.yaml"
+            f"encoder {encoder!r} not in ahb/configs/registry.yaml"
         )
 
     text = compose_yaml_text(

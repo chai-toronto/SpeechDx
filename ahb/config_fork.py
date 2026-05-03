@@ -9,12 +9,12 @@ then loads the fork with no overrides.
 Why:
   1. The real config a trial ran under used to only exist in worker RAM.
   2. On SLURM timeout/resubmit the Ray trainable re-read the *original*
-     main.yaml, so any edits to ``training/config/*.yaml`` between runs would
+     main.yaml, so any edits to ``ahb/configs/*.yaml`` between runs would
      silently leak into resumed trials. With a frozen on-disk fork, resume is
      drift-proof: the fork is authoritative and never regenerated.
 
 CAVEAT — editing a task yaml does NOT propagate to existing trial forks.
-If you change ``training/config/tasks/<task>.yaml`` (e.g. drop ``num_aug_ver``
+If you change ``ahb/configs/tasks/<task>.yaml`` (e.g. drop ``num_aug_ver``
 from 3 → 1), every pre-existing ``<exp>/<trial_id>/config/tasks/<task>.yaml``
 still carries the old value. For in-flight HPOs this can desync the fork from
 the shared on-disk cache (``tmp/<dataset>/<encoder>/...``) and produce an
