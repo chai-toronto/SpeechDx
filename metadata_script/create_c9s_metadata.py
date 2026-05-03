@@ -2,7 +2,8 @@
 Create unified COVID-19 Sounds (c9s) metadata CSV.
 
 Merges the 3 platform CSVs (android/ios/web) with task 1 and task 2
-split/label info. Copies voice audio from Covid19SoundFull.
+split/label info. Copies voice audio from Covid19SoundFull, which is constructed by finding files
+that match the path in these CSVs
 
 Source data (under data/c9s/raw/):
   - results_raw_20210426_lan_yamnet_{android,ios,web}_noloc.csv
@@ -23,10 +24,6 @@ DATA_ROOT = Path("data")
 C9S_DIR = DATA_ROOT / "c9s"
 RAW_ROOT = C9S_DIR / "raw"
 SRC_AUDIO = RAW_ROOT / "Covid19SoundFull"
-FALLBACK_AUDIO = [
-    DATA_ROOT / "c9s_t1" / "processed" / "audio",
-    DATA_ROOT / "c9s_t2" / "processed" / "audio",
-]
 OUT_ROOT = C9S_DIR / "processed"
 
 PLATFORM_CSVS = {
@@ -195,15 +192,6 @@ def step4_copy_audio(rows):
         # Source path in Covid19SoundFull uses original Uid
         csv_src = SRC_AUDIO / src_uid / folder / voice_fn
         actual_src = find_audio(csv_src)
-
-        # Fallback: check c9s_t1/c9s_t2 processed audio
-        if actual_src is None:
-            pid = row["Participant_ID"]
-            for fb in FALLBACK_AUDIO:
-                fb_src = fb / pid / folder / voice_fn
-                actual_src = find_audio(fb_src)
-                if actual_src:
-                    break
 
         if actual_src is None:
             missing += 1

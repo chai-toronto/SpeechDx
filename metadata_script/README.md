@@ -9,8 +9,7 @@ metadata CSV that the training pipeline understands.
 | `create_aphasia_metadata.py`          | aphasia       | `data/aphasia/processed/aphasia.csv`            |
 | `create_audio_metadata.py`            | (generic)     | helper for ad-hoc audio folders                 |
 | `create_avfad_metadata.py`            | avfad         | `data/avfad/processed/avfad.csv`                |
-| `create_c9s_metadata.py`              | c9s           | `data/c9s/processed/c9s.csv`                    |
-| `create_c9s_t2_metadata.py`           | c9s task 2    | extends c9s with task-2 splits                  |
+| `create_c9s_metadata.py`              | c9s           | `data/c9s/processed/c9s.csv` (unified t1+t2 splits) |
 | `create_coswara_metadata.py`          | coswara       | `data/coswara/processed/coswara.csv`            |
 | `create_dbank_metadata.py`            | DementiaBank (ADReSS-M) | `data/dbank/processed/dbank.csv`      |
 | `create_daic_woz_metadata.py`         | DAIC-WOZ      | unused — superseded by EDAIC                    |
