@@ -3,6 +3,7 @@
   2. Do a test only thru run2.
   3. Paralel cache gen
   4. Rerun regression experiments for run1 (Optional, not run2) 
+  5. Sript to download, metadata, warm and run
                                                  
 
 # Audio Health Benchmark
@@ -135,8 +136,7 @@ truth, not the table below.
 13 health-speech corpora ship with prep modules and metadata builders. Most
 require a license / DTA / EULA — only RAVDESS, Coswara, and MDVR-KCL can be
 fetched without contacting the authors. The "Local" column is the directory
-name under `data/` and the prefix used in task ids; the "Upstream" column is
-the canonical name in the literature.
+name under `data/` and the prefix used in task ids.
 
 | Local        | Upstream                                       | Access | Source                                                                                                                        |
 |--------------|------------------------------------------------|--------|-------------------------------------------------------------------------------------------------------------------------------|

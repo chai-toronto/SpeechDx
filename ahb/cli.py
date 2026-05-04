@@ -26,6 +26,24 @@ def _cmd_summary(args: argparse.Namespace) -> None:
     cmd_summary(args)
 
 
+def _cmd_summary_cross(args: argparse.Namespace) -> None:
+    from ahb.summary_cross import cmd_summary_cross
+
+    cmd_summary_cross(args)
+
+
+def _cmd_summary_cross_category(args: argparse.Namespace) -> None:
+    from ahb.summary_cross import cmd_summary_cross_category
+
+    cmd_summary_cross_category(args)
+
+
+def _cmd_summary_data_eff(args: argparse.Namespace) -> None:
+    from ahb.summary_data_eff import cmd_summary_data_eff
+
+    cmd_summary_data_eff(args)
+
+
 def _cmd_run(args: argparse.Namespace) -> None:
     from ahb.run import cmd_run
 
@@ -205,13 +223,44 @@ def build_parser() -> argparse.ArgumentParser:
         "summary", help="Collect results into per-metric CSVs",
     )
     summary_parser.add_argument(
-        "--out-dir", type=str, default="exps/single_task/_summary",
-        help="Directory to write metric CSVs (default: exps/single_task/_summary)",
+        "--out-dir", type=str, default=None,
+        help="Directory to write metric CSVs (default: exps/single_task/_summary_<tag>)",
     )
     summary_parser.add_argument(
         "--tag", type=str, default="run1",
         help="Experiment tag to scan (default: run1)",
     )
+
+    for name, default_root in [
+        ("summary-cross",          "exps/cross"),
+        ("summary-cross-category", "exps/cross_cat"),
+    ]:
+        p = sub.add_parser(name, help=f"Collect {name.split('-', 1)[1]} results into per-metric CSVs")
+        p.add_argument("--out-dir", type=str, default=None,
+                       help=f"Output dir (default: {default_root}/_summary_<tag>)")
+        p.add_argument("--tag", type=str, default="run1",
+                       help="Experiment tag to scan (default: run1)")
+        p.add_argument("--encoder", type=str, default=None, action="append",
+                       help="Restrict to these encoders (repeatable)")
+        p.add_argument("--dataset", type=str, default=None, action="append",
+                       help="Restrict to tasks whose dataset matches (repeatable)")
+        p.add_argument("--task", type=str, default=None, action="append",
+                       help="Restrict to these task stems (repeatable)")
+
+    sde_parser = sub.add_parser(
+        "summary-data-eff",
+        help="Collect data-eff results into per-level metric CSVs",
+    )
+    sde_parser.add_argument("--out-dir", type=str, default=None,
+                            help="Output dir (default: exps/data_eff/_summary_<tag>)")
+    sde_parser.add_argument("--tag", type=str, default="run1",
+                            help="Experiment tag to scan (default: run1)")
+    sde_parser.add_argument("--level", type=str, default=None, action="append",
+                            help="Restrict to these level dirs (repeatable; "
+                                 "default: all levels)")
+    sde_parser.add_argument("--encoder", type=str, default=None, action="append")
+    sde_parser.add_argument("--dataset", type=str, default=None, action="append")
+    sde_parser.add_argument("--task", type=str, default=None, action="append")
 
     run_parser = sub.add_parser("run", help="Execute all incomplete runs")
     run_parser.add_argument("--device", type=str, default=None,
@@ -326,6 +375,12 @@ def main(argv: list[str] | None = None) -> int:
         _cmd_train_cv(args)
     elif args.command == "summary":
         _cmd_summary(args)
+    elif args.command == "summary-cross":
+        _cmd_summary_cross(args)
+    elif args.command == "summary-cross-category":
+        _cmd_summary_cross_category(args)
+    elif args.command == "summary-data-eff":
+        _cmd_summary_data_eff(args)
     elif args.command == "run":
         if args.cache_only and args.test_only:
             parser.error("--cache-only and --test-only are mutually exclusive")

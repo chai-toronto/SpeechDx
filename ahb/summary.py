@@ -3,6 +3,10 @@
 Salvaged from ``run_all.py:cmd_summary`` (lines 417-502). Output CSVs
 (AUC.csv, F1.csv, MAE.csv, ..., completion.csv) are byte-identical to
 the legacy path's output for the same ``--out-dir`` / ``--tag``.
+
+The lower helpers (``_collect_matrices``, ``_write_metric_csvs``,
+``_write_completion_csv``) are reused by ``ahb.summary_cross`` and
+``ahb.summary_data_eff``.
 """
 
 from __future__ import annotations
@@ -11,6 +15,7 @@ import argparse
 import csv
 from collections import defaultdict
 from pathlib import Path
+from typing import Callable
 
 from ahb.orchestrator import (
     _load_task_yaml,
@@ -22,7 +27,6 @@ from ahb.orchestrator import (
     get_task_info,
     is_complete,
 )
-from ahb.paths import DEFAULT_EXPERIMENT_TAG
 from ahb.registry import encoders as registry_encoders
 from ahb.results import parse_results_txt, parse_results_yaml
 
@@ -41,34 +45,39 @@ CSV_LAYOUT = {
 }
 
 
-def _load_metrics(output_folder: Path, task_stem: str) -> dict | None:
-    results_file = output_folder / get_results_file(task_stem)
-    if not results_file.exists():
+def _load_metrics(output_folder: Path, results_file: str) -> dict | None:
+    path = output_folder / results_file
+    if not path.exists():
         return None
-    if results_file.suffix == ".yaml":
-        return parse_results_yaml(results_file)
-    return parse_results_txt(results_file)
+    if path.suffix == ".yaml":
+        return parse_results_yaml(path)
+    return parse_results_txt(path)
 
 
-def cmd_summary(args: argparse.Namespace) -> None:
-    tasks = discover_tasks()
-    encoders = list(registry_encoders().keys())
-
+def _collect_matrices(
+    tasks: list[str],
+    encoders: list[str],
+    folder_for: Callable[[str, str], Path],
+    results_file_for: Callable[[str], str],
+    task_type_for: Callable[[str], str],
+) -> tuple[dict, set[str], set[str], int, int]:
+    """Collect per-metric (task → encoder → value) matrices."""
     matrices: dict = {k: defaultdict(dict) for k in CSV_LAYOUT.values()}
     regression_tasks: set[str] = set()
     classification_tasks: set[str] = set()
     for task_stem in tasks:
-        if _load_task_yaml(task_stem).get("task_type") == "R":
+        if task_type_for(task_stem) == "R":
             regression_tasks.add(task_stem)
         else:
             classification_tasks.add(task_stem)
-    found = missing = 0
 
+    found = missing = 0
     for task_stem in tasks:
-        dataset, task = get_task_info(task_stem)
         for model_name in encoders:
-            folder = get_output_folder(dataset, task, model_name, args.tag)
-            metrics = _load_metrics(folder, task_stem)
+            metrics = _load_metrics(
+                folder_for(task_stem, model_name),
+                results_file_for(task_stem),
+            )
             if metrics is None:
                 missing += 1
                 continue
@@ -76,11 +85,18 @@ def cmd_summary(args: argparse.Namespace) -> None:
             for metric_key in CSV_LAYOUT.values():
                 if metric_key in metrics:
                     matrices[metric_key][task_stem][model_name] = metrics[metric_key]
+    return matrices, regression_tasks, classification_tasks, found, missing
 
-    out_dir = Path(args.out_dir)
+
+def _write_metric_csvs(
+    matrices: dict,
+    encoders: list[str],
+    regression_tasks: set[str],
+    classification_tasks: set[str],
+    out_dir: Path,
+) -> list[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
-
-    written = []
+    written: list[Path] = []
     for csv_name, metric_key in CSV_LAYOUT.items():
         data = matrices[metric_key]
         pool = regression_tasks if metric_key in REGRESSION_METRICS else classification_tasks
@@ -104,26 +120,64 @@ def cmd_summary(args: argparse.Namespace) -> None:
                         row.append("")
                 writer.writerow(row)
         written.append(csv_path)
+    return written
 
-    # Completion matrix — every task yaml × every encoder yaml (no exclusion).
-    all_tasks = discover_all_tasks()
-    all_encoders = discover_all_encoders()
+
+def _write_completion_csv(
+    all_tasks: list[str],
+    all_encoders: dict[str, str],
+    folder_for: Callable[[str, str], Path],
+    is_complete_for: Callable[[Path, str], bool],
+    out_dir: Path,
+) -> Path:
+    out_dir.mkdir(parents=True, exist_ok=True)
     comp_path = out_dir / "completion.csv"
     totals = {stem: 0 for stem in all_encoders}
     with comp_path.open("w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["task", *all_encoders.keys()])
         for task_stem in all_tasks:
-            dataset, task = get_task_info(task_stem)
             row = [task_stem]
             for stem, folder_name in all_encoders.items():
-                folder = get_output_folder(dataset, task, folder_name, args.tag)
-                done = is_complete(folder, task_stem)
+                done = is_complete_for(folder_for(task_stem, folder_name), task_stem)
                 row.append("1" if done else "0")
                 if done:
                     totals[stem] += 1
             writer.writerow(row)
         writer.writerow(["TOTAL", *(str(totals[s]) for s in all_encoders)])
+    return comp_path
+
+
+def cmd_summary(args: argparse.Namespace) -> None:
+    tasks = discover_tasks()
+    encoders = list(registry_encoders().keys())
+
+    def folder_for(task_stem: str, model_name: str) -> Path:
+        dataset, task = get_task_info(task_stem)
+        return get_output_folder(dataset, task, model_name, args.tag)
+
+    matrices, regression_tasks, classification_tasks, found, missing = _collect_matrices(
+        tasks=tasks,
+        encoders=encoders,
+        folder_for=folder_for,
+        results_file_for=get_results_file,
+        task_type_for=lambda ts: _load_task_yaml(ts).get("task_type"),
+    )
+
+    out_dir = Path(args.out_dir or f"exps/single_task/_summary_{args.tag}")
+    written = _write_metric_csvs(
+        matrices, encoders, regression_tasks, classification_tasks, out_dir,
+    )
+
+    all_tasks = discover_all_tasks()
+    all_encoders = discover_all_encoders()
+    comp_path = _write_completion_csv(
+        all_tasks=all_tasks,
+        all_encoders=all_encoders,
+        folder_for=folder_for,
+        is_complete_for=is_complete,
+        out_dir=out_dir,
+    )
     written.append(comp_path)
 
     print(f"\nParsed {found} result files, {missing} missing")
