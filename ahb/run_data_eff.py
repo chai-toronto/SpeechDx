@@ -131,6 +131,8 @@ def cmd_run_data_eff(args: argparse.Namespace) -> None:
     test_only = getattr(args, "test_only", False)
     cache_only = getattr(args, "cache_only", False)
     no_writer = getattr(args, "no_writer", False)
+    overwrite = getattr(args, "overwrite", False)
+    dry_run = getattr(args, "dry_run", False)
     tag = getattr(args, "tag", "run1")
 
     all_encoders = encoders_default()
@@ -164,12 +166,18 @@ def cmd_run_data_eff(args: argparse.Namespace) -> None:
                         _emit(f"[{_now()}] SKIP (no trained model): {task_stem} × {model_name} @ {level_dir}")
                         skipped += 1
                         continue
-                elif is_complete(folder, task_stem):
+                elif not overwrite and is_complete(folder, task_stem):
                     _emit(f"[{_now()}] SKIP (done)            : {task_stem} × {model_name} @ {level_dir}")
                     skipped += 1
                     completed_by_ds_enc[(dataset, model_name)].append(task_stem)
                     continue
                 pending.append((task_stem, model_name, level_dir))
+
+    if dry_run:
+        print(f"\n[dry-run] would queue {len(pending)} (task × encoder × level); skipped {skipped}.")
+        for ts, mn, lv in pending:
+            print(f"  {ts} × {mn} @ {lv}")
+        return
 
     # Subsample manifests up-front for every (task, level) we'll touch — keeps
     # dispatch hot-path free of subsampling latency.

@@ -77,7 +77,9 @@ whole grid.
 `--train-workers` / `-j` (default `3`), `--tag` (default `run1`),
 `--device`, `--test-only` (re-evaluate saved best trial), `--cache-only`
 (warm phase only), `--no-writer` (train phase only — caches must be
-warm). `data-eff run` adds `--level`. `all run` adds `--skip-mode` and
+warm), `--overwrite` (redo every matching pair, even complete ones —
+prompts unless `-y/--yes`), `--dry-run` (print the plan and exit).
+`data-eff run` adds `--level`. `all run` adds `--skip-mode` and
 `--continue-on-failure`.
 
 **Strict phases.** `run` warms every needed `(dataset, encoder)` cache

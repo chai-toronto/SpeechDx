@@ -322,6 +322,29 @@ def _validate_run_flags(args: argparse.Namespace) -> None:
         raise SystemExit("--cache-only and --no-writer are mutually exclusive")
 
 
+def _confirm_overwrite(args: argparse.Namespace, mode_label: str) -> bool:
+    """Interactive ``[y/N]`` prompt before destructive `run --overwrite`.
+
+    Bypassed by ``--yes``. Also bypassed when ``--dry-run`` is set (nothing
+    actually gets destroyed). Returns True if the run should proceed.
+    """
+    if not getattr(args, "overwrite", False):
+        return True
+    if getattr(args, "yes", False) or getattr(args, "dry_run", False):
+        return True
+    print(f"\n!! {mode_label} --overwrite will redo every matching pair, "
+          f"including ones whose results already exist.")
+    print("   Existing results will be wiped. This is not reversible.")
+    try:
+        resp = input("   Proceed? [y/N] ").strip().lower()
+    except EOFError:
+        resp = ""
+    if resp not in ("y", "yes"):
+        print("Aborted.")
+        return False
+    return True
+
+
 def _strict_phase_run(args: argparse.Namespace,
                       run_fn: Callable[[argparse.Namespace], None],
                       *, mode_label: str) -> None:
@@ -343,6 +366,9 @@ def _strict_phase_run(args: argparse.Namespace,
     no_writer = getattr(args, "no_writer", False)
     warm_workers = getattr(args, "warm_workers", 1)
     train_workers = getattr(args, "train_workers", 3)
+
+    if not _confirm_overwrite(args, mode_label):
+        return
 
     if test_only:
         ns = argparse.Namespace(**vars(args))
@@ -487,6 +513,15 @@ def _add_run_args(p: argparse.ArgumentParser, *,
                    help="Warm phase only (skips train phase).")
     p.add_argument("--no-writer", action="store_true",
                    help="Train phase only — cache must already be warm.")
+    p.add_argument("--overwrite", action="store_true",
+                   help="Redo every matching pair, including ones whose "
+                        "results already exist. Prompts for confirmation "
+                        "unless --yes is also passed.")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Print the plan (which pairs would be queued / "
+                        "skipped) and exit without doing any work.")
+    p.add_argument("--yes", "-y", action="store_true",
+                   help="Skip the --overwrite confirmation prompt.")
     p.add_argument("--tag", type=str, default="run1",
                    help="Experiment tag forwarded to train (default: run1)")
 

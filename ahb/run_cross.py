@@ -128,6 +128,8 @@ def cmd_run_cross(args: argparse.Namespace, *,
     test_only = getattr(args, "test_only", False)
     cache_only = getattr(args, "cache_only", False)
     no_writer = getattr(args, "no_writer", False)
+    overwrite = getattr(args, "overwrite", False)
+    dry_run = getattr(args, "dry_run", False)
     tag = getattr(args, "tag", "run1")
 
     all_encoders = registry_encoders()
@@ -154,12 +156,18 @@ def cmd_run_cross(args: argparse.Namespace, *,
                     _emit(f"[{_now()}] SKIP (no trained model): {task_stem} × {model_name}")
                     skipped += 1
                     continue
-            elif is_complete(folder, task_stem):
+            elif not overwrite and is_complete(folder, task_stem):
                 _emit(f"[{_now()}] SKIP (done)            : {task_stem} × {model_name}")
                 skipped += 1
                 completed_by_ds_enc[(dataset, model_name)].append(task_stem)
                 continue
             pending.append((task_stem, model_name))
+
+    if dry_run:
+        print(f"\n[dry-run] would queue {len(pending)} pair(s); skipped {skipped}.")
+        for ts, mn in pending:
+            print(f"  {ts} × {mn}")
+        return
 
     needed_tasks = {ts for ts, _ in pending}
     needed_tasks |= {ts for lst in completed_by_ds_enc.values() for ts in lst}
