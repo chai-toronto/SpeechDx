@@ -314,12 +314,21 @@ def cmd_train_cv(task: str, encoder: str, *,
 
         assert_no_encoder_imports()
 
-        # test_only re-evaluates each fold's saved best trial; never wipe under it.
+        # ``continue_exp`` is auto-set from disk state — see train.py for
+        # the full rationale. CV variant: partial state means at least one
+        # fold has a Tune storage; resume rather than wipe.
+        output_folder = Path(hparams["output_folder"])
         if hparams.get("test_only", False):
             hparams["continue_exp"] = True
+        elif not hparams.get("continue_exp", False) and output_folder.exists():
+            has_partial = (any(output_folder.glob("fold_*/results"))
+                           or any(output_folder.glob("fold_*/best_hparams.yaml")))
+            has_complete = (output_folder / "test_results.yaml").exists()
+            if has_partial and not has_complete:
+                print(f"Auto-resuming partial Tune state at {output_folder}")
+                hparams["continue_exp"] = True
 
         if not hparams.get("continue_exp", False):
-            output_folder = Path(hparams["output_folder"])
             if output_folder.exists():
                 print(f"Wiping output_folder: {output_folder}")
                 shutil.rmtree(output_folder)

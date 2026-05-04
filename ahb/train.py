@@ -143,12 +143,28 @@ def cmd_train(task: str, encoder: str, *,
         # encoder modules loaded — only stub_encoder, probe, pool.
         assert_no_encoder_imports()
 
-        # test_only re-evaluates the saved best trial; never wipe under it.
+        # ``continue_exp`` is now an internal hparam — auto-set from disk
+        # state rather than exposed as a user-facing flag. Three triggers:
+        #   1. test_only re-evaluates the saved best trial; never wipe.
+        #   2. Partial Tune state on disk (storage/ or best_hparams.yaml
+        #      present, but no test_results.{txt,yaml}) → resume, don't
+        #      wipe. Reaches here outside test_only when cli.py didn't
+        #      already skip-or-overwrite this pair.
+        # Otherwise: fresh train, wipe any stale folder.
+        output_folder = Path(hparams["output_folder"])
         if hparams.get("test_only", False):
             hparams["continue_exp"] = True
+        elif not hparams.get("continue_exp", False) and output_folder.exists():
+            storage_path = output_folder / "results"
+            has_partial = (storage_path.exists()
+                           or (output_folder / "best_hparams.yaml").exists())
+            has_complete = ((output_folder / "test_results.txt").exists()
+                            or (output_folder / "test_results.yaml").exists())
+            if has_partial and not has_complete:
+                print(f"Auto-resuming partial Tune state at {output_folder}")
+                hparams["continue_exp"] = True
 
         if not hparams.get("continue_exp", False):
-            output_folder = Path(hparams["output_folder"])
             if output_folder.exists():
                 print(f"Wiping output_folder: {output_folder}")
                 shutil.rmtree(output_folder)

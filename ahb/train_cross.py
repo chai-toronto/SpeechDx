@@ -132,12 +132,23 @@ def cmd_train_cross(task: str, encoder: str, *,
 
         assert_no_encoder_imports()
 
-        # test_only re-evaluates the saved best trial; never wipe under it.
+        # ``continue_exp`` is auto-set from disk state — see train.py for
+        # the full rationale. test_only never wipes; partial Tune state
+        # auto-resumes; otherwise wipe and start fresh.
+        output_folder = Path(hparams["output_folder"])
         if hparams.get("test_only", False):
             hparams["continue_exp"] = True
+        elif not hparams.get("continue_exp", False) and output_folder.exists():
+            storage_path = output_folder / "results"
+            has_partial = (storage_path.exists()
+                           or (output_folder / "best_hparams.yaml").exists())
+            has_complete = ((output_folder / "test_results.txt").exists()
+                            or (output_folder / "test_results.yaml").exists())
+            if has_partial and not has_complete:
+                print(f"Auto-resuming partial Tune state at {output_folder}")
+                hparams["continue_exp"] = True
 
         if not hparams.get("continue_exp", False):
-            output_folder = Path(hparams["output_folder"])
             if output_folder.exists():
                 print(f"Wiping output_folder: {output_folder}")
                 shutil.rmtree(output_folder)
