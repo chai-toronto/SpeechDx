@@ -61,6 +61,45 @@ def _resolve_pairs(args: argparse.Namespace, mode: str) -> list[tuple[str, str]]
     return [(t, e) for t in tasks for e in encs]
 
 
+def _load_cross_yaml(cross_task: str) -> dict:
+    """Read the (cross or cross-cat) task yaml as a plain dict for the
+    bookkeeping fields needed by warm delegation. Uses ``TolerantLoader``
+    so HyperPyYAML tags like ``!new:torch.nn.BCEWithLogitsLoss`` parse
+    without trying to construct the underlying object."""
+    import yaml
+    from ahb.orchestrator_cross import TASKS_DIR
+    from ahb.yaml_io import TolerantLoader
+    path = TASKS_DIR / f"{cross_task}.yaml"
+    return yaml.load(path.read_text(), Loader=TolerantLoader) or {}
+
+
+def _proxy_single_tasks_for_cross(cross_yaml: dict) -> list[str]:
+    """List of single-mode task stems on the datasets named in the cross
+    yaml. Cross uses ``train_dataset`` / ``test_dataset`` (singular);
+    cross-cat uses ``train_datasets`` / ``test_datasets`` (plural). Cache
+    is keyed by ``(dataset, encoder)``, so listing every task on each
+    dataset is fine — duplicates no-op (Q3 b)."""
+    from ahb.orchestrator import TASKS_DIR as SINGLE_TASKS_DIR
+    datasets: list[str] = []
+    for key in ("train_dataset", "test_dataset"):
+        v = cross_yaml.get(key)
+        if isinstance(v, str):
+            datasets.append(v)
+    for key in ("train_datasets", "test_datasets"):
+        v = cross_yaml.get(key)
+        if isinstance(v, list):
+            datasets.extend(v)
+    seen: set[str] = set()
+    out: list[str] = []
+    for ds in datasets:
+        for p in sorted(SINGLE_TASKS_DIR.glob(f"{ds}_*.yaml")):
+            if p.stem in seen:
+                continue
+            seen.add(p.stem)
+            out.append(p.stem)
+    return out
+
+
 def _wipe_warm_cache(task: str, encoder: str, *, probe: str = "AvgTProbe") -> None:
     """Remove the per-(dataset, encoder) cache.hdf5 files so the next
     ``run_warm`` rebuilds from scratch. Used by ``warm --overwrite``."""
@@ -181,20 +220,45 @@ def _h_single_summary(args: argparse.Namespace) -> None:
 
 
 def _h_cross_warm(args: argparse.Namespace) -> None:
+    """Cross / cross-cat warm delegate to single warm.
+
+    The cross trainer reads from the same per-(dataset, encoder) caches
+    that single warm populates (paths in main_cross.yaml are
+    ``<tmp>/<dataset>/<encoder>/{train,val}`` — identical to single's
+    layout, just resolved against train_dataset and test_dataset). So
+    rather than maintain a separate warm_cross writer, we iterate the
+    underlying single tasks on each listed dataset and call run_warm
+    with the cross task's ``num_aug_ver`` so the cache gets extended to
+    the aug count the cross trainer needs.
+
+    Cross-cat: every task on every listed dataset (Q3 b — cache is keyed
+    by (dataset, encoder), so multiple tasks per dataset no-op after the
+    first).
+    """
     from ahb.prep.dispatch import ensure_manifest
-    from ahb.warm_cross import run_warm_cross
+    from ahb.warm import run_warm
     pairs = _resolve_pairs(args, args.mode)
     if not pairs:
         print(f"{args.mode} warm: no matching pairs for filters.")
         return
-    print(f"{args.mode} warm: {len(pairs)} pair(s)")
-    for task, encoder in pairs:
-        ensure_manifest(task)
-        if getattr(args, "overwrite", False):
-            _wipe_warm_cache(task, encoder, probe=args.probe)
-        run_warm_cross(task, encoder,
-                       probe=args.probe, probe_yaml=args.probe_yaml,
-                       device=args.device)
+    print(f"{args.mode} warm: {len(pairs)} cross pair(s) "
+          f"→ delegating to single warm")
+    for cross_task, encoder in pairs:
+        ensure_manifest(cross_task)
+        cross_yaml = _load_cross_yaml(cross_task)
+        num_aug = int(cross_yaml.get("num_aug_ver", 1) or 1)
+        proxy_tasks = _proxy_single_tasks_for_cross(cross_yaml)
+        if not proxy_tasks:
+            print(f"  ⚠ {cross_task}: no underlying single tasks found")
+            continue
+        print(f"  {cross_task} × {encoder}  (num_aug_ver={num_aug}, "
+              f"{len(proxy_tasks)} proxy single task(s))")
+        for proxy in proxy_tasks:
+            ensure_manifest(proxy)
+            if getattr(args, "overwrite", False):
+                _wipe_warm_cache(proxy, encoder, probe=args.probe)
+            run_warm(proxy, encoder, probe=args.probe,
+                     device=args.device, num_aug_ver=num_aug)
 
 
 def _h_cross_train(args: argparse.Namespace) -> None:

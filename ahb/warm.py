@@ -181,11 +181,17 @@ def _make_cache_writer(cache_dir: Path, num_versions: int,
 
 
 def run_warm(task: str, encoder: str, *,
-             probe: str = "AvgTProbe", device: str | None = None) -> None:
+             probe: str = "AvgTProbe", device: str | None = None,
+             num_aug_ver: int | None = None) -> None:
     """Warm the HDF5 cache for one (task, encoder) pair.
 
     Idempotent: if every (uid, version) for both train and val is already
     cached, returns without instantiating the encoder.
+
+    ``num_aug_ver`` (optional) overrides the task yaml's value — used by
+    ``cross warm`` / ``cross-cat warm`` to extend the per-(dataset, encoder)
+    cache to whatever aug count the cross task needs. The append-mode
+    HDF5 writer extends the cache; existing aug versions are untouched.
     """
     # Phase 1 — pre-flight using the stub encoder so a warm cache check
     # never pays the real encoder's load cost.
@@ -194,7 +200,8 @@ def run_warm(task: str, encoder: str, *,
     train_cache_dir.mkdir(parents=True, exist_ok=True)
     val_cache_dir.mkdir(parents=True, exist_ok=True)
 
-    num_versions = int(hparams_stub["data_params"].get("num_aug_ver", 1))
+    base_num_versions = int(hparams_stub["data_params"].get("num_aug_ver", 1))
+    num_versions = max(base_num_versions, int(num_aug_ver)) if num_aug_ver else base_num_versions
     data_dict = _load_manifests(hparams_stub)
     all_ids = list(data_dict["all"].keys())
 
