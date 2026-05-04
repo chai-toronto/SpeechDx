@@ -266,14 +266,18 @@ def _h_cross_warm(args: argparse.Namespace) -> None:
 def _h_cross_train(args: argparse.Namespace) -> None:
     """``cmd_train_cross`` auto-detects category vs non-category via the task
     yaml, so the per-pair entry point is shared with ``cross-cat train``.
-    Skip-if-complete by default; ``--overwrite`` wipes and retrains."""
+    Skip-if-complete by default; ``--overwrite`` wipes and retrains.
+
+    Uses a mode-agnostic completeness check (``test_results.{txt,yaml}``);
+    cross task stems aren't in single's TASKS_DIR, so the orchestrator's
+    ``is_complete`` (which goes through ``is_cv``) would crash."""
     import shutil
-    from ahb.orchestrator import is_complete
     from ahb.orchestrator_cross import (
         get_output_folder as cross_output_folder,
         get_task_info as cross_task_info,
     )
     from ahb.run_cross_category import CATEGORY_EXPS_ROOT
+    from ahb.status import _is_complete_any
     from ahb.train_cross import cmd_train_cross
     pairs = _resolve_pairs(args, args.mode)
     if not pairs:
@@ -286,7 +290,7 @@ def _h_cross_train(args: argparse.Namespace) -> None:
     for task, encoder in pairs:
         ds, t = cross_task_info(task)
         folder = cross_output_folder(ds, t, encoder, args.tag, exps_root=exps_root)
-        if folder.exists() and is_complete(folder, task) and not overwrite:
+        if folder.exists() and _is_complete_any(folder) and not overwrite:
             print(f"  SKIP (results exist): {task} × {encoder}")
             skipped += 1
             continue
@@ -542,12 +546,19 @@ def _strict_phase_run(args: argparse.Namespace,
         run_fn(train_ns)
 
     # Phase 3: summary. Skipped under --dry-run (nothing happened) and
-    # --cache-only (no new train results to summarize).
+    # --cache-only (no new train results to summarize). Summary's parser
+    # adds attributes (out_dir, level) that the run parser doesn't, so
+    # inject defaults before calling.
     dry = getattr(args, "dry_run", False)
     if summary_fn is not None and do_train and not dry:
         print(f"\n=== {mode_label}: phase 3 — summary ===")
+        sum_ns = argparse.Namespace(**vars(args))
+        if not hasattr(sum_ns, "out_dir"):
+            sum_ns.out_dir = None
+        if not hasattr(sum_ns, "level"):
+            sum_ns.level = None
         try:
-            summary_fn(args)
+            summary_fn(sum_ns)
         except Exception as e:
             print(f"  ⚠ summary skipped: {e!r}")
 

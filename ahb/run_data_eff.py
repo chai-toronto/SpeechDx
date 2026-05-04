@@ -72,7 +72,8 @@ def _run_subprocess(cmd: list[str], log_path: Path, label: str) -> bool:
 def _execute_job_de(task_stem: str, model_name: str, level_dir: str,
                     role: str, *, device: str | None,
                     test_only: bool, cache_only: bool,
-                    tag: str, log_path: Path) -> tuple[str, bool, float]:
+                    tag: str, log_path: Path,
+                    overwrite: bool = False) -> tuple[str, bool, float]:
     label = f"{task_stem} × {model_name} @ {level_dir}"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("w") as f:
@@ -82,35 +83,38 @@ def _execute_job_de(task_stem: str, model_name: str, level_dir: str,
         f.write(f"  Started: {datetime.now().isoformat(timespec='seconds')}\n")
         f.write(f"{'='*60}\n")
 
-    train_subcommand = "train-cv" if is_cv(task_stem) else "train"
-    train_tag_args = ["--tag", tag]
+    # ``ahb single train`` auto-routes to per-fold CV via the task yaml.
+    # Warm caches are level-agnostic, so we use single warm; train takes
+    # --level-dir to reroute output paths into exps/data_eff/<level>/.
+    train_extras = ["--tag", tag]
+    if overwrite:
+        train_extras.append("--overwrite")
+    base = ["python", "-m", "ahb", "single"]
+    target = ["-t", task_stem, "-e", model_name]
+    level_arg = ["--level-dir", level_dir]
     start = time.time()
     success = True
 
     if cache_only:
-        cmd = ["python", "-m", "ahb", "warm", task_stem, model_name]
+        cmd = [*base, "warm", *target]
         if device:
             cmd.append(f"--device={device}")
         success = _run_subprocess(cmd, log_path, "warm")
     elif test_only:
-        cmd = ["python", "-m", "ahb", train_subcommand, task_stem, model_name,
-               "--level-dir", level_dir,
-               *train_tag_args,
+        cmd = [*base, "train", *target, *level_arg, *train_extras,
                "--overrides", "test_only: true"]
         success = _run_subprocess(cmd, log_path, "test")
     elif role == "writer":
-        warm_cmd = ["python", "-m", "ahb", "warm", task_stem, model_name]
+        warm_cmd = [*base, "warm", *target]
         if device:
             warm_cmd.append(f"--device={device}")
         if not _run_subprocess(warm_cmd, log_path, "warm"):
             success = False
         if success:
-            train_cmd = ["python", "-m", "ahb", train_subcommand, task_stem, model_name,
-                         "--level-dir", level_dir, *train_tag_args]
+            train_cmd = [*base, "train", *target, *level_arg, *train_extras]
             success = _run_subprocess(train_cmd, log_path, "train")
     else:  # reader
-        cmd = ["python", "-m", "ahb", train_subcommand, task_stem, model_name,
-               "--level-dir", level_dir, *train_tag_args]
+        cmd = [*base, "train", *target, *level_arg, *train_extras]
         success = _run_subprocess(cmd, log_path, "train")
 
     elapsed = time.time() - start
@@ -243,7 +247,7 @@ def cmd_run_data_eff(args: argparse.Namespace) -> None:
         result = _execute_job_de(
             task_stem, model_name, level_dir, role,
             device=args.device, test_only=test_only, cache_only=cache_only,
-            tag=tag, log_path=log_path,
+            tag=tag, log_path=log_path, overwrite=overwrite,
         )
         _, ok, elapsed = result
         progress.finish(ok)

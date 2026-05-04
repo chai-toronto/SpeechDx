@@ -69,13 +69,16 @@ def _run_subprocess(cmd: list[str], log_path: Path, label: str) -> bool:
 
 def _execute_job(task_stem: str, model_name: str, role: str, *,
                  device: str | None, test_only: bool, cache_only: bool,
-                 tag: str, log_path: Path) -> tuple[str, bool, float]:
+                 tag: str, log_path: Path,
+                 overwrite: bool = False) -> tuple[str, bool, float]:
     """Run one (task, encoder) job by chaining ahb subcommands.
 
-    - role="writer": ahb warm → ahb train (full pipeline).
-    - role="reader": ahb train (assumes cache warm; pre-flight raises otherwise).
-    - cache_only:    ahb warm only (skips train regardless of role).
-    - test_only:     ahb train --overrides "test_only: true" (no warm needed).
+    - role="writer": ahb single warm → ahb single train (full pipeline).
+    - role="reader": ahb single train (assumes cache warm).
+    - cache_only:    ahb single warm only (skips train regardless of role).
+    - test_only:     ahb single train --overrides "test_only: true".
+    - overwrite:     forwarded to subprocess train so its skip-if-complete
+                     doesn't override our run-level decision to redo.
     """
     label = f"{task_stem} × {model_name}"
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -85,39 +88,39 @@ def _execute_job(task_stem: str, model_name: str, role: str, *,
         f.write(f"  Started: {datetime.now().isoformat(timespec='seconds')}\n")
         f.write(f"{'='*60}\n")
 
-    train_subcommand = "train-cv" if is_cv(task_stem) else "train"
-    train_tag_args = ["--tag", tag]
+    # ``ahb single train`` auto-routes to per-fold CV via the task yaml,
+    # so a single subcommand covers both. ``--overwrite`` is forwarded
+    # so commit 4b's skip-if-complete check doesn't defeat run's own
+    # overwrite (run already chose to queue this pair).
+    train_extras = ["--tag", tag]
+    if overwrite:
+        train_extras.append("--overwrite")
+    base = ["python", "-m", "ahb", "single"]
+    target = ["-t", task_stem, "-e", model_name]
 
     start = time.time()
     success = True
 
     if cache_only:
-        # Writer-only path: warm + skip train.
-        cmd = ["python", "-m", "ahb", "warm", task_stem, model_name]
+        cmd = [*base, "warm", *target]
         if device:
             cmd.append(f"--device={device}")
         success = _run_subprocess(cmd, log_path, "warm")
     elif test_only:
-        # Eval-only path: skip warm, train --overrides test_only=true.
-        cmd = ["python", "-m", "ahb", train_subcommand, task_stem, model_name,
-               *train_tag_args,
+        cmd = [*base, "train", *target, *train_extras,
                "--overrides", "test_only: true"]
         success = _run_subprocess(cmd, log_path, "test")
     elif role == "writer":
-        # Writer: warm cache then train.
-        warm_cmd = ["python", "-m", "ahb", "warm", task_stem, model_name]
+        warm_cmd = [*base, "warm", *target]
         if device:
             warm_cmd.append(f"--device={device}")
         if not _run_subprocess(warm_cmd, log_path, "warm"):
             success = False
         if success:
-            train_cmd_args = ["python", "-m", "ahb", train_subcommand, task_stem, model_name,
-                              *train_tag_args]
+            train_cmd_args = [*base, "train", *target, *train_extras]
             success = _run_subprocess(train_cmd_args, log_path, "train")
     else:  # reader
-        # Reader: train only (cache assumed warm).
-        cmd = ["python", "-m", "ahb", train_subcommand, task_stem, model_name,
-               *train_tag_args]
+        cmd = [*base, "train", *target, *train_extras]
         success = _run_subprocess(cmd, log_path, "train")
 
     elapsed = time.time() - start
@@ -236,7 +239,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         result = _execute_job(
             task_stem, model_name, role,
             device=args.device, test_only=test_only, cache_only=cache_only,
-            tag=tag, log_path=log_path,
+            tag=tag, log_path=log_path, overwrite=overwrite,
         )
         _, ok, elapsed = result
         progress.finish(ok)
