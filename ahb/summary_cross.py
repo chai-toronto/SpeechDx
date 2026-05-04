@@ -34,7 +34,9 @@ def _cmd(args: argparse.Namespace, *, include_categories: bool,
          exps_root: Path) -> None:
     tasks = discover_tasks(args.dataset, args.task,
                            include_categories=include_categories)
-    encoders = list(registry_encoders().keys())
+    enc_filter = set(getattr(args, "encoder", None) or [])
+    encoders = [e for e in registry_encoders().keys()
+                if not enc_filter or e in enc_filter]
 
     def folder_for(task_stem: str, model_name: str) -> Path:
         dataset, task = get_task_info(task_stem)
@@ -54,8 +56,10 @@ def _cmd(args: argparse.Namespace, *, include_categories: bool,
         matrices, encoders, regression_tasks, classification_tasks, out_dir,
     )
 
-    # Completion grid: every cross-task yaml × every encoder yaml under the
-    # right scope (category vs non-category).
+    # Completion grid: cross-task yaml × encoder yaml under the right scope
+    # (category vs non-category), narrowed by -d/-t/-e if given.
+    ds_filter = set(getattr(args, "dataset", None) or [])
+    task_filter = set(getattr(args, "task", None) or [])
     if include_categories:
         all_tasks_list = sorted(
             s for s in discover_all_tasks() if s.startswith("category_")
@@ -64,7 +68,13 @@ def _cmd(args: argparse.Namespace, *, include_categories: bool,
         all_tasks_list = sorted(
             s for s in discover_all_tasks() if not s.startswith("category_")
         )
-    all_encoders = discover_all_encoders()
+    all_tasks_list = [
+        s for s in all_tasks_list
+        if (not ds_filter or get_task_info(s)[0] in ds_filter)
+        and (not task_filter or s in task_filter)
+    ]
+    all_encoders = {k: v for k, v in discover_all_encoders().items()
+                    if not enc_filter or k in enc_filter}
     comp_path = _write_completion_csv(
         all_tasks=all_tasks_list,
         all_encoders=all_encoders,

@@ -75,7 +75,9 @@ def _write_progression_csv(path: Path, *, encoders: list[str],
 
 def cmd_summary_data_eff(args: argparse.Namespace) -> None:
     tasks = discover_tasks(args.dataset, args.task)
-    encoders = list(encoders_default().keys())
+    enc_filter = set(getattr(args, "encoder", None) or [])
+    encoders = [e for e in encoders_default().keys()
+                if not enc_filter or e in enc_filter]
 
     if getattr(args, "level", None):
         active_levels = [(d, v) for d, v in LEVELS if d in set(args.level)]

@@ -365,17 +365,34 @@ def _h_dataeff_warm(args: argparse.Namespace) -> None:
 
 def _h_dataeff_train(args: argparse.Namespace) -> None:
     """Sweep all matching (task, encoder) pairs at every data-eff level by
-    default; ``--level`` filters to specific levels."""
+    default; ``--level`` filters to specific levels. Skip-if-complete by
+    default; pass ``--overwrite`` to wipe and retrain."""
+    import shutil
+    from ahb.orchestrator import get_task_info, is_complete
+    from ahb.orchestrator_data_eff import get_output_folder as de_output_folder
     from ahb.registry import data_eff_levels
     pairs = _resolve_pairs(args, "data-eff")
     if not pairs:
         print("data-eff train: no matching pairs for filters.")
         return
     levels = args.level or [name for name, _ in data_eff_levels()]
+    overwrite = getattr(args, "overwrite", False)
     print(f"data-eff train: {len(pairs)} pair(s) × {len(levels)} level(s)")
+    skipped = 0
     for level in levels:
         for task, encoder in pairs:
+            ds, t = get_task_info(task)
+            folder = de_output_folder(ds, t, encoder, level, args.tag)
+            if folder.exists() and is_complete(folder, task) and not overwrite:
+                print(f"  SKIP (results exist): {task} × {encoder} @ {level}")
+                skipped += 1
+                continue
+            if folder.exists() and overwrite:
+                shutil.rmtree(folder)
             _train_one(args, task, encoder, level_dir=level)
+    if skipped:
+        print(f"data-eff train: skipped {skipped} complete pair(s); "
+              f"pass --overwrite to redo.")
 
 
 def _h_dataeff_run(args: argparse.Namespace) -> None:

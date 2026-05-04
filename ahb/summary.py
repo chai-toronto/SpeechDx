@@ -189,8 +189,11 @@ def _write_completion_csv(
 
 
 def cmd_summary(args: argparse.Namespace) -> None:
-    tasks = discover_tasks()
-    encoders = list(registry_encoders().keys())
+    tasks = discover_tasks(getattr(args, "dataset", None),
+                           getattr(args, "task", None))
+    enc_filter = set(getattr(args, "encoder", None) or [])
+    encoders = [e for e in registry_encoders().keys()
+                if not enc_filter or e in enc_filter]
 
     def folder_for(task_stem: str, model_name: str) -> Path:
         dataset, task = get_task_info(task_stem)
@@ -209,8 +212,15 @@ def cmd_summary(args: argparse.Namespace) -> None:
         matrices, encoders, regression_tasks, classification_tasks, out_dir,
     )
 
-    all_tasks = discover_all_tasks()
-    all_encoders = discover_all_encoders()
+    ds_filter = set(getattr(args, "dataset", None) or [])
+    task_filter = set(getattr(args, "task", None) or [])
+    all_tasks = [
+        s for s in discover_all_tasks()
+        if (not ds_filter or get_task_info(s)[0] in ds_filter)
+        and (not task_filter or s in task_filter)
+    ]
+    all_encoders = {k: v for k, v in discover_all_encoders().items()
+                    if not enc_filter or k in enc_filter}
     comp_path = _write_completion_csv(
         all_tasks=all_tasks,
         all_encoders=all_encoders,
