@@ -73,11 +73,17 @@ The same six commands apply to every mode:
 every c9s task × every encoder, and `single warm` (no filter) warms the
 whole grid.
 
-**Run-only flags** (every mode's `run`): `-j/--max-workers` (default `3`),
-`--tag` (default `run1`), `--device`, `--test-only` (re-evaluate without
-training), `--cache-only` (warm and exit), `--no-writer` (require a
-prewarmed cache). `data-eff run` adds `--level`. `all run` adds
-`--skip-mode` and `--continue-on-failure`.
+**Run-only flags** (every mode's `run`): `--warm-workers` (default `1`),
+`--train-workers` / `-j` (default `3`), `--tag` (default `run1`),
+`--device`, `--test-only` (re-evaluate saved best trial), `--cache-only`
+(warm phase only), `--no-writer` (train phase only — caches must be
+warm). `data-eff run` adds `--level`. `all run` adds `--skip-mode` and
+`--continue-on-failure`.
+
+**Strict phases.** `run` warms every needed `(dataset, encoder)` cache
+first, then trains. The two phases run with independent worker pools —
+warm dominates GPU, train dominates CPU, so serial phases let each
+saturate its bottleneck without contention.
 
 **Cache warming is a hard prerequisite for every mode** — training reads from
 the per-`(dataset, encoder)` HDF5 cache and will fail on miss. Encoder forward

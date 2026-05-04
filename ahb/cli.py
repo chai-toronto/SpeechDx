@@ -125,7 +125,7 @@ def _h_single_train(args: argparse.Namespace) -> None:
 def _h_single_run(args: argparse.Namespace) -> None:
     _validate_run_flags(args)
     from ahb.run import cmd_run
-    cmd_run(args)
+    _strict_phase_run(args, cmd_run, mode_label="single run")
 
 
 def _h_single_status(args: argparse.Namespace) -> None:
@@ -173,7 +173,7 @@ def _h_cross_train(args: argparse.Namespace) -> None:
 def _h_cross_run(args: argparse.Namespace) -> None:
     _validate_run_flags(args)
     from ahb.run_cross import cmd_run_cross
-    cmd_run_cross(args)
+    _strict_phase_run(args, cmd_run_cross, mode_label="cross run")
 
 
 def _h_cross_status(args: argparse.Namespace) -> None:
@@ -200,7 +200,7 @@ def _h_crosscat_train(args: argparse.Namespace) -> None:
 def _h_crosscat_run(args: argparse.Namespace) -> None:
     _validate_run_flags(args)
     from ahb.run_cross_category import cmd_run_cross_category
-    cmd_run_cross_category(args)
+    _strict_phase_run(args, cmd_run_cross_category, mode_label="cross-cat run")
 
 
 def _h_crosscat_status(args: argparse.Namespace) -> None:
@@ -242,7 +242,7 @@ def _h_dataeff_train(args: argparse.Namespace) -> None:
 def _h_dataeff_run(args: argparse.Namespace) -> None:
     _validate_run_flags(args)
     from ahb.run_data_eff import cmd_run_data_eff
-    cmd_run_data_eff(args)
+    _strict_phase_run(args, cmd_run_data_eff, mode_label="data-eff run")
 
 
 def _h_dataeff_status(args: argparse.Namespace) -> None:
@@ -320,6 +320,62 @@ def _validate_run_flags(args: argparse.Namespace) -> None:
         raise SystemExit("--cache-only and --test-only are mutually exclusive")
     if getattr(args, "cache_only", False) and getattr(args, "no_writer", False):
         raise SystemExit("--cache-only and --no-writer are mutually exclusive")
+
+
+def _strict_phase_run(args: argparse.Namespace,
+                      run_fn: Callable[[argparse.Namespace], None],
+                      *, mode_label: str) -> None:
+    """Two-phase run: warm everything, then train everything.
+
+    Underlying ``cmd_run*`` functions are pipelined per-pair; we drive them
+    twice with ``--cache-only`` then ``--no-writer`` (so both phases re-use
+    today's writer/reader plumbing without changes). Worker pools are sized
+    independently — warm dominates GPU time, train dominates CPU; running
+    them strictly serial lets each phase fully utilize its bottleneck.
+
+    Skipped:
+    - ``--test-only``: no warm needed (just re-eval), single phase only.
+    - ``--cache-only``: no train phase (warm-only by user request).
+    - ``--no-writer``: no warm phase (caches assumed warm by user request).
+    """
+    test_only = getattr(args, "test_only", False)
+    cache_only = getattr(args, "cache_only", False)
+    no_writer = getattr(args, "no_writer", False)
+    warm_workers = getattr(args, "warm_workers", 1)
+    train_workers = getattr(args, "train_workers", 3)
+
+    if test_only:
+        ns = argparse.Namespace(**vars(args))
+        ns.max_workers = train_workers
+        print(f"=== {mode_label}: test-only (workers={train_workers}) ===")
+        run_fn(ns)
+        return
+
+    do_warm = not no_writer
+    do_train = not cache_only
+
+    if do_warm:
+        warm_ns = argparse.Namespace(**vars(args))
+        warm_ns.cache_only = True
+        warm_ns.no_writer = False
+        warm_ns.test_only = False
+        warm_ns.max_workers = warm_workers
+        print(f"=== {mode_label}: phase 1 — warm caches "
+              f"(workers={warm_workers}) ===")
+        run_fn(warm_ns)
+
+    if do_train:
+        train_ns = argparse.Namespace(**vars(args))
+        train_ns.cache_only = False
+        # If we just warmed, every pair reads from warm cache.
+        # If user invoked --no-writer, respect that (cache assumed warm).
+        train_ns.no_writer = True
+        train_ns.test_only = False
+        train_ns.max_workers = train_workers
+        phase_label = ("phase 2 — train" if do_warm else "train (no-writer)")
+        print(f"\n=== {mode_label}: {phase_label} "
+              f"(workers={train_workers}) ===")
+        run_fn(train_ns)
 
 
 DISPATCH: dict[tuple[str, str], Callable[[argparse.Namespace], None]] = {
@@ -413,20 +469,24 @@ def _add_run_args(p: argparse.ArgumentParser, *,
                   include_level: bool = False) -> None:
     p.add_argument("--device", type=str, default=None,
                    help="Device override (e.g. cuda:0)")
-    p.add_argument("--max-workers", "-j", type=int, default=3,
-                   help="Max concurrent tasks (default: 3); writers serialize "
-                        "per (dataset, encoder)")
+    p.add_argument("--warm-workers", type=int, default=1,
+                   help="Concurrent warm workers (default: 1). Each warm "
+                        "saturates GPU; ↑ only if you have many distinct "
+                        "(dataset, encoder) pairs and headroom.")
+    p.add_argument("--train-workers", "-j", type=int, default=3,
+                   help="Concurrent train workers (default: 3). `-j` alias.")
     _add_filter_args(p)
     if include_level:
         p.add_argument("--level", type=str, default=None, action="append",
                        help="Restrict to these level dirs (repeatable; "
                             "default: all levels in registry.yaml)")
     p.add_argument("--test-only", action="store_true",
-                   help="Run inference only (requires prior trained model)")
+                   help="Re-evaluate saved best trial; no warm or train "
+                        "(single phase, uses --train-workers).")
     p.add_argument("--cache-only", action="store_true",
-                   help="Warm caches and exit before training")
+                   help="Warm phase only (skips train phase).")
     p.add_argument("--no-writer", action="store_true",
-                   help="Run every job as a reader (cache must already be warm)")
+                   help="Train phase only — cache must already be warm.")
     p.add_argument("--tag", type=str, default="run1",
                    help="Experiment tag forwarded to train (default: run1)")
 
