@@ -22,10 +22,7 @@ metadata CSV that the training pipeline understands.
 | `create_torgo_metadata.py`            | TORGO         | `data/torgo/processed/torgo.csv`                |
 | `create_uaspeech_csv.py`              | UASpeech      | `data/uaspeech/processed/uaspeech.csv`          |
 
-`convert_to_soundfile_compat.py` is a dataset-specific helper used by
-the scripts above. The previous transcript-chunking step
-(`build_edaic_transcript_chunks.py`) has been folded into
-`create_edaic_metadata.py --chunk`.
+`convert_to_soundfile_compat.py` is helpful for audio formats incompatible with soundfile.
 
 ## Required output schema
 
@@ -41,9 +38,6 @@ assume they exist.
 | `label`          | Raw label — encoded by the prep module per `task_type`.                    |
 | `path`           | Audio path **relative to** `data/<dataset>/processed/audio/`.              |
 
-Source-specific extra columns (age, sex, severity, …) are preserved on
-the way through; the prep module decides which become labels.
-
 ## Dataset folder layout
 
 After running the matching script, the dataset must look like:
@@ -57,5 +51,3 @@ data/<dataset>/
 └── (raw upstream files; never read by the training pipeline)
 ```
 
-Audio is **copied**, not symlinked, so that `data/<dataset>/processed/`
-is portable and self-contained.

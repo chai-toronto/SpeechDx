@@ -92,28 +92,6 @@ class LayerTemporalProbe(nn.Module):
         return self.classifier(pooled)
 
 
-class XTTSProbe(nn.Module):
-    def __init__(self, input_dim, num_labels, temp_pooler, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.pooler = temp_pooler
-        if isinstance(self.pooler, ASP):
-            input_dim = input_dim * 2  # ASP doubles the dimension
-        self.classifier = nn.Linear(input_dim + 512, num_labels)
-
-    def forward(self, x, lengths=None):
-        """
-        x: (B, T_max, D) matrix of batch x time x features, where D includes both GPT cond latent and speaker embedding.
-        lengths: (B,) relative lengths (to T_max) per sequence. If None, we assume no padding.
-        Returns:
-          logits: (B, num_labels)
-        """
-        spk_emb = x[:, 0, :512]  # Assuming speaker embedding is at the first time step and is 512-dim
-        gpt_cond_latent = x[:, 1:, :]  # The rest is GPT cond latent
-
-        pooled_lat = self.pooler(gpt_cond_latent) # (B, D)
-        both = torch.cat([pooled_lat, spk_emb], dim=-1) # (B, D + 512)
-        return self.classifier(both)
-
 class EyeProbe(nn.Module):
     def forward(self, x, lengths=None):
         return x

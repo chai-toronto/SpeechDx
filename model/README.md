@@ -24,8 +24,10 @@ class MyEncoder(nn.Module):
 
     def forward(self, waveform, lengths=None):
         # waveform: (B, T_audio) at self.sample_rate
-        # returns: (B, T, D)  if output_hidden_states is False
-        #          tuple of (B, T, D) per layer  if output_hidden_states is True
+        # lengths:  (B,) relative lengths in [0, 1] — fraction of the padded
+        #           batch length (SpeechBrain convention), not absolute samples
+        # returns:  (B, T, D)  if output_hidden_states is False
+        #           tuple of (B, T, D) per layer  if output_hidden_states is True
         ...
 ```
 

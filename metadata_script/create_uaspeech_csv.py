@@ -37,11 +37,17 @@ def stage_audio_from_raw():
     if not RAW_DIR.is_dir():
         return
     candidates = [RAW_DIR / "audio" / "normalized", RAW_DIR]
-    src_root = next((c for c in candidates if c.is_dir()), None)
+    src_root = None
+    matches: list[Path] = []
+    for c in candidates:
+        if not c.is_dir():
+            continue
+        found = list(c.glob("*/*.wav"))
+        if found:
+            src_root = c
+            matches = found
+            break
     if src_root is None:
-        return
-    matches = list(src_root.glob("*/*.wav"))
-    if not matches:
         return
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)
     copied = skipped = 0
