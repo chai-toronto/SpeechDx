@@ -306,8 +306,8 @@ def _h_cross_run(args: argparse.Namespace) -> None:
 
 
 def _h_cross_status(args: argparse.Namespace) -> None:
-    raise NotImplementedError(
-        "`ahb cross status` is not yet implemented (scheduled for commit 7).")
+    from ahb.status import cmd_status_cross
+    cmd_status_cross(args)
 
 
 def _h_cross_summary(args: argparse.Namespace) -> None:
@@ -333,8 +333,8 @@ def _h_crosscat_run(args: argparse.Namespace) -> None:
 
 
 def _h_crosscat_status(args: argparse.Namespace) -> None:
-    raise NotImplementedError(
-        "`ahb cross-cat status` is not yet implemented (scheduled for commit 7).")
+    from ahb.status import cmd_status_crosscat
+    cmd_status_crosscat(args)
 
 
 def _h_crosscat_summary(args: argparse.Namespace) -> None:
@@ -375,8 +375,8 @@ def _h_dataeff_run(args: argparse.Namespace) -> None:
 
 
 def _h_dataeff_status(args: argparse.Namespace) -> None:
-    raise NotImplementedError(
-        "`ahb data-eff status` is not yet implemented (scheduled for commit 7).")
+    from ahb.status import cmd_status_dataeff
+    cmd_status_dataeff(args)
 
 
 def _h_dataeff_summary(args: argparse.Namespace) -> None:
@@ -434,8 +434,8 @@ def _h_all_run(args: argparse.Namespace) -> None:
 
 
 def _h_all_status(args: argparse.Namespace) -> None:
-    raise NotImplementedError(
-        "`ahb all status` is not yet implemented (scheduled for commit 7).")
+    from ahb.status import cmd_status_all
+    cmd_status_all(args)
 
 
 def _h_all_summary(args: argparse.Namespace) -> None:
@@ -663,10 +663,14 @@ def _add_run_args(p: argparse.ArgumentParser, *,
                    help="Experiment tag forwarded to train (default: run1)")
 
 
-def _add_status_args(p: argparse.ArgumentParser) -> None:
+def _add_status_args(p: argparse.ArgumentParser, *,
+                     include_level: bool = False) -> None:
     p.add_argument("--tag", type=str, default="run1",
                    help="Experiment tag to scan (default: run1)")
     _add_filter_args(p)
+    if include_level:
+        p.add_argument("--level", type=str, default=None, action="append",
+                       help="Restrict to these level dirs (repeatable)")
 
 
 def _add_summary_args(p: argparse.ArgumentParser, *,
@@ -713,7 +717,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_train_args(sub.add_parser("train", help="Train probe on a cross task."),
                     default_probe="Probe")
     _add_run_args(sub.add_parser("run", help="Sweep all incomplete cross runs."))
-    _add_status_args(sub.add_parser("status", help="(stub — commit 7)"))
+    _add_status_args(sub.add_parser("status", help="Per-task × per-encoder completion grid for cross."))
     _add_summary_args(sub.add_parser("summary", help="Aggregate cross results."),
                       default_root_hint="exps/cross")
 
@@ -726,7 +730,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_train_args(sub.add_parser("train", help="Train probe on a category task."),
                     default_probe="Probe")
     _add_run_args(sub.add_parser("run", help="Sweep all incomplete cross-category runs."))
-    _add_status_args(sub.add_parser("status", help="(stub — commit 7)"))
+    _add_status_args(sub.add_parser("status", help="Per-task × per-encoder completion grid for cross-cat."))
     _add_summary_args(sub.add_parser("summary", help="Aggregate cross-category results."),
                       default_root_hint="exps/cross_cat")
 
@@ -740,7 +744,8 @@ def build_parser() -> argparse.ArgumentParser:
         include_level=True)
     _add_run_args(sub.add_parser("run", help="Sweep all incomplete data-eff runs (across levels)."),
                   include_level=True)
-    _add_status_args(sub.add_parser("status", help="(stub — commit 7)"))
+    _add_status_args(sub.add_parser("status", help="Per-(level, task, encoder) completion grid for data-eff."),
+                     include_level=True)
     _add_summary_args(sub.add_parser("summary", help="Aggregate data-eff results."),
                       default_root_hint="exps/data_eff", include_level=True)
 
@@ -757,7 +762,8 @@ def build_parser() -> argparse.ArgumentParser:
                          help="Mode(s) to skip (repeatable)")
     all_run.add_argument("--continue-on-failure", action="store_true",
                          help="Run later modes even if an earlier one raises")
-    sub.add_parser("status", help="(stub — commit 7)")
+    _add_status_args(sub.add_parser("status", help="Stacked completion grids for every mode."),
+                     include_level=True)
     sub.add_parser("summary", help="(stub — fleshed out in a later commit)")
 
     return parser
