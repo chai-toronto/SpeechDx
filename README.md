@@ -20,26 +20,31 @@ git clone <this repo> && cd Audio-Health-Benchmark
 pip install -r requirements.txt
 pip install -e .
 
-# 1. Stage one dataset (audio + metadata CSV) under data/<dataset>/processed/.
-#    See data/README.md for required CSV columns.
-
-# 2. Build manifests, warm the encoder cache, then train. Filters apply
-#    to every command: `-t/--task`, `-e/--encoder`, `-d/--dataset` (each
-#    repeatable). Empty filter = "every match in scope". `single` is the
-#    default mode, so `ahb prep ...` ≡ `ahb single prep ...`.
+# 1. Tell the harness which dataset + task to work on. `prep` will:
+#    - download raw data if the dataset is public (mvdr, ravdess, coswara,
+#      torgo) and a `scripts/download_<name>.sh` exists,
+#    - else fail loudly with the contact info from registry.yaml,
+#    - run metadata_script/create_<name>_metadata.py if processed/<name>.csv
+#      is missing,
+#    - build the train/valid/test manifests.
+#    Filters: `-t/--task`, `-e/--encoder`, `-d/--dataset` (repeatable;
+#    empty = "every match in scope"). `single` is the default mode, so
+#    `ahb prep ...` ≡ `ahb single prep ...`.
 python -m ahb single prep  -t c9s_t1
 python -m ahb single warm  -t c9s_t1 -e wavlm
 python -m ahb single train -t c9s_t1 -e wavlm
 
-# 3. Or sweep all incomplete (task, encoder) pairs in one mode …
+# 2. Or `run` does the whole pipeline for matching pairs:
+#    download → prep → warm → train → summary. Idempotent — skips
+#    pairs whose results already exist; pass --overwrite to redo.
 python -m ahb single run -j 4
 
-# 4. … or chain every mode (single → cross → cross-cat → data-eff).
+# 3. … or chain every mode (single → cross → cross-cat → data-eff).
 python -m ahb all run -j 4
 
-# 5. Inspect.
+# 4. Inspect.
 python -m ahb single status         # task × encoder grid of ☑ / ☐ for --tag
-python -m ahb single summary        # per-metric CSVs at exps/single_task/_summary_<tag>/
+python -m ahb single summary        # per-metric CSVs + stdout tables
 ```
 
 ## Modes
@@ -60,12 +65,12 @@ The same six commands apply to every mode:
 
 | Command   | What it does                                                                                                                |
 |-----------|-----------------------------------------------------------------------------------------------------------------------------|
-| `prep`    | Build manifests for every task matching the filters.                                                                        |
-| `warm`    | Warm the HDF5 cache for every matching (task, encoder) pair. Idempotent.                                                    |
-| `train`   | Train probe (Ray Tune HP search) on every matching pair; `single train` auto-routes to per-fold CV via the task yaml.       |
-| `run`     | Idempotent sweep — warm + train every *incomplete* matching pair. Skips already-complete results.                            |
-| `status`  | Completion grid for the mode. (Cross / cross-cat / data-eff are stubs in commit 1; flesh-out in commit 7.)                  |
-| `summary` | Aggregate `test_results.{txt,yaml}` into per-metric CSVs at `<mode-root>/_summary_<tag>/`.                                  |
+| `prep`    | Download raw data (if public) or yell with contact info; run metadata script if needed; build manifests.                    |
+| `warm`    | Warm the HDF5 cache for every matching (task, encoder) pair. Idempotent. `--overwrite` wipes cache.hdf5 and re-extracts.    |
+| `train`   | Train probe (Ray Tune HP search) on every matching pair; `single train` auto-routes to per-fold CV via the task yaml. Skips pairs whose results exist; `--overwrite` redoes them. |
+| `run`     | Whole pipeline for matching pairs: download → prep → warm → train → summary. Idempotent.                                    |
+| `status`  | Per-task × per-encoder ☑/☐ completion grid for the mode (data-eff has an extra `level` column).                             |
+| `summary` | Aggregate `test_results.{txt,yaml}` into per-metric CSVs at `<mode-root>/_summary_<tag>/`. Also pretty-prints the metric tables to stdout. |
 
 **Canonical filters.** Every command accepts `-t/--task`, `-e/--encoder`,
 `-d/--dataset`. Each is repeatable; empty = "every match in scope". So
@@ -83,19 +88,24 @@ prompts unless `-y/--yes`), `--dry-run` (print the plan and exit).
 `--continue-on-failure`.
 
 **Strict phases.** `run` warms every needed `(dataset, encoder)` cache
-first, then trains. The two phases run with independent worker pools —
-warm dominates GPU, train dominates CPU, so serial phases let each
-saturate its bottleneck without contention.
+first, trains second, summarizes third. The warm and train phases run
+with independent worker pools — warm dominates GPU, train dominates CPU,
+so serial phases let each saturate its bottleneck without contention.
 
-**Cache warming is a hard prerequisite for every mode** — training reads from
-the per-`(dataset, encoder)` HDF5 cache and will fail on miss. Encoder forward
-passes dominate wall time, so `<mode> run` serializes warm vs read per
-`(dataset, encoder)` pair to let multiple jobs share the cache. `single run`
-and `cross run` chain warming and training internally. `cross-cat run` does
-not: cross-cat warm short-circuits today, so the constituent single-task
-caches must already be populated via `ahb single warm <task> <encoder>` (or
-a prior `single run`) before invoking it. `ahb all run` handles the ordering
-automatically (single → cross → cross-cat → data-eff).
+**Auto-resume.** If a `train` invocation finds partial Ray Tune state
+on disk (storage/, best_hparams.yaml) and no completed `test_results`,
+it auto-resumes rather than wiping. Pass `--overwrite` to force a fresh
+start. `continue_exp` is no longer a user-facing knob.
+
+**Cache sharing.** Training reads from the per-`(dataset, encoder)`
+HDF5 cache and will fail on miss. `single run` and `cross run` chain
+warming and training internally; `cross-cat run` expects the per-dataset
+single caches to be populated (covered automatically by `ahb all run`'s
+single → cross → cross-cat → data-eff ordering, or via a prior `single
+run` / `cross-cat warm`). Standalone `cross warm` and `cross-cat warm`
+delegate to `single warm` for every task on each listed dataset,
+propagating the cross task's `num_aug_ver` so caches get extended to
+the aug count the cross trainer needs.
 
 ## Encoders
 
@@ -191,16 +201,18 @@ name under `data/` and the prefix used in task ids.
 | `c9s`        | COVID-19 Sounds (Cambridge)                    | DTA    | https://covid-19-sounds.org/ — DTA via covid-19-sounds@cl.cam.ac.uk                                                           |
 | `avfad`      | Advanced Voice Function Assessment Database    | email  | https://acsa.web.ua.pt/AVFAD.htm — request via ieeta-acsa@ua.pt                                                               |
 
-**Staging contract.** Once raw data is on disk, a metadata script copies the
-audio into `data/<name>/processed/audio/` and writes the CSV to
-`data/<name>/processed/<name>.csv`. The CSV must have at least
-`uid, Participant_ID, split, label, path` — see
+**Staging contract.** Once raw data is on disk at `data/<name>/raw/`, a
+metadata script copies the audio into `data/<name>/processed/audio/` and
+writes the CSV to `data/<name>/processed/<name>.csv`. The CSV must have at
+least `uid, Participant_ID, split, label, path` — see
 [`metadata_script/README.md`](metadata_script/README.md).
 
-All `create_<name>_metadata.py` scripts read from `data/<name>/raw/` by
-default. Drop the upstream archive there (or run the matching
-`scripts/download_*.sh` for the open ones), then run the metadata script —
-it stages audio into `processed/audio/` and writes the CSV.
+`ahb prep` automates the whole chain: it runs `scripts/download_<name>.sh`
+when raw is missing and the dataset is open, then `metadata_script/create_<name>_metadata.py`
+when the processed CSV is missing, then builds manifests. Datasets with
+restricted access fail loudly with the contact info from
+`ahb/configs/registry.yaml` (`datasets.<name>.contact`). Drop the upstream
+archive at `data/<name>/raw/` and re-run.
 
 
 ## Adding a task
@@ -254,12 +266,17 @@ Each completed `(task, encoder)` job writes:
 - `events.out.tfevents.*` — TensorBoard scalar logs.
 - `best_hparams.yaml` — winning hyperparameters from the Ray Tune search.
 
-Aggregate everything into per-metric CSVs:
+Aggregate everything into per-metric CSVs (and pretty-print the same
+matrices to stdout):
 
 ```bash
-python -m ahb summary
-ls exps/single_task/_summary/    # AUROC.csv, MAE.csv, completion.csv, …
+python -m ahb single summary
+ls exps/single_task/_summary_run1/   # AUC.csv, F1.csv, MAE.csv, completion.csv, …
 ```
+
+`run` invokes the matching mode's `summary` automatically as its third
+phase, so a single `ahb single run` ends with the metric tables for the
+pairs it just trained printed to stdout.
 
 ### Cross-validation tasks
 
@@ -286,10 +303,14 @@ no orchestrator code changes required.
 
 ## Concurrency
 
-`-j N` on `ahb run` controls how many jobs run in parallel. There is a
-per-`(dataset, encoder)` write lock so warm-cache never races; reader-only
-jobs (cache already populated) run unblocked and short-circuit the encoder
-load via a stub. CLAP requires `-j 1` because of 48 kHz memory pressure.
+`run` runs warm and train in two strict phases with independent worker
+pools: `--warm-workers` (default `1`) and `--train-workers` / `-j`
+(default `3`). Warm dominates GPU; train dominates CPU; serial phases
+let each saturate its bottleneck. Within a phase, a per-`(dataset,
+encoder)` write lock prevents warm-cache races; reader-only jobs (cache
+already populated) run unblocked and short-circuit the encoder load via
+a stub. CLAP requires `--warm-workers 1` because of 48 kHz memory
+pressure (already the default).
 
 ## Multi-host / SLURM
 
