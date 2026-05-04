@@ -183,6 +183,34 @@ def _build_kwargs_category(tr, va, te, tcfg, mcfg) -> dict:
     }
 
 
+def _datasets_for_task(tcfg: dict, kind: str) -> list[str]:
+    """Datasets a task touches — used to decide which raw/ + processed/ to
+    auto-provision. Single: ``[dataset]``. Cross: ``[train, test]``.
+    Cross-cat: union of ``train_datasets`` + ``test_datasets``."""
+    out: list[str] = []
+    if kind == "single":
+        ds = tcfg.get("dataset")
+        if ds:
+            out.append(ds)
+    elif kind == "cross":
+        for k in ("train_dataset", "test_dataset"):
+            v = tcfg.get(k)
+            if v:
+                out.append(v)
+    elif kind == "category":
+        for k in ("train_datasets", "test_datasets"):
+            v = tcfg.get(k)
+            if isinstance(v, list):
+                out.extend(v)
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for ds in out:
+        if ds not in seen:
+            seen.add(ds)
+            deduped.append(ds)
+    return deduped
+
+
 def ensure_manifest(task_stem: str) -> None:
     """Build manifests for ``task_stem`` if any are missing.
 
@@ -190,6 +218,11 @@ def ensure_manifest(task_stem: str) -> None:
     task YAML's location and contents. The legacy
     ``data_io_script: training.dataio.prep_X`` field is mapped to the new
     ``ahb.prep.X`` module so YAMLs need no edits.
+
+    Before manifest building: ensures every dataset the task touches has
+    raw data staged (auto-downloads via scripts/download_<name>.sh when
+    public; yells with contact info when private) and a processed CSV
+    (runs metadata_script/create_<name>_metadata.py when needed).
     """
     tpath = _find_task_yaml(task_stem)
     tcfg = _load_yaml(tpath)
@@ -202,6 +235,10 @@ def ensure_manifest(task_stem: str) -> None:
     if tr.exists() and va.exists():
         if is_cv_single or te.exists():
             return
+
+    # Provision every dataset this task touches before building manifests.
+    from ahb.prep.raw import ensure_raw_and_processed
+    ensure_raw_and_processed(_datasets_for_task(tcfg, kind))
 
     module = _resolve_module(tcfg["data_io_script"])
     fn = getattr(module, tcfg["prepare_data_fn"])

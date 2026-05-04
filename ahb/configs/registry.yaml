@@ -73,3 +73,21 @@ cross_pairs: []
 # Datasets to skip across all modes.
 exclude_datasets:
   - daic_woz
+
+# Per-dataset access metadata used by `ahb prep` to auto-download or yell.
+# `access` is informational; `contact` is shown to the user if raw/ is empty
+# and no scripts/download_<name>.sh exists. `metadata_script` overrides the
+# default convention `metadata_script/create_<name>_metadata.py`.
+datasets:
+  ravdess:    {access: open}                                                                  # scripts/download_ravdess.sh
+  coswara:    {access: open}                                                                  # scripts/download_coswara.sh
+  mvdr:       {access: open}                                                                  # scripts/download_mvdr.sh (CC BY 4.0)
+  torgo:      {access: open}                                                                  # scripts/download_torgo.sh
+  ksof:       {access: eula,         contact: "https://th-nuernberg.github.io/kassel-state-of-fluency/"}
+  uaspeech:   {access: email,        contact: "uaspeech-requests@lists.illinois.edu"}
+  iemocap:    {access: form,         contact: "https://sail.usc.edu/iemocap/"}
+  dbank:      {access: dta,          contact: "madress2023@ed.ac.uk (https://luzs.gitlab.io/madress-2023/)"}
+  aphasia:    {access: registration, contact: "https://aphasia.talkbank.org/"}
+  edaic:      {access: dta,          contact: "https://dcapswoz.ict.usc.edu/"}
+  c9s:        {access: dta,          contact: "covid-19-sounds@cl.cam.ac.uk (https://covid-19-sounds.org/)"}
+  avfad:      {access: email,        contact: "ieeta-acsa@ua.pt (https://acsa.web.ua.pt/AVFAD.htm)"}

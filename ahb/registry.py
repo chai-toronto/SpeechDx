@@ -51,3 +51,8 @@ def cross_pairs() -> list[str]:
 
 def exclude_datasets() -> set[str]:
     return set(load_registry().get("exclude_datasets", []))
+
+
+def datasets() -> dict[str, dict]:
+    """Per-dataset access metadata (``access``, ``contact``, …)."""
+    return dict(load_registry().get("datasets", {}))
