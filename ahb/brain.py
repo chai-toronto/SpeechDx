@@ -26,14 +26,28 @@ def _maybe_subject_ids(pids):
     return arr
 
 
-def _cluster_bootstrap_indices(rng, n, subject_ids):
-    """Sample indices for a sample- or cluster-level bootstrap draw."""
+def _build_subject_groups(subject_ids):
+    """Precompute per-subject index lists for cluster bootstrap.
+
+    Returned object is keyed by subject ordinal 0..S-1 (not the subject id),
+    which lets the per-draw sampler use a fast integer rng.
+    """
     if subject_ids is None:
+        return None
+    sid = np.asarray(subject_ids)
+    order = np.argsort(sid, kind="stable")
+    sorted_sid = sid[order]
+    splits = np.where(sorted_sid[1:] != sorted_sid[:-1])[0] + 1
+    return np.split(order, splits)
+
+
+def _cluster_bootstrap_indices(rng, n, subj_groups):
+    """Sample indices for a sample- or cluster-level bootstrap draw."""
+    if subj_groups is None:
         return rng.choice(n, size=n, replace=True)
-    subjects = np.unique(subject_ids)
-    subj_to_idx = {s: np.where(subject_ids == s)[0] for s in subjects}
-    sampled = rng.choice(subjects, size=len(subjects), replace=True)
-    return np.concatenate([subj_to_idx[s] for s in sampled])
+    n_subj = len(subj_groups)
+    sampled = rng.integers(0, n_subj, size=n_subj)
+    return np.concatenate([subj_groups[k] for k in sampled])
 
 
 def bootstrap_macro_auc_ci(
@@ -68,11 +82,10 @@ def bootstrap_macro_auc_ci(
     point_estimate = macro_auc(y_true, y_score)
 
     n = len(y_true)
-    if subject_ids is not None:
-        subject_ids = np.asarray(subject_ids)
+    subj_groups = _build_subject_groups(subject_ids)
     boot_scores = []
     for _ in range(n_boot):
-        idx = _cluster_bootstrap_indices(rng, n, subject_ids)
+        idx = _cluster_bootstrap_indices(rng, n, subj_groups)
         boot_scores.append(macro_auc(y_true[idx], y_score[idx]))
 
     boot_scores = np.asarray(boot_scores)
@@ -107,11 +120,10 @@ def bootstrap_mae_ci(
     point_estimate = float(np.mean(abs_err))
 
     n = len(y_true)
-    if subject_ids is not None:
-        subject_ids = np.asarray(subject_ids)
+    subj_groups = _build_subject_groups(subject_ids)
     boot_scores = np.empty(n_boot)
     for i in range(n_boot):
-        idx = _cluster_bootstrap_indices(rng, n, subject_ids)
+        idx = _cluster_bootstrap_indices(rng, n, subj_groups)
         boot_scores[i] = abs_err[idx].mean()
 
     alpha = (100 - ci) / 2
