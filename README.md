@@ -23,12 +23,13 @@ pip install -e .
 # 1. Stage one dataset (audio + metadata CSV) under data/<dataset>/processed/.
 #    See data/README.md for required CSV columns.
 
-# 2. Build manifests for one task, warm the encoder cache, then train.
-#    `single` is the default mode — `ahb prep ...` is shorthand for
-#    `ahb single prep ...` etc.
-python -m ahb single prep   c9s_t1
-python -m ahb single warm   c9s_t1 wavlm
-python -m ahb single train  c9s_t1 wavlm
+# 2. Build manifests, warm the encoder cache, then train. Filters apply
+#    to every command: `-t/--task`, `-e/--encoder`, `-d/--dataset` (each
+#    repeatable). Empty filter = "every match in scope". `single` is the
+#    default mode, so `ahb prep ...` ≡ `ahb single prep ...`.
+python -m ahb single prep  -t c9s_t1
+python -m ahb single warm  -t c9s_t1 -e wavlm
+python -m ahb single train -t c9s_t1 -e wavlm
 
 # 3. Or sweep all incomplete (task, encoder) pairs in one mode …
 python -m ahb single run -j 4
@@ -57,21 +58,26 @@ argument is a command rather than a mode, mode defaults to `single` — so
 
 The same six commands apply to every mode:
 
-| Command   | Surface                                          | What it does                                                                                       |
-|-----------|--------------------------------------------------|----------------------------------------------------------------------------------------------------|
-| `prep`    | `<mode> prep <task ...>`                         | Build manifests for the given task stems (mode-agnostic in practice).                              |
-| `warm`    | `<mode> warm <task> <encoder>`                   | Warm the HDF5 cache for one (task, encoder) pair. Idempotent.                                      |
-| `train`   | `<mode> train <task> <encoder>`                  | Train probe with Ray Tune HP search; `single train` auto-routes to per-fold CV via the task yaml.  |
-| `run`     | `<mode> run [flags]`                             | Sweep all incomplete (task, encoder) pairs in scope; chains warm + train internally where possible.|
-| `status`  | `<mode> status [--tag]`                          | Completion grid for the mode. (Cross / cross-cat / data-eff are stubs in commit 1; commit 7.)      |
-| `summary` | `<mode> summary [--tag] [--out-dir]`             | Aggregate `test_results.{txt,yaml}` into per-metric CSVs at `<mode-root>/_summary_<tag>/`.         |
+| Command   | What it does                                                                                                                |
+|-----------|-----------------------------------------------------------------------------------------------------------------------------|
+| `prep`    | Build manifests for every task matching the filters.                                                                        |
+| `warm`    | Warm the HDF5 cache for every matching (task, encoder) pair. Idempotent.                                                    |
+| `train`   | Train probe (Ray Tune HP search) on every matching pair; `single train` auto-routes to per-fold CV via the task yaml.       |
+| `run`     | Idempotent sweep — warm + train every *incomplete* matching pair. Skips already-complete results.                            |
+| `status`  | Completion grid for the mode. (Cross / cross-cat / data-eff are stubs in commit 1; flesh-out in commit 7.)                  |
+| `summary` | Aggregate `test_results.{txt,yaml}` into per-metric CSVs at `<mode-root>/_summary_<tag>/`.                                  |
 
-Every `run` sweep accepts the same filter / control flags:
-`--encoder` / `--dataset` / `--task` (repeatable allowlists), `-j/--max-workers`
-(default `3`), `--tag` (default `run1`), `--device`, `--test-only`
-(re-evaluate without training), `--cache-only` (warm and exit), and
-`--no-writer` (require a prewarmed cache). `data-eff run` also accepts
-`--level`. `all run` adds `--skip-mode` and `--continue-on-failure`.
+**Canonical filters.** Every command accepts `-t/--task`, `-e/--encoder`,
+`-d/--dataset`. Each is repeatable; empty = "every match in scope". So
+`single warm -t c9s_t1 -e wavlm` is one pair, `single warm -d c9s` warms
+every c9s task × every encoder, and `single warm` (no filter) warms the
+whole grid.
+
+**Run-only flags** (every mode's `run`): `-j/--max-workers` (default `3`),
+`--tag` (default `run1`), `--device`, `--test-only` (re-evaluate without
+training), `--cache-only` (warm and exit), `--no-writer` (require a
+prewarmed cache). `data-eff run` adds `--level`. `all run` adds
+`--skip-mode` and `--continue-on-failure`.
 
 **Cache warming is a hard prerequisite for every mode** — training reads from
 the per-`(dataset, encoder)` HDF5 cache and will fail on miss. Encoder forward

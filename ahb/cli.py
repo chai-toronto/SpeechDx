@@ -30,6 +30,56 @@ COMMANDS = ("prep", "warm", "train", "run", "status", "summary")
 
 
 # ---------------------------------------------------------------------------
+# Filter resolution — every command takes -e/-d/-t (encoder/dataset/task)
+# allowlists. Empty filter = "everything found".
+# ---------------------------------------------------------------------------
+
+def _resolve_tasks(args: argparse.Namespace, mode: str) -> list[str]:
+    """Sorted task stems matching the --task / --dataset filters for ``mode``."""
+    datasets = getattr(args, "dataset", None)
+    tasks = getattr(args, "task", None)
+    if mode in ("single", "data-eff"):
+        from ahb.orchestrator import discover_tasks
+        return discover_tasks(datasets=datasets, tasks=tasks)
+    if mode == "cross":
+        from ahb.orchestrator_cross import discover_tasks as cross_disc
+        return cross_disc(datasets=datasets, tasks=tasks, include_categories=False)
+    if mode == "cross-cat":
+        from ahb.orchestrator_cross import discover_tasks as cross_disc
+        return cross_disc(datasets=datasets, tasks=tasks, include_categories=True)
+    raise ValueError(f"unknown mode for task selection: {mode}")
+
+
+def _resolve_pairs(args: argparse.Namespace, mode: str) -> list[tuple[str, str]]:
+    """Cartesian product of resolved tasks and encoders matching the filters."""
+    from ahb.registry import encoders as registry_encoders
+    tasks = _resolve_tasks(args, mode)
+    enc_filter = set(getattr(args, "encoder", None) or [])
+    encs = list(registry_encoders().keys())
+    if enc_filter:
+        encs = [e for e in encs if e in enc_filter]
+    return [(t, e) for t in tasks for e in encs]
+
+
+def _train_one(args: argparse.Namespace, task: str, encoder: str, *,
+               level_dir: str | None = None) -> None:
+    """Per-pair single-mode train; auto-routes to per-fold CV via task yaml."""
+    from ahb.orchestrator import is_cv
+    from ahb.prep.dispatch import ensure_manifest
+    ensure_manifest(task)
+    if is_cv(task):
+        from ahb.train_cv import cmd_train_cv as _fn
+    else:
+        from ahb.train import cmd_train as _fn
+    _fn(
+        task, encoder,
+        probe=args.probe, probe_yaml=args.probe_yaml,
+        tag=args.tag, overrides=args.overrides or "",
+        level_dir=level_dir,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Handlers — one per (mode, command) cell. Imports are inline so unrelated
 # subcommands don't pull heavy dependencies into argparse startup.
 # ---------------------------------------------------------------------------
@@ -37,32 +87,39 @@ COMMANDS = ("prep", "warm", "train", "run", "status", "summary")
 def _h_prep(args: argparse.Namespace) -> None:
     """Mode-agnostic prep — works for single, cross, and cross-cat stems."""
     from ahb.prep.dispatch import ensure_manifest
-    for task in args.task:
+    tasks = _resolve_tasks(args, args.mode)
+    if not tasks:
+        print("prep: no matching tasks for filters.")
+        return
+    print(f"prep: {len(tasks)} task(s)")
+    for task in tasks:
         ensure_manifest(task)
 
 
 def _h_single_warm(args: argparse.Namespace) -> None:
     from ahb.prep.dispatch import ensure_manifest
     from ahb.warm import run_warm
-    ensure_manifest(args.task)
-    run_warm(args.task, args.encoder, probe=args.probe, device=args.device)
+    pairs = _resolve_pairs(args, "single")
+    if not pairs:
+        print("warm: no matching (task, encoder) pairs for filters.")
+        return
+    print(f"warm: {len(pairs)} (task, encoder) pair(s)")
+    for task, encoder in pairs:
+        ensure_manifest(task)
+        run_warm(task, encoder, probe=args.probe, device=args.device)
 
 
 def _h_single_train(args: argparse.Namespace) -> None:
-    """Auto-routes to per-fold CV when the task yaml sets ``num_fold``."""
-    from ahb.orchestrator import is_cv
-    from ahb.prep.dispatch import ensure_manifest
-    ensure_manifest(args.task)
-    if is_cv(args.task):
-        from ahb.train_cv import cmd_train_cv as _train_fn
-    else:
-        from ahb.train import cmd_train as _train_fn
-    _train_fn(
-        args.task, args.encoder,
-        probe=args.probe, probe_yaml=args.probe_yaml,
-        tag=args.tag, overrides=args.overrides or "",
-        level_dir=getattr(args, "level_dir", None),
-    )
+    """Sweep all matching (task, encoder) pairs; per-pair train auto-routes
+    to per-fold CV via the task yaml."""
+    pairs = _resolve_pairs(args, "single")
+    if not pairs:
+        print("train: no matching pairs for filters.")
+        return
+    print(f"train: {len(pairs)} pair(s)")
+    level_dir = getattr(args, "level_dir", None)
+    for task, encoder in pairs:
+        _train_one(args, task, encoder, level_dir=level_dir)
 
 
 def _h_single_run(args: argparse.Namespace) -> None:
@@ -84,21 +141,33 @@ def _h_single_summary(args: argparse.Namespace) -> None:
 def _h_cross_warm(args: argparse.Namespace) -> None:
     from ahb.prep.dispatch import ensure_manifest
     from ahb.warm_cross import run_warm_cross
-    ensure_manifest(args.task)
-    run_warm_cross(args.task, args.encoder,
-                   probe=args.probe, probe_yaml=args.probe_yaml,
-                   device=args.device)
+    pairs = _resolve_pairs(args, args.mode)
+    if not pairs:
+        print(f"{args.mode} warm: no matching pairs for filters.")
+        return
+    print(f"{args.mode} warm: {len(pairs)} pair(s)")
+    for task, encoder in pairs:
+        ensure_manifest(task)
+        run_warm_cross(task, encoder,
+                       probe=args.probe, probe_yaml=args.probe_yaml,
+                       device=args.device)
 
 
 def _h_cross_train(args: argparse.Namespace) -> None:
     """``cmd_train_cross`` auto-detects category vs non-category via the task
     yaml, so the per-pair entry point is shared with ``cross-cat train``."""
     from ahb.train_cross import cmd_train_cross
-    cmd_train_cross(
-        args.task, args.encoder,
-        probe=args.probe, probe_yaml=args.probe_yaml,
-        tag=args.tag, overrides=args.overrides or "",
-    )
+    pairs = _resolve_pairs(args, args.mode)
+    if not pairs:
+        print(f"{args.mode} train: no matching pairs for filters.")
+        return
+    print(f"{args.mode} train: {len(pairs)} pair(s)")
+    for task, encoder in pairs:
+        cmd_train_cross(
+            task, encoder,
+            probe=args.probe, probe_yaml=args.probe_yaml,
+            tag=args.tag, overrides=args.overrides or "",
+        )
 
 
 def _h_cross_run(args: argparse.Namespace) -> None:
@@ -156,15 +225,18 @@ def _h_dataeff_warm(args: argparse.Namespace) -> None:
 
 
 def _h_dataeff_train(args: argparse.Namespace) -> None:
-    """Train one (task, encoder) at every data-eff level by default;
-    ``--level`` filters to specific levels."""
+    """Sweep all matching (task, encoder) pairs at every data-eff level by
+    default; ``--level`` filters to specific levels."""
     from ahb.registry import data_eff_levels
+    pairs = _resolve_pairs(args, "data-eff")
+    if not pairs:
+        print("data-eff train: no matching pairs for filters.")
+        return
     levels = args.level or [name for name, _ in data_eff_levels()]
+    print(f"data-eff train: {len(pairs)} pair(s) × {len(levels)} level(s)")
     for level in levels:
-        ns = argparse.Namespace(**vars(args))
-        ns.level_dir = level
-        ns.level = None
-        _h_single_train(ns)
+        for task, encoder in pairs:
+            _train_one(args, task, encoder, level_dir=level)
 
 
 def _h_dataeff_run(args: argparse.Namespace) -> None:
@@ -288,14 +360,25 @@ DISPATCH: dict[tuple[str, str], Callable[[argparse.Namespace], None]] = {
 # Parser builders — argument groupings reused across modes.
 # ---------------------------------------------------------------------------
 
+def _add_filter_args(p: argparse.ArgumentParser) -> None:
+    """The canonical ``-e``/``-d``/``-t`` filters used by every command.
+
+    Each is repeatable; an empty filter means "every match in scope".
+    """
+    p.add_argument("-e", "--encoder", action="append", default=None,
+                   help="Restrict to this encoder (repeatable; default: all)")
+    p.add_argument("-d", "--dataset", action="append", default=None,
+                   help="Restrict to this dataset (repeatable; default: all)")
+    p.add_argument("-t", "--task", action="append", default=None,
+                   help="Restrict to this task stem (repeatable; default: all)")
+
+
 def _add_prep_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument("task", nargs="+",
-                   help="Task stem(s) — looked up in ahb/configs/{tasks,cross_tasks}/")
+    _add_filter_args(p)
 
 
 def _add_warm_args(p: argparse.ArgumentParser, *, default_probe: str = "AvgTProbe") -> None:
-    p.add_argument("task", help="Task stem")
-    p.add_argument("encoder", help="Encoder name (model_name in registry.yaml)")
+    _add_filter_args(p)
     p.add_argument("--probe", default=default_probe,
                    help=f"Probe name (default: {default_probe})")
     p.add_argument("--probe-yaml", default="Probe.yaml",
@@ -308,8 +391,7 @@ def _add_train_args(p: argparse.ArgumentParser, *,
                     default_probe: str = "AvgTProbe",
                     include_level_dir: bool = False,
                     include_level: bool = False) -> None:
-    p.add_argument("task", help="Task stem")
-    p.add_argument("encoder", help="Encoder name")
+    _add_filter_args(p)
     p.add_argument("--probe", default=default_probe,
                    help=f"Probe name (default: {default_probe})")
     p.add_argument("--probe-yaml", default="Probe.yaml")
@@ -334,12 +416,7 @@ def _add_run_args(p: argparse.ArgumentParser, *,
     p.add_argument("--max-workers", "-j", type=int, default=3,
                    help="Max concurrent tasks (default: 3); writers serialize "
                         "per (dataset, encoder)")
-    p.add_argument("--encoder", type=str, default=None, action="append",
-                   help="Restrict to this encoder (repeatable)")
-    p.add_argument("--dataset", type=str, default=None, action="append",
-                   help="Restrict to tasks whose dataset matches (repeatable)")
-    p.add_argument("--task", type=str, default=None, action="append",
-                   help="Restrict to this task stem (repeatable)")
+    _add_filter_args(p)
     if include_level:
         p.add_argument("--level", type=str, default=None, action="append",
                        help="Restrict to these level dirs (repeatable; "
@@ -357,6 +434,7 @@ def _add_run_args(p: argparse.ArgumentParser, *,
 def _add_status_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--tag", type=str, default="run1",
                    help="Experiment tag to scan (default: run1)")
+    _add_filter_args(p)
 
 
 def _add_summary_args(p: argparse.ArgumentParser, *,
@@ -366,12 +444,7 @@ def _add_summary_args(p: argparse.ArgumentParser, *,
                    help=f"Output dir (default: {default_root_hint}/_summary_<tag>)")
     p.add_argument("--tag", type=str, default="run1",
                    help="Experiment tag to scan (default: run1)")
-    p.add_argument("--encoder", type=str, default=None, action="append",
-                   help="Restrict to these encoders (repeatable)")
-    p.add_argument("--dataset", type=str, default=None, action="append",
-                   help="Restrict to tasks whose dataset matches (repeatable)")
-    p.add_argument("--task", type=str, default=None, action="append",
-                   help="Restrict to these task stems (repeatable)")
+    _add_filter_args(p)
     if include_level:
         p.add_argument("--level", type=str, default=None, action="append",
                        help="Restrict to these level dirs (repeatable)")

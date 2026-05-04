@@ -409,5 +409,5 @@ def cmd_train_cv(task: str, encoder: str, *,
 if __name__ == "__main__":
     import signal
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
-    raise SystemExit("Use `python -m ahb single train <task> <encoder>` instead "
+    raise SystemExit("Use `python -m ahb single train -t <task> -e <encoder>` instead "
                      "(auto-routes to per-fold CV when the task yaml sets `num_fold`).")
