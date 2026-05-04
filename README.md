@@ -54,6 +54,16 @@ A single CLI entry point (`python -m ahb <subcommand>`) covers four modes:
 
 `harness.py` is a thin shim equivalent to `python -m ahb`.
 
+**Cache warming is a hard prerequisite for every mode** — training reads from
+the per-`(dataset, encoder)` HDF5 cache and will fail on miss. `run` and
+`run-cross` chain warming and training internally (`warm`+`train`,
+`warm-cross`+`train-cross`). `run-cross-category` does not: `warm-cross`
+short-circuits for category tasks, so the constituent single-task caches must
+already be populated via `ahb warm <dataset-task> <encoder>` (or a prior
+single-mode `run`) before invoking it. Running the full benchmark via
+`ahb run-all` handles the ordering automatically (single → cross → cross-cat
+→ data-eff).
+
 ## Encoders
 
 12 frozen backbones ship by default. The `Source` column is the identifier

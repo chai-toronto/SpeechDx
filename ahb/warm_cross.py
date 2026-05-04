@@ -32,7 +32,6 @@ from ahb.dataio.pipeline import (
     build_augmenters,
     make_audio_pipeline,
     make_augment,
-    make_get_pid,
     make_label_pipeline,
     make_passthrough_duration,
     make_process_signal,
@@ -89,7 +88,7 @@ def _build_warm_dynamic_items(hparams: dict[str, Any], *, augmented: bool) -> li
     min_samples = int(hparams.get("min_length", 3) * sample_rate)
     split_by_boundary = hparams["data_params"].get("split_by_boundary", False)
 
-    items = [make_get_pid(), make_audio_pipeline(sample_rate)]
+    items = [make_audio_pipeline(sample_rate)]
     if augmented:
         noisifier, reverb, perturbator = build_augmenters(
             noise_folder=os.path.abspath(hparams["noise_folder"]),
@@ -201,7 +200,7 @@ def run_warm_cross(task: str, encoder: str, *,
     val_items = _build_warm_dynamic_items(hparams, augmented=False) + [val_writer]
     test_items = _build_warm_dynamic_items(hparams, augmented=False) + [test_writer]
 
-    output_keys_base = ["id", "path", "pid", "label_encoded"]
+    output_keys_base = ["id", "path", "Participant_ID", "label_encoded"]
     train_ds = sb.dataio.dataset.DynamicItemDataset(
         data=data_dict["all_train"], dynamic_items=train_items,
         output_keys=output_keys_base + output_vars,

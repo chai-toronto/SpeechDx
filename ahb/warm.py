@@ -27,7 +27,6 @@ from ahb.dataio.pipeline import (
     build_augmenters,
     make_audio_pipeline,
     make_augment,
-    make_get_pid,
     make_label_pipeline,
     make_passthrough_duration,
     make_process_signal,
@@ -120,7 +119,6 @@ def _build_warm_dynamic_items(hparams: dict[str, Any], *, augmented: bool) -> li
     split_by_boundary = hparams["data_params"].get("split_by_boundary", False)
 
     items = [
-        make_get_pid(),
         make_audio_pipeline(sample_rate),
     ]
 
@@ -231,7 +229,7 @@ def run_warm(task: str, encoder: str, *,
     train_items = _build_warm_dynamic_items(hparams, augmented=True) + [train_writer]
     val_items = _build_warm_dynamic_items(hparams, augmented=False) + [val_writer]
 
-    output_keys_base = ["id", "path", "pid", "label_encoded"]
+    output_keys_base = ["id", "path", "Participant_ID", "label_encoded"]
     train_ds = sb.dataio.dataset.DynamicItemDataset(
         data=data_dict["all"],
         dynamic_items=train_items,

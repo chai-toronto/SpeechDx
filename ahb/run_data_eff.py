@@ -38,10 +38,16 @@ from ahb.orchestrator_data_eff import (
     ensure_manifest_data_eff,
     get_output_folder,
     get_task_info,
-    has_ci_results,
     is_complete,
     is_cv,
 )
+
+
+def _has_trained_model(output_folder: Path, task_stem: str) -> bool:
+    """True if a prior training run left a best-config artifact we can re-evaluate."""
+    if is_cv(task_stem):
+        return any(output_folder.glob("best_hparams_fold_*.yaml"))
+    return (output_folder / "best_hparams.yaml").exists()
 
 
 def _run_subprocess(cmd: list[str], log_path: Path, label: str) -> bool:
@@ -154,11 +160,7 @@ def cmd_run_data_eff(args: argparse.Namespace) -> None:
                 if cache_only:
                     pass
                 elif test_only:
-                    if has_ci_results(folder, task_stem):
-                        _emit(f"[{_now()}] SKIP (CI present)     : {task_stem} × {model_name} @ {level_dir}")
-                        skipped += 1
-                        continue
-                    if not (folder / "best_hparams.yaml").exists():
+                    if not _has_trained_model(folder, task_stem):
                         _emit(f"[{_now()}] SKIP (no trained model): {task_stem} × {model_name} @ {level_dir}")
                         skipped += 1
                         continue

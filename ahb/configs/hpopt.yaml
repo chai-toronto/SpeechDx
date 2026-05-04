@@ -1,12 +1,12 @@
 # HP Optimizer
 # Enable Ray Tune hyperparameter optimization
-continue_exp: True  # Continue previous experiment if available (i.e., environment is the same)
+continue_exp: False   # False = wipe and restart HP search; True = resume previous run (orchestrator already skips finished jobs)
 optim_metric: 'loss'
 optim_mode: 'min'  # 'min' or 'max' depending on the metric
 max_concurrent_trials: 1  # Number of concurrent trials to run
 grace_period: 5  # max number of epochs without improvement
 limit_warmup: 2  # 4: Number of epochs to ignore for ONLY early stopping
-# hp_search_seed is set in main yaml from <random_seed> via the include override.
+
 
 # Ray Tune specific configuration
 ray_tune_config:

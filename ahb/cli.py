@@ -148,11 +148,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     status_parser = sub.add_parser("status", help="Show completion status of all runs")
     status_parser.add_argument(
-        "--test-only",
-        action="store_true",
-        help="Report CI-presence status instead of completion status",
-    )
-    status_parser.add_argument(
         "--tag", type=str, default="run1",
         help="Experiment tag to scan (default: run1)",
     )

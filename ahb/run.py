@@ -27,7 +27,6 @@ from ahb.orchestrator import (
     get_output_folder,
     get_results_file,
     get_task_info,
-    has_ci_results,
     is_complete,
     is_cv,
     needed_keys,
@@ -35,6 +34,17 @@ from ahb.orchestrator import (
 )
 from ahb.prep.dispatch import ensure_manifest
 from ahb.registry import encoders as registry_encoders
+
+
+def _has_trained_model(output_folder: Path, task_stem: str) -> bool:
+    """True if a prior training run left a best-config artifact we can re-evaluate.
+
+    CV tasks emit ``best_hparams_fold_<i>.yaml``; single-split emits
+    ``best_hparams.yaml``. ``--test-only`` needs at least one to exist.
+    """
+    if is_cv(task_stem):
+        return any(output_folder.glob("best_hparams_fold_*.yaml"))
+    return (output_folder / "best_hparams.yaml").exists()
 
 
 def _run_subprocess(cmd: list[str], log_path: Path, label: str) -> bool:
@@ -149,11 +159,7 @@ def cmd_run(args: argparse.Namespace) -> None:
             if cache_only:
                 pass  # always queue; cache_only emits no result file
             elif test_only:
-                if has_ci_results(folder, task_stem):
-                    _emit(f"[{_now()}] SKIP (CI present)     : {task_stem} × {model_name}")
-                    skipped += 1
-                    continue
-                if not (folder / "best_hparams.yaml").exists():
+                if not _has_trained_model(folder, task_stem):
                     _emit(f"[{_now()}] SKIP (no trained model): {task_stem} × {model_name}")
                     skipped += 1
                     continue

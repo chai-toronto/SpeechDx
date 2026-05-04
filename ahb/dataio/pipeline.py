@@ -21,15 +21,6 @@ import torch
 from speechbrain.augment.time_domain import AddNoise, AddReverb, SpeedPerturb
 
 
-def make_get_pid():
-    @sb.utils.data_pipeline.takes("Participant_ID")
-    @sb.utils.data_pipeline.provides("pid")
-    def get_pid(pid: str):
-        return pid
-
-    return get_pid
-
-
 def make_audio_pipeline(sample_rate: int):
     @sb.utils.data_pipeline.takes("path")
     @sb.utils.data_pipeline.provides("signal", "raw_duration")

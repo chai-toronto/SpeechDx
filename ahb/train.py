@@ -143,7 +143,11 @@ def cmd_train(task: str, encoder: str, *,
         # encoder modules loaded — only stub_encoder, probe, pool.
         assert_no_encoder_imports()
 
-        if not hparams.get("continue_exp", False) and not hparams.get("test_only", False):
+        # test_only re-evaluates the saved best trial; never wipe under it.
+        if hparams.get("test_only", False):
+            hparams["continue_exp"] = True
+
+        if not hparams.get("continue_exp", False):
             output_folder = Path(hparams["output_folder"])
             if output_folder.exists():
                 print(f"Wiping output_folder: {output_folder}")

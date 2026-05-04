@@ -30,7 +30,6 @@ from ahb.registry import (
     exclude_datasets,
     paper_tasks,
 )
-from ahb.results import expected_ci_keys
 
 EXP_ROOT_BASE = "exps/data_eff"
 LOGS_ROOT = Path("logs/run_all_data_eff")
@@ -128,20 +127,6 @@ def ensure_manifest_data_eff(task_stem: str, level_dir: str) -> None:
     )
 
 
-def has_ci_results(output_folder: Path, task_stem: str) -> bool:
-    results_file = output_folder / get_results_file(task_stem)
-    if not results_file.exists():
-        return False
-    if results_file.suffix == ".yaml":
-        return True
-    expected = expected_ci_keys(_load_task_yaml(task_stem).get("task_type", ""))
-    if expected is None:
-        return True
-    lo, hi = expected
-    text = results_file.read_text()
-    return lo in text and hi in text
-
-
 __all__ = [
     "EXP_ROOT_BASE",
     "LEVELS",
@@ -153,7 +138,6 @@ __all__ = [
     "get_output_folder",
     "get_results_file",
     "get_task_info",
-    "has_ci_results",
     "is_complete",
     "is_cv",
     "manifest_paths",

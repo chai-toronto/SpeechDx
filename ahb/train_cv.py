@@ -196,6 +196,10 @@ def _run_fold_hp_optimization(fold_idx, hparams, hparams_file, run_opts,
         print(f"\nFold {fold_idx} best config: {best_config}")
         print(f"Fold {fold_idx} best {optim_metric}: {best_metrics.get(optim_metric, 'N/A')}")
 
+        # Persist trial_id so test_only can locate the winning trial's
+        # forked yaml + checkpointer save_folder for re-evaluation.
+        best_config["trial_id"] = best_trial.trial_id
+
         fold_config_path = (
             Path(resolved_paths["output_folder"]) / f"best_hparams_fold_{fold_idx}.yaml"
         )
@@ -204,6 +208,75 @@ def _run_fold_hp_optimization(fold_idx, hparams, hparams_file, run_opts,
     finally:
         ray.shutdown()
     return best_config, best_metrics
+
+
+def _evaluate_fold_test_only(*, fold_idx: int, output_folder: Path,
+                             run_opts: dict, optim_metric: str,
+                             optim_mode: str) -> tuple[dict, dict]:
+    """Reload one fold's best trial and re-run val-set evaluation.
+
+    Mirrors train.py's test_only path: loads ``fold_<i>/<trial_id>/config/main.yaml``
+    (the forked yaml the winning trial trained under), instantiates the brain
+    with the trial's checkpointer, and runs ``brain.evaluate`` against the val
+    set (CV's "test" — there is no held-out test split). Returns the best_config
+    plus brain.test_stats so the caller can re-aggregate test_results.yaml.
+
+    Errors out for legacy CV runs whose ``best_hparams_fold_<i>.yaml`` lacks
+    ``trial_id``: those need to be re-trained once before test-only works.
+    """
+    fold_config_path = output_folder / f"best_hparams_fold_{fold_idx}.yaml"
+    if not fold_config_path.exists():
+        raise FileNotFoundError(
+            f"Fold {fold_idx}: missing {fold_config_path}; re-train this run before --test-only."
+        )
+    best_config = yaml.safe_load(fold_config_path.read_text()) or {}
+    trial_id = best_config.get("trial_id")
+    if not trial_id:
+        raise KeyError(
+            f"Fold {fold_idx}: {fold_config_path} has no trial_id (legacy run); "
+            f"re-train this CV experiment to add trial_id, then retry --test-only."
+        )
+
+    trial_dir = output_folder / f"fold_{fold_idx}" / trial_id
+    forked_yaml = trial_dir / "config" / "main.yaml"
+    if not forked_yaml.exists():
+        raise FileNotFoundError(
+            f"Fold {fold_idx}: forked config missing at {forked_yaml}; re-train required."
+        )
+
+    with open(forked_yaml) as fin:
+        hparams = load_hyperpyyaml(fin)
+
+    train_folds, val_folds = load_manifest_data_cv(hparams)
+    datasets = build_read_datasets_cv(
+        train_folds[fold_idx], val_folds[fold_idx], hparams,
+    )
+
+    checkpointer = sb.utils.checkpoints.Checkpointer(
+        checkpoints_dir=hparams["save_folder"],
+        recoverables=hparams["checkpointer"].recoverables,
+    )
+
+    brain = DiagnosticsBrain(
+        fold_idx=fold_idx,
+        modules=hparams["modules"],
+        opt_class=hparams["opt_class"],
+        hparams=hparams,
+        run_opts=run_opts,
+        checkpointer=checkpointer,
+    )
+
+    evaluate_kwargs = {
+        "test_set": datasets["val"],
+        "test_loader_kwargs": hparams["val_dataloader_options"],
+    }
+    if optim_mode == "min":
+        evaluate_kwargs["min_key"] = optim_metric
+    else:
+        evaluate_kwargs["max_key"] = optim_metric
+    brain.evaluate(**evaluate_kwargs)
+
+    return best_config, dict(brain.test_stats)
 
 
 def cmd_train_cv(task: str, encoder: str, *,
@@ -241,6 +314,10 @@ def cmd_train_cv(task: str, encoder: str, *,
 
         assert_no_encoder_imports()
 
+        # test_only re-evaluates each fold's saved best trial; never wipe under it.
+        if hparams.get("test_only", False):
+            hparams["continue_exp"] = True
+
         if not hparams.get("continue_exp", False):
             output_folder = Path(hparams["output_folder"])
             if output_folder.exists():
@@ -249,28 +326,41 @@ def cmd_train_cv(task: str, encoder: str, *,
 
         project_root = Path.cwd().resolve()
         resolved_paths = collect_resolved_paths(hparams, project_root)
-        search_space = parse_hp_search_space(hparams)
         num_folds = hparams["data_params"]["num_fold"]
         optim_metric = hparams.get("optim_metric", "F1")
+        optim_mode = hparams.get("optim_mode", "max")
 
         all_best_configs: dict = {}
         all_best_metrics: dict = {}
 
-        print(f"\n{'='*60}\nPer-fold HP search: {num_folds} folds\n{'='*60}\n")
+        if hparams.get("test_only", False):
+            print(f"\n{'='*60}\nPer-fold test-only re-evaluation: {num_folds} folds\n{'='*60}\n")
+            for fold_idx in range(num_folds):
+                print(f"\n{'='*60}\nFold {fold_idx}/{num_folds - 1}\n{'='*60}\n")
+                best_config, best_metrics = _evaluate_fold_test_only(
+                    fold_idx=fold_idx,
+                    output_folder=Path(resolved_paths["output_folder"]),
+                    run_opts=run_opts,
+                    optim_metric=optim_metric, optim_mode=optim_mode,
+                )
+                all_best_configs[fold_idx] = best_config
+                all_best_metrics[fold_idx] = best_metrics
+        else:
+            search_space = parse_hp_search_space(hparams)
+            print(f"\n{'='*60}\nPer-fold HP search: {num_folds} folds\n{'='*60}\n")
+            for fold_idx in range(num_folds):
+                print(f"\n{'='*60}")
+                print(f"Fold {fold_idx}/{num_folds - 1}")
+                print(f"{'='*60}\n")
 
-        for fold_idx in range(num_folds):
-            print(f"\n{'='*60}")
-            print(f"Fold {fold_idx}/{num_folds - 1}")
-            print(f"{'='*60}\n")
-
-            best_config, best_metrics = _run_fold_hp_optimization(
-                fold_idx=fold_idx, hparams=hparams,
-                hparams_file=base_yaml, run_opts=run_opts,
-                overrides=overrides, resolved_paths=resolved_paths,
-                search_space=search_space,
-            )
-            all_best_configs[fold_idx] = best_config
-            all_best_metrics[fold_idx] = best_metrics
+                best_config, best_metrics = _run_fold_hp_optimization(
+                    fold_idx=fold_idx, hparams=hparams,
+                    hparams_file=base_yaml, run_opts=run_opts,
+                    overrides=overrides, resolved_paths=resolved_paths,
+                    search_space=search_space,
+                )
+                all_best_configs[fold_idx] = best_config
+                all_best_metrics[fold_idx] = best_metrics
 
         print(f"\n{'='*60}\nAggregated results\n{'='*60}\n")
 

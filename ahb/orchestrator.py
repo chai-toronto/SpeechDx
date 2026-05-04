@@ -20,7 +20,6 @@ import yaml
 from ahb.paths import DEFAULT_EXPERIMENT_TAG, DEFAULT_PROBE_NAME
 from ahb.registry import encoders as registry_encoders
 from ahb.registry import exclude_datasets, paper_tasks
-from ahb.results import expected_ci_keys
 from ahb.yaml_io import TolerantLoader
 
 _CONFIGS = Path(__file__).resolve().parent / "configs"
@@ -156,21 +155,6 @@ def get_results_file(task_stem: str) -> str:
 
 def is_complete(output_folder: Path, task_stem: str) -> bool:
     return (output_folder / get_results_file(task_stem)).exists()
-
-
-def has_ci_results(output_folder: Path, task_stem: str) -> bool:
-    """True iff the result file already contains CI fields (so a re-run adds nothing)."""
-    results_file = output_folder / get_results_file(task_stem)
-    if not results_file.exists():
-        return False
-    if results_file.suffix == ".yaml":
-        return True
-    expected = expected_ci_keys(_load_task_yaml(task_stem).get("task_type", ""))
-    if expected is None:
-        return True
-    lo, hi = expected
-    text = results_file.read_text()
-    return lo in text and hi in text
 
 
 def reset_caches() -> None:

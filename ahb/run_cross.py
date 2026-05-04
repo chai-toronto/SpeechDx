@@ -30,7 +30,6 @@ from ahb.orchestrator_cross import (
     forget_task_ids,
     get_output_folder,
     get_task_info,
-    has_ci_results,
     is_complete,
     needed_keys,
     task_weight,
@@ -151,10 +150,6 @@ def cmd_run_cross(args: argparse.Namespace, *,
             if cache_only:
                 pass
             elif test_only:
-                if has_ci_results(folder, task_stem):
-                    _emit(f"[{_now()}] SKIP (CI present)     : {task_stem} × {model_name}")
-                    skipped += 1
-                    continue
                 if not (folder / "best_hparams.yaml").exists():
                     _emit(f"[{_now()}] SKIP (no trained model): {task_stem} × {model_name}")
                     skipped += 1

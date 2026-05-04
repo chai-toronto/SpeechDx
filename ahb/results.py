@@ -1,11 +1,7 @@
 """Helpers for reading and aggregating result files.
 
-- ``expected_ci_keys``: maps ``task_type`` to the CI field names emitted by
-  ``brain.py``, used by the orchestrator's completion checks.
-- ``parse_results_txt`` / ``parse_results_yaml``: parse a finished run's
-  ``test_results.{txt,yaml}`` into a metric dict for the summary CSV writer.
-
-Salvaged from ``bench/results.py`` and ``run_all.py:364-414``.
+``parse_results_txt`` / ``parse_results_yaml``: parse a finished run's
+``test_results.{txt,yaml}`` into a metric dict for the summary CSV writer.
 """
 
 from __future__ import annotations
@@ -13,15 +9,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
-
-
-def expected_ci_keys(task_type: str) -> tuple[str, str] | None:
-    """CI field names brain.py emits per task_type. ``None`` ⇒ no CI produced."""
-    if task_type == "R":
-        return ("MAE_CI_low", "MAE_CI_high")
-    if task_type in ("B", "C", "L"):
-        return ("AUROC_CI_low", "AUROC_CI_high")
-    return None
 
 
 def parse_results_txt(path: Path) -> dict[str, float | str]:

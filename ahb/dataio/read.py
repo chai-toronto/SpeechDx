@@ -60,15 +60,6 @@ def _label_pipeline_dynitem():
     return label_pipeline
 
 
-def _pid_pipeline_dynitem():
-    @sb.utils.data_pipeline.takes("Participant_ID")
-    @sb.utils.data_pipeline.provides("pid")
-    def get_pid(pid):
-        return pid
-
-    return get_pid
-
-
 def _make_cache_reader(cache_dir: Path, num_versions: int, output_vars: list[str]):
     """Build a read-only DynamicItem that loads embeddings from HDF5."""
     @CachedHDF5DynamicItem.cache(cache_dir, file_mode="r", num_version=num_versions)
@@ -117,9 +108,8 @@ def build_read_datasets_standard(data_dict: dict[str, dict],
     val_reader = _make_cache_reader(val_cache_dir, 1, output_vars)
 
     label = _label_pipeline_dynitem()
-    pid = _pid_pipeline_dynitem()
 
-    output_keys = ["id", "path", "pid", "label_encoded"] + output_vars
+    output_keys = ["id", "path", "Participant_ID", "label_encoded"] + output_vars
 
     try:
         # Pre-flight: missing entries fail loudly here, not mid-fit.
@@ -141,7 +131,7 @@ def build_read_datasets_standard(data_dict: dict[str, dict],
         reader = train_reader if split == "train" else val_reader
         datasets[split] = sb.dataio.dataset.DynamicItemDataset(
             data=data_dict[split],
-            dynamic_items=[pid, label, reader],
+            dynamic_items=[label, reader],
             output_keys=output_keys,
         )
     return datasets
@@ -187,8 +177,7 @@ def build_read_datasets_cv(train_fold: dict, val_fold: dict,
     val_reader = _make_cache_reader(val_cache_dir, 1, output_vars)
 
     label = _label_pipeline_dynitem()
-    pid = _pid_pipeline_dynitem()
-    output_keys = ["id", "path", "pid", "label_encoded"] + output_vars
+    output_keys = ["id", "path", "Participant_ID", "label_encoded"] + output_vars
 
     try:
         _preflight(train_reader, list(train_fold.keys()),
@@ -203,12 +192,12 @@ def build_read_datasets_cv(train_fold: dict, val_fold: dict,
     return {
         "train": sb.dataio.dataset.DynamicItemDataset(
             data=train_fold,
-            dynamic_items=[pid, label, train_reader],
+            dynamic_items=[label, train_reader],
             output_keys=output_keys,
         ),
         "val": sb.dataio.dataset.DynamicItemDataset(
             data=val_fold,
-            dynamic_items=[pid, label, val_reader],
+            dynamic_items=[label, val_reader],
             output_keys=output_keys,
         ),
     }
@@ -236,8 +225,7 @@ def build_read_datasets_cross(data_dict: dict[str, dict],
     test_reader = _make_cache_reader(test_cache_dir, 1, output_vars)
 
     label = _label_pipeline_dynitem()
-    pid = _pid_pipeline_dynitem()
-    output_keys = ["id", "path", "pid", "label_encoded"] + output_vars
+    output_keys = ["id", "path", "Participant_ID", "label_encoded"] + output_vars
 
     try:
         _preflight(train_reader, list(data_dict["train"].keys()),
@@ -255,17 +243,17 @@ def build_read_datasets_cross(data_dict: dict[str, dict],
     return {
         "train": sb.dataio.dataset.DynamicItemDataset(
             data=data_dict["train"],
-            dynamic_items=[pid, label, train_reader],
+            dynamic_items=[label, train_reader],
             output_keys=output_keys,
         ),
         "val": sb.dataio.dataset.DynamicItemDataset(
             data=data_dict["val"],
-            dynamic_items=[pid, label, val_reader],
+            dynamic_items=[label, val_reader],
             output_keys=output_keys,
         ),
         "test": sb.dataio.dataset.DynamicItemDataset(
             data=data_dict["test"],
-            dynamic_items=[pid, label, test_reader],
+            dynamic_items=[label, test_reader],
             output_keys=output_keys,
         ),
     }
@@ -394,8 +382,7 @@ def build_read_datasets_category(data_dict: dict[str, dict],
     )
 
     label = _label_pipeline_dynitem()
-    pid = _pid_pipeline_dynitem()
-    output_keys = ["id", "path", "pid", "label_encoded"] + output_vars
+    output_keys = ["id", "path", "Participant_ID", "label_encoded"] + output_vars
 
     try:
         _preflight(train_reader, list(data_dict["train"].keys()),
@@ -413,17 +400,17 @@ def build_read_datasets_category(data_dict: dict[str, dict],
     return {
         "train": sb.dataio.dataset.DynamicItemDataset(
             data=data_dict["train"],
-            dynamic_items=[pid, label, train_reader],
+            dynamic_items=[label, train_reader],
             output_keys=output_keys,
         ),
         "val": sb.dataio.dataset.DynamicItemDataset(
             data=data_dict["val"],
-            dynamic_items=[pid, label, val_reader],
+            dynamic_items=[label, val_reader],
             output_keys=output_keys,
         ),
         "test": sb.dataio.dataset.DynamicItemDataset(
             data=data_dict["test"],
-            dynamic_items=[pid, label, test_reader],
+            dynamic_items=[label, test_reader],
             output_keys=output_keys,
         ),
     }

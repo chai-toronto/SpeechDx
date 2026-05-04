@@ -15,7 +15,6 @@ from pathlib import Path
 import yaml
 
 from ahb.registry import cross_pairs, encoders as registry_encoders
-from ahb.results import expected_ci_keys
 from ahb.yaml_io import TolerantLoader
 
 _CONFIGS = Path(__file__).resolve().parent / "configs"
@@ -145,18 +144,6 @@ def get_results_file(task_stem: str | None = None) -> str:
 
 def is_complete(output_folder: Path, task_stem: str | None = None) -> bool:
     return (output_folder / get_results_file(task_stem)).exists()
-
-
-def has_ci_results(output_folder: Path, task_stem: str) -> bool:
-    results_file = output_folder / get_results_file(task_stem)
-    if not results_file.exists():
-        return False
-    expected = expected_ci_keys(_load_task_yaml(task_stem).get("task_type", ""))
-    if expected is None:
-        return True
-    lo, hi = expected
-    text = results_file.read_text()
-    return lo in text and hi in text
 
 
 def forget_task_ids(task_stem: str, *, exps_root: Path | None = None) -> None:

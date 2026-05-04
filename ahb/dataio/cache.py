@@ -1,10 +1,5 @@
 """HDF5-backed ``CachedDynamicItem``.
-
-Salvaged verbatim from ``training/dataio/cache_dynamic_item.py``. The
-on-disk schema (``<uid>/v<version>``) is unchanged — caches written by the
-legacy ``master_dataio_prep`` are byte-compatible with this reader.
-
-Author: Peter Plantinga
+Author: Peter Plantinga, Larry Kieu
 """
 
 from __future__ import annotations
