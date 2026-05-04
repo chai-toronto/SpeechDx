@@ -239,6 +239,37 @@ classification on the COVID-19 Sounds dataset.
 For per-dataset staging conventions and the full CSV schema, see
 [`metadata_script/README.md`](metadata_script/README.md).
 
+## Adding a cross task
+
+A cross task trains on one dataset and evaluates on another (`cross`) or on
+multi-source train/test groups (`cross-cat`). The shape mirrors single-mode but
+configs live under `ahb/configs/cross_tasks/` and registration goes into a
+different list.
+
+1. **Stage both datasets.** Same contract as single — audio under
+   `data/<dataset>/processed/audio/`, CSV at
+   `data/<dataset>/processed/<dataset>.csv` for *each* dataset the cross task
+   touches.
+2. **Write a `prepare_*` function** under `ahb/prep/cross_<train>_<test>.py`
+   (or extend `ahb/prep/category.py` for cross-cat). It builds the manifests
+   by joining the per-dataset CSVs. `ahb/prep/cross_aphasia_dbank.py` and
+   `ahb/prep/category.py` are the templates.
+3. **Add a cross-task yaml** at `ahb/configs/cross_tasks/<stem>.yaml`.
+   - Pair tasks use singular `train_dataset` / `test_dataset` and a combined
+     `dataset:` field (e.g. `aphasia_dbank`).
+     See [`aphasia_dbank_pwaC_adC.yaml`](ahb/configs/cross_tasks/aphasia_dbank_pwaC_adC.yaml).
+   - Category tasks use plural `train_datasets` / `test_datasets` lists and
+     `setting_1/2/3` blocks; `dataset:` should be `cross_tasks`.
+     See [`category_c1_c2.yaml`](ahb/configs/cross_tasks/category_c1_c2.yaml).
+   Both schemas point at the prep function via `data_io_script` /
+   `prepare_data_fn` and set `label_key`, `loss`, and `task_type`.
+4. **Register the task** in `ahb/configs/registry.yaml`:
+   - Pair tasks → append the stem to `cross_pairs:`.
+   - Category tasks → append the stem (must start with `category_`) to
+     `cross_categories:`.
+   Unregistered yamls are ignored by `cross run` / `cross-cat run` /
+   `status` / `summary`, matching the single-mode `paper_tasks` rule.
+
 ## Adding an encoder
 
 1. Implement the encoder under `model/<name>.py`. Contract: an `nn.Module`

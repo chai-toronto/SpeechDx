@@ -66,9 +66,61 @@ data_eff_default_encoders:
   - ast
   - whisper
 
-# Cross-task pairs for run_all_cross.py. Currently driven by --task flags;
-# leave empty unless pinning a default set.
-cross_pairs: []
+# Cross-task pairs (train on dataset A, test on dataset B). Each entry must
+# have a matching yaml at ahb/configs/cross_tasks/<stem>.yaml. Used by
+# `ahb cross run` / status / summary. To add a new pair: drop the yaml in
+# cross_tasks/ and append the stem here.
+cross_pairs:
+  - aphasia_dbank_pwaC_adC
+  - avfad_c9s_pathC_t1
+  - avfad_c9s_pathC_t2
+  - avfad_coswara_pathC_covidC
+  - avfad_coswara_pathC_sympC
+  - c9s_avfad_t1_pathC
+  - c9s_avfad_t2_pathC
+  - c9s_coswara_t1_sympC
+  - c9s_coswara_t2_covidC
+  - coswara_avfad_covidC_pathC
+  - coswara_avfad_sympC_pathC
+  - coswara_c9s_covidC_t2
+  - coswara_c9s_sympC_t1
+  - dbank_aphasia_adC_pwaC
+  - edaic_iemocap_depC_emoBC
+  - edaic_ravdess_depC_emoBC
+  - iemocap_edaic_emoBC_depC
+  - iemocap_ravdess_emoBC_emoBC
+  - ksof_mvdr_intC_parkC
+  - ksof_torgo_intC_dysC
+  - ksof_uaspeech_intC_dysC
+  - mvdr_ksof_parkC_intC
+  - mvdr_torgo_parkC_dysC
+  - mvdr_uaspeech_parkC_dysC
+  - ravdess_edaic_emoBC_depC
+  - ravdess_iemocap_emoBC_emoBC
+  - torgo_ksof_dysC_intC
+  - torgo_mvdr_dysC_parkC
+  - torgo_uaspeech_dysC
+  - uaspeech_ksof_dysC_intC
+  - uaspeech_mvdr_dysC_parkC
+  - uaspeech_torgo_dysC
+
+# Cross-category tasks (multi-source train on category A → test on category B).
+# Each entry must have a matching yaml at
+# ahb/configs/cross_tasks/<stem>.yaml using the plural train_datasets /
+# test_datasets schema. Used by `ahb cross-cat run` / status / summary.
+cross_categories:
+  - category_c1_c2
+  - category_c1_c3
+  - category_c1_c4
+  - category_c2_c1
+  - category_c2_c3
+  - category_c2_c4
+  - category_c3_c1
+  - category_c3_c2
+  - category_c3_c4
+  - category_c4_c1
+  - category_c4_c2
+  - category_c4_c3
 
 # Datasets to skip across all modes.
 exclude_datasets:

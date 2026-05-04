@@ -14,7 +14,11 @@ from pathlib import Path
 
 import yaml
 
-from ahb.registry import cross_pairs, encoders as registry_encoders
+from ahb.registry import (
+    cross_categories,
+    cross_pairs,
+    encoders as registry_encoders,
+)
 from ahb.yaml_io import TolerantLoader
 
 _CONFIGS = Path(__file__).resolve().parent / "configs"
@@ -31,7 +35,10 @@ EXPERIMENT_TAG = "run1"
 
 
 def discover_all_tasks() -> list[str]:
-    return sorted(p.stem for p in TASKS_DIR.glob("*.yaml"))
+    """Every registered cross stem (pairs + categories) whose yaml exists."""
+    available = {p.stem for p in TASKS_DIR.glob("*.yaml")}
+    return sorted(s for s in (*cross_pairs(), *cross_categories())
+                  if s in available)
 
 
 def discover_all_encoders() -> dict[str, str]:
@@ -46,20 +53,16 @@ def discover_all_encoders() -> dict[str, str]:
 def discover_tasks(datasets: list[str] | None = None,
                    tasks: list[str] | None = None,
                    *, include_categories: bool = False) -> list[str]:
-    """Sorted cross-pair task stems narrowed by --dataset / --task.
+    """Sorted registered cross stems narrowed by --dataset / --task.
 
-    By default skips ``category_*`` (those belong to the cross-category
-    runner). Set ``include_categories=True`` to flip that — used by
-    ``ahb run-cross-category``.
+    Reads ``cross_pairs`` (default) or ``cross_categories``
+    (``include_categories=True``) from the registry. Stems missing a yaml
+    under ``cross_tasks/`` are dropped, matching the ``paper_tasks``
+    behavior in ``ahb/orchestrator.py``.
     """
-    if include_categories:
-        stems = sorted(p.stem for p in TASKS_DIR.glob("category_*.yaml"))
-    else:
-        seed = [s for s in cross_pairs() if not s.startswith("category_")]
-        stems = seed if seed else sorted(
-            p.stem for p in TASKS_DIR.glob("*.yaml")
-            if not p.stem.startswith("category_")
-        )
+    available = {p.stem for p in TASKS_DIR.glob("*.yaml")}
+    seed = cross_categories() if include_categories else cross_pairs()
+    stems = sorted(s for s in seed if s in available)
     allowed_ds = set(datasets) if datasets else None
     allowed_tasks = set(tasks) if tasks else None
     out = []

@@ -49,6 +49,10 @@ def cross_pairs() -> list[str]:
     return list(load_registry().get("cross_pairs", []))
 
 
+def cross_categories() -> list[str]:
+    return list(load_registry().get("cross_categories", []))
+
+
 def exclude_datasets() -> set[str]:
     return set(load_registry().get("exclude_datasets", []))
 
