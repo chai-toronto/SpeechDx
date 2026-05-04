@@ -98,14 +98,14 @@ it auto-resumes rather than wiping. Pass `--overwrite` to force a fresh
 start. `continue_exp` is no longer a user-facing knob.
 
 **Cache sharing.** Training reads from the per-`(dataset, encoder)`
-HDF5 cache and will fail on miss. `single run` and `cross run` chain
-warming and training internally; `cross-cat run` expects the per-dataset
-single caches to be populated (covered automatically by `ahb all run`'s
-single → cross → cross-cat → data-eff ordering, or via a prior `single
-run` / `cross-cat warm`). Standalone `cross warm` and `cross-cat warm`
-delegate to `single warm` for every task on each listed dataset,
-propagating the cross task's `num_aug_ver` so caches get extended to
-the aug count the cross trainer needs.
+HDF5 cache and will fail on miss. Every mode's `run` chains warming
+and training internally; cross / cross-cat warm both delegate to
+`single warm` for every task on each listed dataset, propagating the
+cross task's `num_aug_ver` so caches get extended to the aug count
+the cross trainer needs. So `single`, `cross`, and `cross-cat` runs
+are each self-sufficient; `all run`'s single → cross → cross-cat →
+data-eff ordering also keeps each phase's cache work cheap because
+later phases hit caches earlier phases already populated.
 
 ## Encoders
 
