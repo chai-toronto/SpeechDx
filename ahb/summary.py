@@ -88,6 +88,46 @@ def _collect_matrices(
     return matrices, regression_tasks, classification_tasks, found, missing
 
 
+def _print_metric_tables(
+    matrices: dict,
+    encoders: list[str],
+    regression_tasks: set[str],
+    classification_tasks: set[str],
+) -> None:
+    """Pretty-print every per-metric matrix to stdout. Empty matrices are
+    skipped — keeps output tight when only one task type is in scope."""
+    for csv_name, metric_key in CSV_LAYOUT.items():
+        data = matrices[metric_key]
+        pool = regression_tasks if metric_key in REGRESSION_METRICS else classification_tasks
+        task_rows = sorted(t for t in pool if data.get(t))
+        if not task_rows:
+            continue
+        cols = ["task", *encoders]
+        rows: list[list[str]] = []
+        for task_stem in task_rows:
+            row = [task_stem]
+            for enc in encoders:
+                val = data[task_stem].get(enc, "")
+                if isinstance(val, float):
+                    row.append(f"{val:.4f}")
+                else:
+                    row.append(str(val) if val else "—")
+            rows.append(row)
+        widths = [len(c) for c in cols]
+        for r in rows:
+            for i, cell in enumerate(r):
+                widths[i] = max(widths[i], len(cell))
+
+        def fmt(r):
+            return " | ".join(c.ljust(widths[i]) for i, c in enumerate(r))
+
+        print(f"\n=== {csv_name} ===")
+        print(fmt(cols))
+        print("-+-".join("-" * w for w in widths))
+        for r in rows:
+            print(fmt(r))
+
+
 def _write_metric_csvs(
     matrices: dict,
     encoders: list[str],
@@ -180,7 +220,6 @@ def cmd_summary(args: argparse.Namespace) -> None:
     )
     written.append(comp_path)
 
+    _print_metric_tables(matrices, encoders, regression_tasks, classification_tasks)
     print(f"\nParsed {found} result files, {missing} missing")
     print(f"Wrote {len(written)} CSV(s) to {out_dir}/")
-    for p in written:
-        print(f"  {p}")

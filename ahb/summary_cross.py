@@ -74,10 +74,10 @@ def _cmd(args: argparse.Namespace, *, include_categories: bool,
     )
     written.append(comp_path)
 
+    from ahb.summary import _print_metric_tables
+    _print_metric_tables(matrices, encoders, regression_tasks, classification_tasks)
     print(f"\nParsed {found} result files, {missing} missing")
     print(f"Wrote {len(written)} CSV(s) to {out_dir}/")
-    for p in written:
-        print(f"  {p}")
 
 
 def cmd_summary_cross(args: argparse.Namespace) -> None:

@@ -206,7 +206,9 @@ def _h_single_train(args: argparse.Namespace) -> None:
 def _h_single_run(args: argparse.Namespace) -> None:
     _validate_run_flags(args)
     from ahb.run import cmd_run
-    _strict_phase_run(args, cmd_run, mode_label="single run")
+    from ahb.summary import cmd_summary
+    _strict_phase_run(args, cmd_run, mode_label="single run",
+                      summary_fn=cmd_summary)
 
 
 def _h_single_status(args: argparse.Namespace) -> None:
@@ -302,7 +304,9 @@ def _h_cross_train(args: argparse.Namespace) -> None:
 def _h_cross_run(args: argparse.Namespace) -> None:
     _validate_run_flags(args)
     from ahb.run_cross import cmd_run_cross
-    _strict_phase_run(args, cmd_run_cross, mode_label="cross run")
+    from ahb.summary_cross import cmd_summary_cross
+    _strict_phase_run(args, cmd_run_cross, mode_label="cross run",
+                      summary_fn=cmd_summary_cross)
 
 
 def _h_cross_status(args: argparse.Namespace) -> None:
@@ -329,7 +333,9 @@ def _h_crosscat_train(args: argparse.Namespace) -> None:
 def _h_crosscat_run(args: argparse.Namespace) -> None:
     _validate_run_flags(args)
     from ahb.run_cross_category import cmd_run_cross_category
-    _strict_phase_run(args, cmd_run_cross_category, mode_label="cross-cat run")
+    from ahb.summary_cross import cmd_summary_cross_category
+    _strict_phase_run(args, cmd_run_cross_category, mode_label="cross-cat run",
+                      summary_fn=cmd_summary_cross_category)
 
 
 def _h_crosscat_status(args: argparse.Namespace) -> None:
@@ -371,7 +377,9 @@ def _h_dataeff_train(args: argparse.Namespace) -> None:
 def _h_dataeff_run(args: argparse.Namespace) -> None:
     _validate_run_flags(args)
     from ahb.run_data_eff import cmd_run_data_eff
-    _strict_phase_run(args, cmd_run_data_eff, mode_label="data-eff run")
+    from ahb.summary_data_eff import cmd_summary_data_eff
+    _strict_phase_run(args, cmd_run_data_eff, mode_label="data-eff run",
+                      summary_fn=cmd_summary_data_eff)
 
 
 def _h_dataeff_status(args: argparse.Namespace) -> None:
@@ -476,7 +484,8 @@ def _confirm_overwrite(args: argparse.Namespace, mode_label: str) -> bool:
 
 def _strict_phase_run(args: argparse.Namespace,
                       run_fn: Callable[[argparse.Namespace], None],
-                      *, mode_label: str) -> None:
+                      *, mode_label: str,
+                      summary_fn: Callable[[argparse.Namespace], None] | None = None) -> None:
     """Two-phase run: warm everything, then train everything.
 
     Underlying ``cmd_run*`` functions are pipelined per-pair; we drive them
@@ -531,6 +540,16 @@ def _strict_phase_run(args: argparse.Namespace,
         print(f"\n=== {mode_label}: {phase_label} "
               f"(workers={train_workers}) ===")
         run_fn(train_ns)
+
+    # Phase 3: summary. Skipped under --dry-run (nothing happened) and
+    # --cache-only (no new train results to summarize).
+    dry = getattr(args, "dry_run", False)
+    if summary_fn is not None and do_train and not dry:
+        print(f"\n=== {mode_label}: phase 3 — summary ===")
+        try:
+            summary_fn(args)
+        except Exception as e:
+            print(f"  ⚠ summary skipped: {e!r}")
 
 
 DISPATCH: dict[tuple[str, str], Callable[[argparse.Namespace], None]] = {
