@@ -59,7 +59,7 @@ argument is a command rather than a mode, mode defaults to `single` — so
 | `cross`     | Zero-shot cross-task — train on dataset A, evaluate on dataset B.                                                      |
 | `cross-cat` | Multi-source cross-category variant (reuses single-mode caches under the hood).                                        |
 | `data-eff`  | Same tasks at 4 reduced training-set sizes (6.25 %, 12.5 %, 25 %, 50 %); reuses single-mode prep / warm.               |
-| `all`       | Apply the command to every mode in turn (e.g. `ahb all run` chains single → cross → cross-cat → data-eff).             |
+| `all`       | Chain the command across single → cross → cross-cat → data-eff. Only `all run` and `all status` are wired today; `all prep` / `warm` / `train` / `summary` are stubs — use the per-mode commands. |
 
 The same six commands apply to every mode:
 
