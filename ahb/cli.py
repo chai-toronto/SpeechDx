@@ -61,6 +61,24 @@ def _resolve_pairs(args: argparse.Namespace, mode: str) -> list[tuple[str, str]]
     return [(t, e) for t in tasks for e in encs]
 
 
+def _wipe_warm_cache(task: str, encoder: str, *, probe: str = "AvgTProbe") -> None:
+    """Remove the per-(dataset, encoder) cache.hdf5 files so the next
+    ``run_warm`` rebuilds from scratch. Used by ``warm --overwrite``."""
+    from ahb.warm import _cache_dirs as warm_cache_dirs
+    from ahb.config import compose_config
+    try:
+        hparams = compose_config(task, encoder, probe=probe, mode="read")
+    except Exception as e:
+        print(f"  ⚠ couldn't resolve cache for {task} × {encoder}: {e}")
+        return
+    train_dir, val_dir = warm_cache_dirs(hparams)
+    for d in (train_dir, val_dir):
+        f = d / "cache.hdf5"
+        if f.exists():
+            f.unlink()
+            print(f"  removed {f}")
+
+
 def _train_one(args: argparse.Namespace, task: str, encoder: str, *,
                level_dir: str | None = None) -> None:
     """Per-pair single-mode train; auto-routes to per-fold CV via task yaml."""
@@ -86,13 +104,18 @@ def _train_one(args: argparse.Namespace, task: str, encoder: str, *,
 
 def _h_prep(args: argparse.Namespace) -> None:
     """Mode-agnostic prep — works for single, cross, and cross-cat stems."""
+    from ahb.orchestrator import manifest_paths
     from ahb.prep.dispatch import ensure_manifest
     tasks = _resolve_tasks(args, args.mode)
     if not tasks:
         print("prep: no matching tasks for filters.")
         return
     print(f"prep: {len(tasks)} task(s)")
+    overwrite = getattr(args, "overwrite", False)
     for task in tasks:
+        if overwrite:
+            for p in manifest_paths(task):
+                p.unlink(missing_ok=True)
         ensure_manifest(task)
 
 
@@ -106,20 +129,39 @@ def _h_single_warm(args: argparse.Namespace) -> None:
     print(f"warm: {len(pairs)} (task, encoder) pair(s)")
     for task, encoder in pairs:
         ensure_manifest(task)
+        if getattr(args, "overwrite", False):
+            _wipe_warm_cache(task, encoder, probe=args.probe)
         run_warm(task, encoder, probe=args.probe, device=args.device)
 
 
 def _h_single_train(args: argparse.Namespace) -> None:
     """Sweep all matching (task, encoder) pairs; per-pair train auto-routes
-    to per-fold CV via the task yaml."""
+    to per-fold CV via the task yaml. Skip-if-complete by default; pass
+    ``--overwrite`` to wipe and retrain."""
+    from ahb.orchestrator import (
+        get_output_folder, get_task_info, is_complete,
+    )
     pairs = _resolve_pairs(args, "single")
     if not pairs:
         print("train: no matching pairs for filters.")
         return
-    print(f"train: {len(pairs)} pair(s)")
+    overwrite = getattr(args, "overwrite", False)
     level_dir = getattr(args, "level_dir", None)
+    print(f"train: {len(pairs)} pair(s)")
+    skipped = 0
     for task, encoder in pairs:
+        ds, t = get_task_info(task)
+        folder = get_output_folder(ds, t, encoder, args.tag)
+        if folder.exists() and is_complete(folder, task) and not overwrite:
+            print(f"  SKIP (results exist): {task} × {encoder}")
+            skipped += 1
+            continue
+        if folder.exists() and overwrite:
+            import shutil
+            shutil.rmtree(folder)
         _train_one(args, task, encoder, level_dir=level_dir)
+    if skipped:
+        print(f"train: skipped {skipped} complete pair(s); pass --overwrite to redo.")
 
 
 def _h_single_run(args: argparse.Namespace) -> None:
@@ -148,6 +190,8 @@ def _h_cross_warm(args: argparse.Namespace) -> None:
     print(f"{args.mode} warm: {len(pairs)} pair(s)")
     for task, encoder in pairs:
         ensure_manifest(task)
+        if getattr(args, "overwrite", False):
+            _wipe_warm_cache(task, encoder, probe=args.probe)
         run_warm_cross(task, encoder,
                        probe=args.probe, probe_yaml=args.probe_yaml,
                        device=args.device)
@@ -155,19 +199,40 @@ def _h_cross_warm(args: argparse.Namespace) -> None:
 
 def _h_cross_train(args: argparse.Namespace) -> None:
     """``cmd_train_cross`` auto-detects category vs non-category via the task
-    yaml, so the per-pair entry point is shared with ``cross-cat train``."""
+    yaml, so the per-pair entry point is shared with ``cross-cat train``.
+    Skip-if-complete by default; ``--overwrite`` wipes and retrains."""
+    import shutil
+    from ahb.orchestrator import is_complete
+    from ahb.orchestrator_cross import (
+        get_output_folder as cross_output_folder,
+        get_task_info as cross_task_info,
+    )
+    from ahb.run_cross_category import CATEGORY_EXPS_ROOT
     from ahb.train_cross import cmd_train_cross
     pairs = _resolve_pairs(args, args.mode)
     if not pairs:
         print(f"{args.mode} train: no matching pairs for filters.")
         return
+    overwrite = getattr(args, "overwrite", False)
+    exps_root = CATEGORY_EXPS_ROOT if args.mode == "cross-cat" else None
     print(f"{args.mode} train: {len(pairs)} pair(s)")
+    skipped = 0
     for task, encoder in pairs:
+        ds, t = cross_task_info(task)
+        folder = cross_output_folder(ds, t, encoder, args.tag, exps_root=exps_root)
+        if folder.exists() and is_complete(folder, task) and not overwrite:
+            print(f"  SKIP (results exist): {task} × {encoder}")
+            skipped += 1
+            continue
+        if folder.exists() and overwrite:
+            shutil.rmtree(folder)
         cmd_train_cross(
             task, encoder,
             probe=args.probe, probe_yaml=args.probe_yaml,
             tag=args.tag, overrides=args.overrides or "",
         )
+    if skipped:
+        print(f"{args.mode} train: skipped {skipped} complete pair(s); pass --overwrite to redo.")
 
 
 def _h_cross_run(args: argparse.Namespace) -> None:
@@ -457,6 +522,8 @@ def _add_filter_args(p: argparse.ArgumentParser) -> None:
 
 def _add_prep_args(p: argparse.ArgumentParser) -> None:
     _add_filter_args(p)
+    p.add_argument("--overwrite", action="store_true",
+                   help="Rebuild manifests even if they already exist.")
 
 
 def _add_warm_args(p: argparse.ArgumentParser, *, default_probe: str = "AvgTProbe") -> None:
@@ -467,6 +534,9 @@ def _add_warm_args(p: argparse.ArgumentParser, *, default_probe: str = "AvgTProb
                    help="Probe yaml filename under ahb/configs/probes/")
     p.add_argument("--device", default=None,
                    help="Torch device override (e.g. cuda:0)")
+    p.add_argument("--overwrite", action="store_true",
+                   help="Wipe the per-(dataset, encoder) cache.hdf5 files "
+                        "before re-extracting.")
 
 
 def _add_train_args(p: argparse.ArgumentParser, *,
@@ -481,6 +551,9 @@ def _add_train_args(p: argparse.ArgumentParser, *,
                    help="Experiment tag (default: run1)")
     p.add_argument("--overrides", default="",
                    help="Extra YAML overrides forwarded to load_hyperpyyaml")
+    p.add_argument("--overwrite", action="store_true",
+                   help="Wipe the experiment folder and retrain. By default, "
+                        "pairs whose results already exist are skipped.")
     if include_level_dir:
         p.add_argument("--level-dir", default=None,
                        help="Reroute output_folder + manifest paths from "
