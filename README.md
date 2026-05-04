@@ -67,10 +67,10 @@ The same six commands apply to every mode:
 |-----------|-----------------------------------------------------------------------------------------------------------------------------|
 | `prep`    | Download raw data (if public) or yell with contact info; run metadata script if needed; build manifests.                    |
 | `warm`    | Warm the HDF5 cache for every matching (task, encoder) pair. Idempotent. `--overwrite` wipes cache.hdf5 and re-extracts.    |
-| `train`   | Train probe (Ray Tune HP search) on every matching pair; `single train` auto-routes to per-fold CV via the task yaml. Skips pairs whose results exist; `--overwrite` redoes them. |
+| `train`   | Train probe (Ray Tune HP search) on every matching pair; `single train` auto-routes to per-fold CV via the task yaml. `data-eff train` sweeps all levels by default; `--level` narrows. Skips pairs whose results exist; `--overwrite` redoes them. |
 | `run`     | Whole pipeline for matching pairs: download → prep → warm → train → summary. Idempotent.                                    |
 | `status`  | Per-task × per-encoder ☑/☐ completion grid for the mode (data-eff has an extra `level` column).                             |
-| `summary` | Aggregate `test_results.{txt,yaml}` into per-metric CSVs at `<mode-root>/_summary_<tag>/`. Also pretty-prints the metric tables to stdout. |
+| `summary` | Aggregate `test_results.{txt,yaml}` into per-metric CSVs at `<mode-root>/_summary_<tag>/`; also pretty-prints metric tables to stdout. Filters narrow both the CSV columns/rows and the stdout tables. |
 
 **Canonical filters.** Every command accepts `-t/--task`, `-e/--encoder`,
 `-d/--dataset`. Each is repeatable; empty = "every match in scope". So
