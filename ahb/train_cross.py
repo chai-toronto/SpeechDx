@@ -286,4 +286,4 @@ def cmd_train_cross(task: str, encoder: str, *,
 if __name__ == "__main__":
     import signal
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
-    raise SystemExit("Use `python -m ahb train-cross <task> <encoder>` instead.")
+    raise SystemExit("Use `python -m ahb cross train <task> <encoder>` instead.")

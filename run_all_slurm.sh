@@ -57,6 +57,6 @@ if [[ -n "${TEST_ONLY:-}" ]]; then
     TEST_ONLY_ARG+=(--test-only)
 fi
 echo "=== Packed run: ${ENC_ARGS[*]} ${DS_ARGS[*]} ${TASK_ARGS[*]} ${TEST_ONLY_ARG[*]} ==="
-python run_all.py run --device=cuda -j "${JOBS:-3}" "${ENC_ARGS[@]}" "${DS_ARGS[@]}" "${TASK_ARGS[@]}" "${TEST_ONLY_ARG[@]}"
+python -m ahb single run --device=cuda -j "${JOBS:-3}" "${ENC_ARGS[@]}" "${DS_ARGS[@]}" "${TASK_ARGS[@]}" "${TEST_ONLY_ARG[@]}"
 
 kill $LOGGER_PID

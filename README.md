@@ -24,40 +24,64 @@ pip install -e .
 #    See data/README.md for required CSV columns.
 
 # 2. Build manifests for one task, warm the encoder cache, then train.
-python -m ahb prep   c9s_t1
-python -m ahb warm   c9s_t1 wavlm
-python -m ahb train  c9s_t1 wavlm
+#    `single` is the default mode — `ahb prep ...` is shorthand for
+#    `ahb single prep ...` etc.
+python -m ahb single prep   c9s_t1
+python -m ahb single warm   c9s_t1 wavlm
+python -m ahb single train  c9s_t1 wavlm
 
-# 3. Or run the full benchmark — every paper task × every encoder.
-python -m ahb run -j 4
+# 3. Or sweep all incomplete (task, encoder) pairs in one mode …
+python -m ahb single run -j 4
 
-# 4. Inspect.
-python -m ahb status                # task × encoder grid of ☑ / ☐
-python -m ahb summary               # per-metric CSVs under exps/single_task/_summary/
+# 4. … or chain every mode (single → cross → cross-cat → data-eff).
+python -m ahb all run -j 4
+
+# 5. Inspect.
+python -m ahb single status         # task × encoder grid of ☑ / ☐ for --tag
+python -m ahb single summary        # per-metric CSVs at exps/single_task/_summary_<tag>/
 ```
 
 ## Modes
 
-A single CLI entry point (`python -m ahb <subcommand>`) covers four modes:
+The CLI surface is `python -m ahb <mode> <command> [flags]`. If the first
+argument is a command rather than a mode, mode defaults to `single` — so
+`python -m ahb run` is shorthand for `python -m ahb single run`.
 
-| Mode             | Subcommands                                            | What it does                                                                |
-|------------------|--------------------------------------------------------|-----------------------------------------------------------------------------|
-| single           | `prep` / `warm` / `train` / `train-cv` / `run`         | Full benchmark — every paper task × every encoder, single dataset per task. |
-| data-eff         | `run-data-eff`                                         | Same tasks at 4 reduced training-set sizes (6.25 %, 12.5 %, 25 %, 50 %).    |
-| cross            | `warm-cross` / `train-cross` / `run-cross`             | Zero-shot cross-task — train on dataset A, evaluate on dataset B.           |
-| cross-category   | `run-cross-category`                                   | Multi-source cross-task variant for category-level transfer.                |
+| Mode        | What it does                                                                                                           |
+|-------------|------------------------------------------------------------------------------------------------------------------------|
+| `single`    | Full benchmark — every paper task × every encoder, single dataset per task. Default mode.                              |
+| `cross`     | Zero-shot cross-task — train on dataset A, evaluate on dataset B.                                                      |
+| `cross-cat` | Multi-source cross-category variant (reuses single-mode caches under the hood).                                        |
+| `data-eff`  | Same tasks at 4 reduced training-set sizes (6.25 %, 12.5 %, 25 %, 50 %); reuses single-mode prep / warm.               |
+| `all`       | Apply the command to every mode in turn (e.g. `ahb all run` chains single → cross → cross-cat → data-eff).             |
+
+The same six commands apply to every mode:
+
+| Command   | Surface                                          | What it does                                                                                       |
+|-----------|--------------------------------------------------|----------------------------------------------------------------------------------------------------|
+| `prep`    | `<mode> prep <task ...>`                         | Build manifests for the given task stems (mode-agnostic in practice).                              |
+| `warm`    | `<mode> warm <task> <encoder>`                   | Warm the HDF5 cache for one (task, encoder) pair. Idempotent.                                      |
+| `train`   | `<mode> train <task> <encoder>`                  | Train probe with Ray Tune HP search; `single train` auto-routes to per-fold CV via the task yaml.  |
+| `run`     | `<mode> run [flags]`                             | Sweep all incomplete (task, encoder) pairs in scope; chains warm + train internally where possible.|
+| `status`  | `<mode> status [--tag]`                          | Completion grid for the mode. (Cross / cross-cat / data-eff are stubs in commit 1; commit 7.)      |
+| `summary` | `<mode> summary [--tag] [--out-dir]`             | Aggregate `test_results.{txt,yaml}` into per-metric CSVs at `<mode-root>/_summary_<tag>/`.         |
+
+Every `run` sweep accepts the same filter / control flags:
+`--encoder` / `--dataset` / `--task` (repeatable allowlists), `-j/--max-workers`
+(default `3`), `--tag` (default `run1`), `--device`, `--test-only`
+(re-evaluate without training), `--cache-only` (warm and exit), and
+`--no-writer` (require a prewarmed cache). `data-eff run` also accepts
+`--level`. `all run` adds `--skip-mode` and `--continue-on-failure`.
 
 **Cache warming is a hard prerequisite for every mode** — training reads from
 the per-`(dataset, encoder)` HDF5 cache and will fail on miss. Encoder forward
-passes dominate wall time, so `ahb run` serializes warm vs read per
-`(dataset, encoder)` pair to let multiple jobs share the cache. `run` and
-`run-cross` chain warming and training internally (`warm`+`train`,
-`warm-cross`+`train-cross`). `run-cross-category` does not: `warm-cross`
-short-circuits for category tasks, so the constituent single-task caches must
-already be populated via `ahb warm <dataset-task> <encoder>` (or a prior
-single-mode `run`) before invoking it. Running the full benchmark via
-`ahb run-all` handles the ordering automatically (single → cross → cross-cat
-→ data-eff).
+passes dominate wall time, so `<mode> run` serializes warm vs read per
+`(dataset, encoder)` pair to let multiple jobs share the cache. `single run`
+and `cross run` chain warming and training internally. `cross-cat run` does
+not: cross-cat warm short-circuits today, so the constituent single-task
+caches must already be populated via `ahb single warm <task> <encoder>` (or
+a prior `single run`) before invoking it. `ahb all run` handles the ordering
+automatically (single → cross → cross-cat → data-eff).
 
 ## Encoders
 
@@ -226,9 +250,10 @@ ls exps/single_task/_summary/    # AUROC.csv, MAE.csv, completion.csv, …
 ### Cross-validation tasks
 
 Tasks whose yaml sets `num_fold:` (in `ahb/configs/tasks/<stem>.yaml`) are
-routed through `ahb train-cv` instead of `ahb train` — `ahb run` dispatches
-automatically based on that field (`ahb/orchestrator.py:is_cv`). Results are
-aggregated (mean ± std across folds) into `test_results.yaml`. 
+routed through per-fold CV training automatically — `ahb single train` and
+`ahb single run` both dispatch based on that field
+(`ahb/orchestrator.py:is_cv`). Results are aggregated (mean ± std across
+folds) into `test_results.yaml`. 
 
 Currently CV-routed (5-fold each):
 
