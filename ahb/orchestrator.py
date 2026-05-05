@@ -76,9 +76,37 @@ def get_task_info(task_stem: str) -> tuple[str, str]:
     return dataset_m.group(1), task_m.group(1)
 
 
-def get_output_folder(dataset: str, task: str, model_name: str,
+def task_label(task_stem: str) -> str:
+    """Display label for a single-task stem.
+
+    For paper tasks (yaml renamed to ``T1``…``T27``) this returns
+    ``"T1 (edaic_depC)"``, exposing both the paper ID (which now also
+    names the experiment folder on disk) and the descriptive
+    ``<dataset>_<task>``. For tasks whose stem already matches
+    ``<dataset>_<task>`` (auxiliary configs and cross-task stems handled
+    elsewhere), the bare stem is returned. Falls back to the bare stem
+    if the yaml is missing or unparseable, so callers don't need to
+    wrap in try/except.
+    """
+    try:
+        ds, t = get_task_info(task_stem)
+    except (FileNotFoundError, ValueError):
+        return task_stem
+    descriptive = f"{ds}_{t}"
+    return task_stem if task_stem == descriptive else f"{task_stem} ({descriptive})"
+
+
+def get_output_folder(task_stem: str, model_name: str,
                       tag: str = DEFAULT_EXPERIMENT_TAG) -> Path:
-    return Path(f"./exps/single_task/{dataset}_{task}/{model_name}-{DEFAULT_PROBE_NAME}-{tag}")
+    """``./exps/single_task/<task_stem>/<model>-<probe>-<tag>/``.
+
+    ``task_stem`` is the YAML filename without the ``.yaml`` suffix —
+    ``T9`` for paper tasks (renamed from ``aphasia_pwaC.yaml``),
+    ``avfad_ageR`` etc. for auxiliary configs whose stem already equals
+    ``<dataset>_<task>``. Folder names track the stem, so paper tasks
+    get the paper ID and auxiliary tasks keep their old folder name.
+    """
+    return Path(f"./exps/single_task/{task_stem}/{model_name}-{DEFAULT_PROBE_NAME}-{tag}")
 
 
 _task_yaml_cache: dict[str, dict] = {}
@@ -104,8 +132,7 @@ def _load_task_yaml(task_stem: str) -> dict:
 
 
 def manifest_paths(task_stem: str) -> tuple[Path, Path, Path]:
-    dataset, task = get_task_info(task_stem)
-    base = Path(f"./exps/single_task/{dataset}_{task}/manifest")
+    base = Path(f"./exps/single_task/{task_stem}/manifest")
     return base / "train.json", base / "valid.json", base / "test.json"
 
 

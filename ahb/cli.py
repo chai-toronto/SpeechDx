@@ -78,8 +78,12 @@ def _proxy_single_tasks_for_cross(cross_yaml: dict) -> list[str]:
     yaml. Cross uses ``train_dataset`` / ``test_dataset`` (singular);
     cross-cat uses ``train_datasets`` / ``test_datasets`` (plural). Cache
     is keyed by ``(dataset, encoder)``, so listing every task on each
-    dataset is fine — duplicates no-op (Q3 b)."""
-    from ahb.orchestrator import TASKS_DIR as SINGLE_TASKS_DIR
+    dataset is fine — duplicates no-op (Q3 b).
+
+    Looks up each single-task yaml's ``dataset:`` field rather than
+    glob-matching the filename, so opaque stems like ``T1.yaml`` work the
+    same as descriptive ones like ``aphasia_pwaC.yaml``."""
+    from ahb.orchestrator import TASKS_DIR as SINGLE_TASKS_DIR, get_task_info
     datasets: list[str] = []
     for key in ("train_dataset", "test_dataset"):
         v = cross_yaml.get(key)
@@ -89,12 +93,15 @@ def _proxy_single_tasks_for_cross(cross_yaml: dict) -> list[str]:
         v = cross_yaml.get(key)
         if isinstance(v, list):
             datasets.extend(v)
+    wanted = set(datasets)
     seen: set[str] = set()
     out: list[str] = []
-    for ds in datasets:
-        for p in sorted(SINGLE_TASKS_DIR.glob(f"{ds}_*.yaml")):
-            if p.stem in seen:
-                continue
+    for p in sorted(SINGLE_TASKS_DIR.glob("*.yaml")):
+        try:
+            ds, _ = get_task_info(p.stem)
+        except (ValueError, FileNotFoundError):
+            continue
+        if ds in wanted and p.stem not in seen:
             seen.add(p.stem)
             out.append(p.stem)
     return out
@@ -178,7 +185,7 @@ def _h_single_train(args: argparse.Namespace) -> None:
     to per-fold CV via the task yaml. Skip-if-complete by default; pass
     ``--overwrite`` to wipe and retrain."""
     from ahb.orchestrator import (
-        get_output_folder, get_task_info, is_complete,
+        get_output_folder, is_complete,
     )
     pairs = _resolve_pairs(args, "single")
     if not pairs:
@@ -189,8 +196,7 @@ def _h_single_train(args: argparse.Namespace) -> None:
     print(f"train: {len(pairs)} pair(s)")
     skipped = 0
     for task, encoder in pairs:
-        ds, t = get_task_info(task)
-        folder = get_output_folder(ds, t, encoder, args.tag)
+        folder = get_output_folder(task, encoder, args.tag)
         if folder.exists() and is_complete(folder, task) and not overwrite:
             print(f"  SKIP (results exist): {task} × {encoder}")
             skipped += 1
@@ -274,7 +280,6 @@ def _h_cross_train(args: argparse.Namespace) -> None:
     import shutil
     from ahb.orchestrator_cross import (
         get_output_folder as cross_output_folder,
-        get_task_info as cross_task_info,
     )
     from ahb.run_cross_category import CATEGORY_EXPS_ROOT
     from ahb.status import _is_complete_any
@@ -288,8 +293,7 @@ def _h_cross_train(args: argparse.Namespace) -> None:
     print(f"{args.mode} train: {len(pairs)} pair(s)")
     skipped = 0
     for task, encoder in pairs:
-        ds, t = cross_task_info(task)
-        folder = cross_output_folder(ds, t, encoder, args.tag, exps_root=exps_root)
+        folder = cross_output_folder(task, encoder, args.tag, exps_root=exps_root)
         if folder.exists() and _is_complete_any(folder) and not overwrite:
             print(f"  SKIP (results exist): {task} × {encoder}")
             skipped += 1
@@ -368,7 +372,7 @@ def _h_dataeff_train(args: argparse.Namespace) -> None:
     default; ``--level`` filters to specific levels. Skip-if-complete by
     default; pass ``--overwrite`` to wipe and retrain."""
     import shutil
-    from ahb.orchestrator import get_task_info, is_complete
+    from ahb.orchestrator import is_complete
     from ahb.orchestrator_data_eff import get_output_folder as de_output_folder
     from ahb.registry import data_eff_levels
     pairs = _resolve_pairs(args, "data-eff")
@@ -381,8 +385,7 @@ def _h_dataeff_train(args: argparse.Namespace) -> None:
     skipped = 0
     for level in levels:
         for task, encoder in pairs:
-            ds, t = get_task_info(task)
-            folder = de_output_folder(ds, t, encoder, level, args.tag)
+            folder = de_output_folder(task, encoder, level, args.tag)
             if folder.exists() and is_complete(folder, task) and not overwrite:
                 print(f"  SKIP (results exist): {task} × {encoder} @ {level}")
                 skipped += 1

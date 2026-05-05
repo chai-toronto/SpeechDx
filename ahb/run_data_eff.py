@@ -160,9 +160,9 @@ def cmd_run_data_eff(args: argparse.Namespace) -> None:
     completed_by_ds_enc: dict[tuple[str, str], list[str]] = defaultdict(list)
     for level_dir, _ in active_levels:
         for task_stem in tasks:
-            dataset, task = get_task_info(task_stem)
+            dataset, _ = get_task_info(task_stem)
             for model_name in encoders:
-                folder = get_output_folder(dataset, task, model_name, level_dir, tag)
+                folder = get_output_folder(task_stem, model_name, level_dir, tag)
                 if cache_only:
                     pass
                 elif test_only:

@@ -71,25 +71,24 @@ def discover_tasks(datasets: list[str] | None = None,
     return out
 
 
-def get_output_folder(dataset: str, task: str, model_name: str, level_dir: str,
+def get_output_folder(task_stem: str, model_name: str, level_dir: str,
                       tag: str = "run1", probe_name: str = "AvgTProbe") -> Path:
+    """``./exps/data_eff/<level_dir>/<task_stem>/<model>-<probe>-<tag>/``."""
     return Path(
-        f"./{EXP_ROOT_BASE}/{level_dir}/{dataset}_{task}/"
+        f"./{EXP_ROOT_BASE}/{level_dir}/{task_stem}/"
         f"{model_name}-{probe_name}-{tag}"
     )
 
 
 def src_manifest_paths(task_stem: str) -> tuple[Path, Path, Path]:
-    """Original (full) manifest paths under exps/single_task/<dataset>_<task>/manifest/."""
-    dataset, task = get_task_info(task_stem)
-    base = Path(f"./exps/single_task/{dataset}_{task}/manifest")
+    """Original (full) manifest paths under exps/single_task/<task_stem>/manifest/."""
+    base = Path(f"./exps/single_task/{task_stem}/manifest")
     return base / "train.json", base / "valid.json", base / "test.json"
 
 
 def manifest_paths(task_stem: str, level_dir: str) -> tuple[Path, Path, Path]:
     """Subsampled manifest paths for a (task, level) pair."""
-    dataset, task = get_task_info(task_stem)
-    base = Path(f"./{EXP_ROOT_BASE}/{level_dir}/{dataset}_{task}/manifest")
+    base = Path(f"./{EXP_ROOT_BASE}/{level_dir}/{task_stem}/manifest")
     return base / "train.json", base / "valid.json", base / "test.json"
 
 

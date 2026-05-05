@@ -26,9 +26,14 @@ from ahb.orchestrator import (
     get_results_file,
     get_task_info,
     is_complete,
+    task_label,
 )
 from ahb.registry import encoders as registry_encoders
 from ahb.results import parse_results_txt, parse_results_yaml
+
+#: Default label rendering for a task stem. Override per-mode via the
+#: ``label_for`` parameter on the table/CSV writers.
+_IDENTITY_LABEL: Callable[[str], str] = lambda s: s  # noqa: E731
 
 CLASSIFICATION_METRICS = ["AUROC", "AUC_CI", "F1", "accuracy"]
 REGRESSION_METRICS = ["MAE", "MAE_CI", "MSE", "PearsonR", "R2"]
@@ -93,9 +98,15 @@ def _print_metric_tables(
     encoders: list[str],
     regression_tasks: set[str],
     classification_tasks: set[str],
+    label_for: Callable[[str], str] = _IDENTITY_LABEL,
 ) -> None:
     """Pretty-print every per-metric matrix to stdout. Empty matrices are
-    skipped — keeps output tight when only one task type is in scope."""
+    skipped — keeps output tight when only one task type is in scope.
+
+    ``label_for`` maps a task stem to its display label (e.g.
+    ``"T1 (edaic_depC)"`` for single-mode paper tasks). Defaults to the
+    identity so cross-mode callers, whose stems already carry a
+    descriptive ``<dataset>_<task>`` prefix, are unaffected."""
     for csv_name, metric_key in CSV_LAYOUT.items():
         data = matrices[metric_key]
         pool = regression_tasks if metric_key in REGRESSION_METRICS else classification_tasks
@@ -105,7 +116,7 @@ def _print_metric_tables(
         cols = ["task", *encoders]
         rows: list[list[str]] = []
         for task_stem in task_rows:
-            row = [task_stem]
+            row = [label_for(task_stem)]
             for enc in encoders:
                 val = data[task_stem].get(enc, "")
                 if isinstance(val, float):
@@ -134,6 +145,7 @@ def _write_metric_csvs(
     regression_tasks: set[str],
     classification_tasks: set[str],
     out_dir: Path,
+    label_for: Callable[[str], str] = _IDENTITY_LABEL,
 ) -> list[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
@@ -149,7 +161,7 @@ def _write_metric_csvs(
             writer = csv.writer(f)
             writer.writerow(["task", *encoders])
             for task_stem in task_rows:
-                row = [task_stem]
+                row = [label_for(task_stem)]
                 for enc in encoders:
                     val = data[task_stem].get(enc, "")
                     if isinstance(val, float):
@@ -169,6 +181,7 @@ def _write_completion_csv(
     folder_for: Callable[[str, str], Path],
     is_complete_for: Callable[[Path, str], bool],
     out_dir: Path,
+    label_for: Callable[[str], str] = _IDENTITY_LABEL,
 ) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     comp_path = out_dir / "completion.csv"
@@ -177,7 +190,7 @@ def _write_completion_csv(
         writer = csv.writer(f)
         writer.writerow(["task", *all_encoders.keys()])
         for task_stem in all_tasks:
-            row = [task_stem]
+            row = [label_for(task_stem)]
             for stem, folder_name in all_encoders.items():
                 done = is_complete_for(folder_for(task_stem, folder_name), task_stem)
                 row.append("1" if done else "0")
@@ -196,8 +209,7 @@ def cmd_summary(args: argparse.Namespace) -> None:
                 if not enc_filter or e in enc_filter]
 
     def folder_for(task_stem: str, model_name: str) -> Path:
-        dataset, task = get_task_info(task_stem)
-        return get_output_folder(dataset, task, model_name, args.tag)
+        return get_output_folder(task_stem, model_name, args.tag)
 
     matrices, regression_tasks, classification_tasks, found, missing = _collect_matrices(
         tasks=tasks,
@@ -210,6 +222,7 @@ def cmd_summary(args: argparse.Namespace) -> None:
     out_dir = Path(args.out_dir or f"exps/single_task/_summary_{args.tag}")
     written = _write_metric_csvs(
         matrices, encoders, regression_tasks, classification_tasks, out_dir,
+        label_for=task_label,
     )
 
     ds_filter = set(getattr(args, "dataset", None) or [])
@@ -227,9 +240,11 @@ def cmd_summary(args: argparse.Namespace) -> None:
         folder_for=folder_for,
         is_complete_for=is_complete,
         out_dir=out_dir,
+        label_for=task_label,
     )
     written.append(comp_path)
 
-    _print_metric_tables(matrices, encoders, regression_tasks, classification_tasks)
+    _print_metric_tables(matrices, encoders, regression_tasks, classification_tasks,
+                         label_for=task_label)
     print(f"\nParsed {found} result files, {missing} missing")
     print(f"Wrote {len(written)} CSV(s) to {out_dir}/")

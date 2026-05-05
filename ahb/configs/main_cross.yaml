@@ -8,6 +8,10 @@ __set_seed_random:     !!python/object/apply:random.seed                [!ref <r
 model_name: emotion2vec
 probe_name: AvgTProbe
 experiment_tag: run1
+# task_id is the cross-task YAML stem (paper IDs are "T<train>_T<test>",
+# e.g. "T9_T7"). compose_yaml_text rewrites this per-job; the placeholder
+# below is only used for ad-hoc HyperPyYAML loads of this main.
+task_id: T9_T7
 
 ratio: [80, 20]
 cross_eval: true
@@ -17,7 +21,7 @@ data_folder: ./data/
 slurm_tmpdir: ./embeddings_avg_finalv2/
 #----------------------------------
 # Most of the knobs you should change
-data_params: !include:tasks/torgo_dysC.yaml
+data_params: !include:cross_tasks/T9_T7.yaml  # aphasia/pwaC → dbank/adC — placeholder default; runtime overrides via --task
 
 encoder_params: !include:encoders/emotion2vec.yaml
 
@@ -76,14 +80,14 @@ wav_folder_test: !ref <data_folder>/<test_dataset>/processed/audio
 metadata_path_test: !ref <data_folder>/<test_dataset>/processed/<test_dataset>.csv
 
 # Output folder structure
-output_folder: !ref ./exps/cross/<dataset>_<task>/<model_name>-<probe_name>-<experiment_tag>/
+output_folder: !ref ./exps/cross/<task_id>/<model_name>-<probe_name>-<experiment_tag>/
 save_folder: !ref <output_folder>/save
 train_log_dir: !ref <output_folder>/
 
 # Manifest files created by prepare_data_fn
-train_annotation: !ref ./exps/cross/<dataset>_<task>/manifest/train.json
-val_annotation: !ref ./exps/cross/<dataset>_<task>/manifest/valid.json
-test_annotation: !ref ./exps/cross/<dataset>_<task>/manifest/test.json
+train_annotation: !ref ./exps/cross/<task_id>/manifest/train.json
+val_annotation: !ref ./exps/cross/<task_id>/manifest/valid.json
+test_annotation: !ref ./exps/cross/<task_id>/manifest/test.json
 
 # Data preparation
 skip_prep: !ref <data_params[skip_prep]>

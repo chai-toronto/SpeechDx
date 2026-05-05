@@ -20,8 +20,12 @@ from ahb.orchestrator_cross import (
     get_results_file,
     get_task_info,
     is_complete,
+    task_label,
 )
-from ahb.registry import encoders as registry_encoders
+from ahb.registry import (
+    cross_categories as registry_cross_categories,
+    encoders as registry_encoders,
+)
 from ahb.run_cross_category import CATEGORY_EXPS_ROOT
 from ahb.summary import (
     _collect_matrices,
@@ -39,8 +43,7 @@ def _cmd(args: argparse.Namespace, *, include_categories: bool,
                 if not enc_filter or e in enc_filter]
 
     def folder_for(task_stem: str, model_name: str) -> Path:
-        dataset, task = get_task_info(task_stem)
-        return get_output_folder(dataset, task, model_name, args.tag,
+        return get_output_folder(task_stem, model_name, args.tag,
                                  exps_root=exps_root)
 
     matrices, regression_tasks, classification_tasks, found, missing = _collect_matrices(
@@ -54,20 +57,21 @@ def _cmd(args: argparse.Namespace, *, include_categories: bool,
     out_dir = Path(args.out_dir or exps_root / f"_summary_{args.tag}")
     written = _write_metric_csvs(
         matrices, encoders, regression_tasks, classification_tasks, out_dir,
+        label_for=task_label,
     )
 
     # Completion grid: cross-task yaml × encoder yaml under the right scope
-    # (category vs non-category), narrowed by -d/-t/-e if given.
+    # (category vs non-category), narrowed by -d/-t/-e if given. After the
+    # cross-task rename, the category vs non-category split is no longer
+    # encoded in the stem (was ``category_…`` prefix), so we read the
+    # canonical lists from the registry.
     ds_filter = set(getattr(args, "dataset", None) or [])
     task_filter = set(getattr(args, "task", None) or [])
+    cat_set = set(registry_cross_categories())
     if include_categories:
-        all_tasks_list = sorted(
-            s for s in discover_all_tasks() if s.startswith("category_")
-        )
+        all_tasks_list = sorted(s for s in discover_all_tasks() if s in cat_set)
     else:
-        all_tasks_list = sorted(
-            s for s in discover_all_tasks() if not s.startswith("category_")
-        )
+        all_tasks_list = sorted(s for s in discover_all_tasks() if s not in cat_set)
     all_tasks_list = [
         s for s in all_tasks_list
         if (not ds_filter or get_task_info(s)[0] in ds_filter)
@@ -81,11 +85,13 @@ def _cmd(args: argparse.Namespace, *, include_categories: bool,
         folder_for=folder_for,
         is_complete_for=is_complete,
         out_dir=out_dir,
+        label_for=task_label,
     )
     written.append(comp_path)
 
     from ahb.summary import _print_metric_tables
-    _print_metric_tables(matrices, encoders, regression_tasks, classification_tasks)
+    _print_metric_tables(matrices, encoders, regression_tasks, classification_tasks,
+                         label_for=task_label)
     print(f"\nParsed {found} result files, {missing} missing")
     print(f"Wrote {len(written)} CSV(s) to {out_dir}/")
 

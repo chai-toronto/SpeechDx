@@ -487,7 +487,13 @@ class DiagnosticsBrain(sb.Brain):
                     self._test_preds.append(torch.sigmoid(predictions).cpu())
                     self._test_labels.append(lab.cpu())
                 # Track participant ids for subject-level cluster bootstrap.
-                self._test_pids.extend(list(batch.Participant_ID))
+                # Numeric pids (e.g. EDAIC's "302") arrive as a CUDA tensor;
+                # _maybe_subject_ids -> np.asarray would crash on those, so
+                # demote to plain Python scalars before storing.
+                pids = batch.Participant_ID
+                if isinstance(pids, torch.Tensor):
+                    pids = pids.detach().cpu().tolist()
+                self._test_pids.extend(list(pids))
 
         return loss
 

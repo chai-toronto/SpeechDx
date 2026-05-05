@@ -46,7 +46,7 @@ def _resolve_encoders(arg_encoder: list[str] | None) -> list[str]:
 def _scan_single(args: argparse.Namespace) -> tuple[int, int, int]:
     """Returns (complete, incomplete, total)."""
     from ahb.orchestrator import (
-        discover_tasks, get_output_folder, get_task_info,
+        discover_tasks, get_output_folder, task_label,
     )
     tag = getattr(args, "tag", "run1")
     tasks = discover_tasks(getattr(args, "dataset", None),
@@ -55,10 +55,9 @@ def _scan_single(args: argparse.Namespace) -> tuple[int, int, int]:
     complete = incomplete = 0
     rows: list[list[str]] = []
     for ts in tasks:
-        ds, t = get_task_info(ts)
-        row = [ts]
+        row = [task_label(ts)]
         for enc in encoders:
-            folder = get_output_folder(ds, t, enc, tag)
+            folder = get_output_folder(ts, enc, tag)
             if _is_complete_any(folder):
                 row.append("☑"); complete += 1
             else:
@@ -73,7 +72,7 @@ def _scan_cross(args: argparse.Namespace, *, include_categories: bool,
     from ahb.orchestrator_cross import (
         discover_tasks as cross_disc,
         get_output_folder as cross_folder,
-        get_task_info as cross_info,
+        task_label as cross_label,
     )
     tag = getattr(args, "tag", "run1")
     tasks = cross_disc(getattr(args, "dataset", None),
@@ -83,10 +82,9 @@ def _scan_cross(args: argparse.Namespace, *, include_categories: bool,
     complete = incomplete = 0
     rows: list[list[str]] = []
     for ts in tasks:
-        ds, t = cross_info(ts)
-        row = [ts]
+        row = [cross_label(ts)]
         for enc in encoders:
-            folder = cross_folder(ds, t, enc, tag, exps_root=exps_root)
+            folder = cross_folder(ts, enc, tag, exps_root=exps_root)
             if _is_complete_any(folder):
                 row.append("☑"); complete += 1
             else:
@@ -97,7 +95,7 @@ def _scan_cross(args: argparse.Namespace, *, include_categories: bool,
 
 
 def _scan_data_eff(args: argparse.Namespace) -> tuple[int, int, int]:
-    from ahb.orchestrator import get_task_info
+    from ahb.orchestrator import task_label
     from ahb.orchestrator_data_eff import (
         discover_tasks as de_disc,
         get_output_folder as de_folder,
@@ -115,10 +113,9 @@ def _scan_data_eff(args: argparse.Namespace) -> tuple[int, int, int]:
     rows: list[list[str]] = []
     for level in levels:
         for ts in tasks:
-            ds, t = get_task_info(ts)
-            row = [level, ts]
+            row = [level, task_label(ts)]
             for enc in encoders:
-                folder = de_folder(ds, t, enc, level, tag)
+                folder = de_folder(ts, enc, level, tag)
                 if _is_complete_any(folder):
                     row.append("☑"); complete += 1
                 else:

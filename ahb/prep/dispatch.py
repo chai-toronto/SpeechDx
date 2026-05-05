@@ -81,11 +81,16 @@ def _main_yaml(kind: str) -> Path:
 
 
 def manifest_paths(task_stem: str) -> tuple[Path, Path, Path]:
-    """Return ``(train, valid, test)`` manifest paths for a task."""
+    """Return ``(train, valid, test)`` manifest paths for a task.
+
+    Folder name is the YAML stem (== ``<dataset>_<task>`` for auxiliary
+    and cross tasks, ``T<N>`` for paper tasks renamed in the rename
+    pass). Matches ``ahb/orchestrator{,_cross,_data_eff}.manifest_paths``.
+    """
     tpath = _find_task_yaml(task_stem)
     tcfg = _load_yaml(tpath)
     kind = _classify(tpath, tcfg)
-    base = _exps_root(kind) / f"{tcfg['dataset']}_{tcfg['task']}" / "manifest"
+    base = _exps_root(kind) / task_stem / "manifest"
     return base / "train.json", base / "valid.json", base / "test.json"
 
 

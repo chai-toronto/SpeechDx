@@ -8,6 +8,10 @@ __set_seed_random:     !!python/object/apply:random.seed                [!ref <r
 model_name: emotion2vec
 probe_name: AvgTProbe
 experiment_tag: run1
+# task_id is the category-cross task YAML stem (paper IDs are "c<train>_c<test>",
+# e.g. "c2_c3"). compose_yaml_text rewrites this per-job; the placeholder
+# below is only used for ad-hoc HyperPyYAML loads of this main.
+task_id: c2_c3
 
 ratio: [80, 20]
 cross_eval: false
@@ -19,7 +23,7 @@ slurm_tmpdir: ./embeddings_avg_finalv2/
 
 #----------------------------------
 # Most of the knobs you should change
-data_params: !include:cross_tasks/category_c2_c3.yaml
+data_params: !include:cross_tasks/c2_c3.yaml  # category c2 → c3 — placeholder default; runtime overrides via --task
 
 encoder_params: !include:encoders/emotion2vec.yaml
 
@@ -85,13 +89,13 @@ data_io_script: !ref <data_params[data_io_script]>
 prepare_data_fn: !ref <data_params[prepare_data_fn]>
 label_key: !ref <data_params[label_key]>
 
-output_folder: !ref ./exps/cross_cat/<dataset>_<task>/<model_name>-<probe_name>-<experiment_tag>/
+output_folder: !ref ./exps/cross_cat/<task_id>/<model_name>-<probe_name>-<experiment_tag>/
 save_folder: !ref <output_folder>/save
 train_log_dir: !ref <output_folder>/
 
-train_annotation: !ref ./exps/cross_cat/<dataset>_<task>/manifest/train.json
-val_annotation: !ref ./exps/cross_cat/<dataset>_<task>/manifest/valid.json
-test_annotation: !ref ./exps/cross_cat/<dataset>_<task>/manifest/test.json
+train_annotation: !ref ./exps/cross_cat/<task_id>/manifest/train.json
+val_annotation: !ref ./exps/cross_cat/<task_id>/manifest/valid.json
+test_annotation: !ref ./exps/cross_cat/<task_id>/manifest/test.json
 
 skip_prep: !ref <data_params[skip_prep]>
 

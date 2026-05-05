@@ -1,8 +1,8 @@
 """Participant-level subsampling for data efficiency analysis.
 
-Reads source manifests (typically `exps/single_task/<dataset>_<task>/manifest/`),
+Reads source manifests (typically `exps/single_task/<task_stem>/manifest/`),
 picks a balanced subset of participants per split, and writes new manifests to a
-destination directory (typically `exps/data_eff/<level>/<dataset>_<task>/manifest/`).
+destination directory (typically `exps/data_eff/<level>/<task_stem>/manifest/`).
 
 Per task type:
 - B / C  : greedy class-balanced selection on integer label

@@ -8,13 +8,18 @@ __set_seed_random:     !!python/object/apply:random.seed                [!ref <r
 model_name: qwen3voice
 probe_name: AvgTProbe
 experiment_tag: run1
+# task_id is the task YAML stem (e.g. "T9", "avfad_ageR"). It names the
+# experiment folder under exps/single_task/. compose_yaml_text rewrites
+# this line per-job to match --task; the placeholder below is only used
+# when main.yaml is loaded directly (e.g. ad-hoc HyperPyYAML loads).
+task_id: T21
 
 data_folder: ./data/
 #slurm_tmpdir: !apply:os.getenv ["SLURM_TMPDIR", "/tmp/"]
 slurm_tmpdir: ./embeddings_avg_finalv2/
 #----------------------------------
 # Most of the knobs you should change
-data_params: !include:tasks/c9s_t2.yaml
+data_params: !include:tasks/T21.yaml  # c9s_t2 — placeholder default; runtime overrides via --task
 ratio: [70, 10, 20]
 
 encoder_params: !include:encoders/qwen3_voice.yaml
@@ -67,14 +72,14 @@ wav_folder: !ref <data_folder>/<dataset>/processed/audio
 metadata_path: !ref <data_folder>/<dataset>/processed/<dataset>.csv
 
 # Output folder structure
-output_folder: !ref ./exps/single_task/<dataset>_<task>/<model_name>-<probe_name>-<experiment_tag>/
+output_folder: !ref ./exps/single_task/<task_id>/<model_name>-<probe_name>-<experiment_tag>/
 save_folder: !ref <output_folder>/save
 train_log_dir: !ref <output_folder>/
 
 # Manifest files created by prepare_data_fn
-train_annotation: !ref ./exps/single_task/<dataset>_<task>/manifest/train.json
-val_annotation: !ref ./exps/single_task/<dataset>_<task>/manifest/valid.json
-test_annotation: !ref ./exps/single_task/<dataset>_<task>/manifest/test.json
+train_annotation: !ref ./exps/single_task/<task_id>/manifest/train.json
+val_annotation: !ref ./exps/single_task/<task_id>/manifest/valid.json
+test_annotation: !ref ./exps/single_task/<task_id>/manifest/test.json
 
 # Data preparation
 skip_prep: !ref <data_params[skip_prep]>

@@ -107,6 +107,15 @@ def compose_yaml_text(
     else:
         encoder_block = f"encoder_params: !include:encoders/{encoder_yaml}"
 
+    # task_id is the YAML stem (e.g. "T9", "avfad_ageR",
+    # "aphasia_dbank_pwaC_adC"). It names the experiment folder via the
+    # <task_id> ref in main*.yaml — replacing the previous <dataset>_<task>
+    # ref so paper tasks land under exps/<scope>/T<N>/ instead of
+    # exps/<scope>/<dataset>_<task>/. Auxiliary single-task and cross
+    # stems already match <dataset>_<task>, so their folder names are
+    # unchanged.
+    task_id = task_yaml[:-5] if task_yaml.endswith(".yaml") else task_yaml
+
     # Whole-line substitutions keyed by line prefix. Order doesn't matter
     # since each prefix is unique to one line in main.yaml.
     line_subs: dict[str, str] = {
@@ -115,6 +124,7 @@ def compose_yaml_text(
         "encoder_params:": encoder_block,
         "probe_params:":   f"probe_params: !include:probes/{probe_yaml}",
         "data_params:":    f"data_params: !include:{task_include_prefix}/{task_yaml}",
+        "task_id:":        f"task_id: {task_id}",
         "skip_prep:":      "skip_prep: True",
     }
     if experiment_tag is not None:

@@ -158,9 +158,9 @@ def cmd_run(args: argparse.Namespace) -> None:
     pending: list[tuple[str, str]] = []
     completed_by_ds_enc: dict[tuple[str, str], list[str]] = defaultdict(list)
     for task_stem in tasks:
-        dataset, task = get_task_info(task_stem)
+        dataset, _ = get_task_info(task_stem)
         for model_name in encoders:
-            folder = get_output_folder(dataset, task, model_name, tag)
+            folder = get_output_folder(task_stem, model_name, tag)
             if cache_only:
                 pass  # always queue; cache_only emits no result file
             elif test_only:

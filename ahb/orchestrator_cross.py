@@ -85,10 +85,48 @@ def get_task_info(task_stem: str) -> tuple[str, str]:
     return dataset_m.group(1), task_m.group(1)
 
 
-def get_output_folder(dataset: str, task: str, model_name: str,
+# Paper cross-task stems are ``T<train>_T<test>`` (e.g. ``T9_T7``) and
+# paper cross-category stems are ``c<train>_c<test>`` (e.g. ``c2_c3``).
+_PAPER_CROSS_RE = re.compile(r"^T\d+_T\d+$")
+_PAPER_CROSSCAT_RE = re.compile(r"^c\d+_c\d+$")
+
+
+def task_label(task_stem: str) -> str:
+    """Display label for a cross or cross-category task stem.
+
+    For paper cross pairs renamed to ``T<train>_T<test>``, returns
+    ``"T9_T7 (aphasia_dbank_pwaC_adC)"`` — both the paper ID (which now
+    also names the experiment folder on disk) and the legacy descriptive
+    ``<dataset>_<task>`` reconstructed from the YAML body. For paper
+    cross-category stems renamed to ``c<train>_c<test>``, returns
+    ``"c2_c3 (category_c2_c3)"`` — the legacy ``category_…`` prefix
+    spelled out for readability. Falls back to the bare stem for any
+    stem that doesn't match the paper patterns or whose YAML can't be
+    read, so callers don't need to wrap in try/except.
+    """
+    if _PAPER_CROSSCAT_RE.match(task_stem):
+        return f"{task_stem} (category_{task_stem})"
+    if _PAPER_CROSS_RE.match(task_stem):
+        try:
+            ds, t = get_task_info(task_stem)
+            return f"{task_stem} ({ds}_{t})"
+        except (FileNotFoundError, ValueError):
+            return task_stem
+    return task_stem
+
+
+def get_output_folder(task_stem: str, model_name: str,
                       tag: str = EXPERIMENT_TAG,
                       *, exps_root: Path | None = None) -> Path:
-    return (exps_root or EXPS_ROOT) / f"{dataset}_{task}" / f"{model_name}-{CROSS_PROBE_NAME}-{tag}"
+    """``./exps/cross/<task_stem>/<model>-<probe>-<tag>/``.
+
+    For the cross runner ``task_stem`` already equals the legacy
+    ``<dataset>_<task>`` folder name (e.g.
+    ``aphasia_dbank_pwaC_adC``), so behavior is byte-identical to
+    before; the signature change is purely cosmetic for consistency
+    with single/data-eff.
+    """
+    return (exps_root or EXPS_ROOT) / task_stem / f"{model_name}-{CROSS_PROBE_NAME}-{tag}"
 
 
 _task_yaml_cache: dict[str, dict] = {}
@@ -105,8 +143,7 @@ def _load_task_yaml(task_stem: str) -> dict:
 
 
 def manifest_paths(task_stem: str, *, exps_root: Path | None = None) -> tuple[Path, Path, Path]:
-    dataset, task = get_task_info(task_stem)
-    base = (exps_root or EXPS_ROOT) / f"{dataset}_{task}" / "manifest"
+    base = (exps_root or EXPS_ROOT) / task_stem / "manifest"
     return base / "train.json", base / "valid.json", base / "test.json"
 
 

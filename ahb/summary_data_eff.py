@@ -18,9 +18,12 @@ import csv
 from collections import defaultdict
 from pathlib import Path
 
+from typing import Callable
+
 from ahb.orchestrator import (
     _load_task_yaml,
     get_output_folder as get_single_output_folder,
+    task_label,
 )
 from ahb.orchestrator_data_eff import (
     EXP_ROOT_BASE,
@@ -29,7 +32,6 @@ from ahb.orchestrator_data_eff import (
     encoders_default,
     get_output_folder,
     get_results_file,
-    get_task_info,
     is_complete,
 )
 from ahb.summary import (
@@ -54,7 +56,8 @@ def _format_value(v) -> str:
 
 def _write_progression_csv(path: Path, *, encoders: list[str],
                            levels: list[str], tasks: list[str],
-                           value_for) -> None:
+                           value_for,
+                           label_for: Callable[[str], str] = lambda s: s) -> None:
     with path.open("w", newline="") as f:
         writer = csv.writer(f)
         header_models = [""]
@@ -66,7 +69,7 @@ def _write_progression_csv(path: Path, *, encoders: list[str],
         writer.writerow(header_models)
         writer.writerow(header_levels)
         for task_stem in tasks:
-            row = [task_stem]
+            row = [label_for(task_stem)]
             for enc in encoders:
                 for lvl in levels:
                     row.append(value_for(task_stem, enc, lvl))
@@ -102,9 +105,8 @@ def cmd_summary_data_eff(args: argparse.Namespace) -> None:
 
     # Pull 100% column from single-task results, regardless of --level filter.
     for task_stem in tasks:
-        dataset, task = get_task_info(task_stem)
         for model_name in encoders:
-            folder = get_single_output_folder(dataset, task, model_name, args.tag)
+            folder = get_single_output_folder(task_stem, model_name, args.tag)
             metrics = _load_metrics(folder, get_results_file(task_stem))
             if metrics is not None:
                 for metric_key in CSV_LAYOUT.values():
@@ -120,8 +122,7 @@ def cmd_summary_data_eff(args: argparse.Namespace) -> None:
     for level_dir, _ in active_levels:
         def folder_for(task_stem: str, model_name: str,
                        level_dir=level_dir) -> Path:
-            dataset, task = get_task_info(task_stem)
-            return get_output_folder(dataset, task, model_name, level_dir,
+            return get_output_folder(task_stem, model_name, level_dir,
                                      args.tag)
 
         matrices, _, _, found, missing = _collect_matrices(
@@ -138,6 +139,7 @@ def cmd_summary_data_eff(args: argparse.Namespace) -> None:
         out_dir = base_out / level_dir
         per_level_written = _write_metric_csvs(
             matrices, encoders, regression_tasks, classification_tasks, out_dir,
+            label_for=task_label,
         )
         written.extend(per_level_written)
 
@@ -148,7 +150,7 @@ def cmd_summary_data_eff(args: argparse.Namespace) -> None:
             w = csv.writer(f)
             w.writerow(["task", *encoders])
             for task_stem in tasks:
-                row = [task_stem]
+                row = [task_label(task_stem)]
                 for enc in encoders:
                     done = is_complete(folder_for(task_stem, enc), task_stem)
                     row.append("1" if done else "0")
@@ -181,7 +183,7 @@ def cmd_summary_data_eff(args: argparse.Namespace) -> None:
         path = base_out / f"{csv_name}.csv"
         _write_progression_csv(
             path, encoders=encoders, levels=combined_levels,
-            tasks=task_rows, value_for=value_for,
+            tasks=task_rows, value_for=value_for, label_for=task_label,
         )
         written.append(path)
 
@@ -197,7 +199,7 @@ def cmd_summary_data_eff(args: argparse.Namespace) -> None:
 
     _write_progression_csv(
         comp_path, encoders=encoders, levels=combined_levels,
-        tasks=list(tasks), value_for=comp_value,
+        tasks=list(tasks), value_for=comp_value, label_for=task_label,
     )
     # Append TOTAL row.
     with comp_path.open("a", newline="") as f:

@@ -31,10 +31,10 @@ pip install -r requirements.txt
 #    Filters: `-t/--task`, `-e/--encoder`, `-d/--dataset` (repeatable;
 #    empty = "every match in scope"). `single` is the default mode, so
 #    `ahb prep ...` ≡ `ahb single prep ...`.
-uv run python -m ahb single prep  -t c9s_t1
+uv run python -m ahb single prep  -t T19
 # Drop uv run if run without uv
-uv run python -m ahb single warm  -t c9s_t1 -e wavlm
-uv run python -m ahb single train -t c9s_t1 -e wavlm
+uv run python -m ahb single warm  -t T19 -e wavlm
+uv run python -m ahb single train -t T19 -e wavlm
 
 # 2. Or `run` does the whole pipeline for matching pairs:
 #    download → prep → warm → train → summary. Idempotent — skips
@@ -77,7 +77,7 @@ The same six commands apply to every mode:
 
 **Canonical filters.** Every command accepts `-t/--task`, `-e/--encoder`,
 `-d/--dataset`. Each is repeatable; empty = "every match in scope". So
-`single warm -t c9s_t1 -e wavlm` is one pair, `single warm -d c9s` warms
+`single warm -t T19 -e wavlm` is one pair, `single warm -d c9s` warms
 every c9s task × every encoder, and `single warm` (no filter) warms the
 whole grid.
 
@@ -219,8 +219,10 @@ archive at `data/<name>/raw/` and re-run.
 
 ## Adding a task
 
-A task is one (dataset, label) pair — e.g. *c9s_t1* trains binary COVID
-classification on the COVID-19 Sounds dataset.
+A task is one (dataset, label) pair — e.g. *T19* (`c9s_t1` internally) trains
+binary COVID classification on the COVID-19 Sounds dataset. Paper tasks are
+identified by ID (T1…T27) — see `paper_tasks` in `ahb/configs/registry.yaml`
+for the full ID-to-(dataset, label) mapping.
 
 1. **Stage the dataset.** Audio under `data/<dataset>/processed/audio/`,
    metadata CSV at `data/<dataset>/processed/<dataset>.csv`. Required CSV
@@ -230,11 +232,16 @@ classification on the COVID-19 Sounds dataset.
 2. **Write a `prepare_*` function** under `ahb/prep/<dataset>.py`. It builds
    train/valid/test manifests from the metadata CSV. `ahb/prep/c9s.py` and
    `ahb/prep/torgo.py` are the templates.
-3. **Add a task yaml** at `ahb/configs/tasks/<dataset>_<task>.yaml` pointing
-   at the prep function (`data_io_script`, `prepare_data_fn`), the label
-   column (`label_key`), the loss, and `task_type` (B / C / R / L for binary,
-   multiclass, regression, multilabel).
-4. **Register the task** by adding its stem to `paper_tasks` in
+3. **Add a task yaml** at `ahb/configs/tasks/T<N>.yaml` (next free ID;
+   non-paper / scratch tasks may keep descriptive `<dataset>_<task>.yaml`
+   stems instead) pointing at the prep function (`data_io_script`,
+   `prepare_data_fn`), the label column (`label_key`), the loss, and
+   `task_type` (B / C / R / L for binary, multiclass, regression, multilabel).
+   The yaml's **stem** drives the experiment folder name
+   (`exps/single_task/<stem>/...`), so paper tasks land at
+   `exps/single_task/T<N>/` and auxiliary tasks at the descriptive name —
+   renaming a stem moves the on-disk results with it.
+4. **Register the task** by adding its stem (e.g. `T28`) to `paper_tasks` in
    `ahb/configs/registry.yaml`. That's the single source of truth used by
    every orchestrator.
 
@@ -256,19 +263,22 @@ different list.
    (or extend `ahb/prep/category.py` for cross-cat). It builds the manifests
    by joining the per-dataset CSVs. `ahb/prep/cross_aphasia_dbank.py` and
    `ahb/prep/category.py` are the templates.
-3. **Add a cross-task yaml** at `ahb/configs/cross_tasks/<stem>.yaml`.
+3. **Add a cross-task yaml** at `ahb/configs/cross_tasks/<stem>.yaml`. Stems
+   follow the paper IDs of the underlying single tasks: pair tasks use
+   `T<train>_T<test>` (e.g. `T9_T7`), category tasks use `c<train>_c<test>`
+   (e.g. `c2_c3`). The stem also names the experiment folder on disk
+   (`exps/cross/T9_T7/...`, `exps/cross_cat/c2_c3/...`).
    - Pair tasks use singular `train_dataset` / `test_dataset` and a combined
      `dataset:` field (e.g. `aphasia_dbank`).
-     See [`aphasia_dbank_pwaC_adC.yaml`](ahb/configs/cross_tasks/aphasia_dbank_pwaC_adC.yaml).
+     See [`T9_T7.yaml`](ahb/configs/cross_tasks/T9_T7.yaml).
    - Category tasks use plural `train_datasets` / `test_datasets` lists and
      `setting_1/2/3` blocks; `dataset:` should be `cross_tasks`.
-     See [`category_c1_c2.yaml`](ahb/configs/cross_tasks/category_c1_c2.yaml).
+     See [`c1_c2.yaml`](ahb/configs/cross_tasks/c1_c2.yaml).
    Both schemas point at the prep function via `data_io_script` /
    `prepare_data_fn` and set `label_key`, `loss`, and `task_type`.
 4. **Register the task** in `ahb/configs/registry.yaml`:
    - Pair tasks → append the stem to `cross_pairs:`.
-   - Category tasks → append the stem (must start with `category_`) to
-     `cross_categories:`.
+   - Category tasks → append the stem to `cross_categories:`.
    Unregistered yamls are ignored by `cross run` / `cross-cat run` /
    `status` / `summary`, matching the single-mode `paper_tasks` rule.
 
@@ -321,14 +331,14 @@ folds) into `test_results.yaml`.
 
 Currently CV-routed (5-fold each):
 
-| Dataset    | Tasks                                            |
-|------------|--------------------------------------------------|
-| `iemocap`  | `iemocap_emoC`, `iemocap_emoBC`                  |
-| `ravdess`  | `ravdess_emoC`, `ravdess_emoBC`                  |
-| `torgo`    | `torgo_dysC`, `torgo_sevR`                       |
-| `uaspeech` | `uaspeech_dysC`                                  |
-| `mvdr`     | `mvdr_parkC`, `mvdr_hyR`, `mvdr_updrs5R`, `mvdr_updrs18R` |
-| `ksof`     | `ksof_intC`, `ksof_stutL`                        |
+| Dataset    | Task IDs (paper name)                                                                            |
+|------------|--------------------------------------------------------------------------------------------------|
+| `iemocap`  | `T5` (iemocap_emoC), `T6` (iemocap_emoBC)                                                        |
+| `ravdess`  | `T3` (ravdess_emoC), `T4` (ravdess_emoBC)                                                        |
+| `torgo`    | `T10` (torgo_dysC), `T11` (torgo_sevR)                                                           |
+| `uaspeech` | `T12` (uaspeech_dysC)                                                                            |
+| `mvdr`     | `T13` (mvdr_parkC), `T14` (mvdr_updrs5R), `T15` (mvdr_updrs18R), `T16` (mvdr_hyR)                |
+| `ksof`     | `T17` (ksof_intC), `T18` (ksof_stutL)                                                            |
 
 To add or remove a task from this set, toggle `num_fold` in its task yaml —
 no orchestrator code changes required.

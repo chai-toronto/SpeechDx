@@ -148,9 +148,9 @@ def cmd_run_cross(args: argparse.Namespace, *,
     pending: list[tuple[str, str]] = []
     completed_by_ds_enc: dict[tuple[str, str], list[str]] = defaultdict(list)
     for task_stem in tasks:
-        dataset, task = get_task_info(task_stem)
+        dataset, _ = get_task_info(task_stem)
         for model_name in encoders:
-            folder = get_output_folder(dataset, task, model_name, tag,
+            folder = get_output_folder(task_stem, model_name, tag,
                                        exps_root=exps_root)
             if cache_only:
                 pass
