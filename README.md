@@ -1,10 +1,3 @@
-## Larry's TODO: 
-  1. Drop the level/single_avg/single cache tag + class-level prune of probe/pool unreachables (cache → v3, drop output_hidden_state outside model wrappers)                                                                                                                            
-  2. Do a test only thru run2.
-  3. Paralel cache gen
-  4. Rerun regression experiments for run1 (Optional, not run2) 
-  5. Sript to download, metadata, warm and run
-                                                 
 
 # Audio Health Benchmark
 
@@ -17,10 +10,18 @@ macro-AUROC / MAE with bootstrap confidence intervals.
 
 ```bash
 git clone <this repo> && cd Audio-Health-Benchmark
-pip install -r requirements.txt
-pip install -e .
+uv sync
+```
 
-# 1. Tell the harness which dataset + task to work on. `prep` will:
+If you don't have uv, a pinned `requirements.txt` is checked in:
+
+```bash
+python3.11 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+```bash
+# 1. Control what dataset + task to work on. `prep` will:
 #    - download raw data if the dataset is public (mvdr, ravdess, coswara,
 #      torgo) and a `scripts/download_<name>.sh` exists,
 #    - else fail loudly with the contact info from registry.yaml,
@@ -30,21 +31,23 @@ pip install -e .
 #    Filters: `-t/--task`, `-e/--encoder`, `-d/--dataset` (repeatable;
 #    empty = "every match in scope"). `single` is the default mode, so
 #    `ahb prep ...` ≡ `ahb single prep ...`.
-python -m ahb single prep  -t c9s_t1
-python -m ahb single warm  -t c9s_t1 -e wavlm
-python -m ahb single train -t c9s_t1 -e wavlm
+uv run python -m ahb single prep  -t c9s_t1
+# Drop uv run if run without uv
+uv run python -m ahb single warm  -t c9s_t1 -e wavlm
+uv run python -m ahb single train -t c9s_t1 -e wavlm
 
 # 2. Or `run` does the whole pipeline for matching pairs:
 #    download → prep → warm → train → summary. Idempotent — skips
 #    pairs whose results already exist; pass --overwrite to redo.
-python -m ahb single run -j 4
+uv run python -m ahb single run -j 4
 
-# 3. … or chain every mode (single → cross → cross-cat → data-eff).
-python -m ahb all run -j 4
+# 3. … or chain every mode (single → cross → cross-cat → data-eff). 
+# When the datasets are in place, this will completely reproduce. 
+uv run python -m ahb all run -j 4
 
 # 4. Inspect.
-python -m ahb single status         # task × encoder grid of ☑ / ☐ for --tag
-python -m ahb single summary        # per-metric CSVs + stdout tables
+uv run python -m ahb single status         # task × encoder grid of ☑ / ☐ for --tag
+uv run python -m ahb single summary        # per-metric CSVs + stdout tables
 ```
 
 ## Modes
@@ -162,7 +165,6 @@ truth, not the table below.
 │   └── configs/            YAML hierarchy (tasks/, encoders/, probes/, registry.yaml)
 ├── model/                  Encoder + probe + pooling implementations
 ├── metadata_script/        One create_<dataset>_metadata.py per dataset
-├── script/                 Operational helpers (slurm tracker, prune, layer-weight viz)
 ├── scripts/                Per-dataset download scripts (open-access corpora)
 ├── slurm/                  SLURM job templates
 ├── third_party/OPERA/      Vendored OPERA encoder loader
@@ -301,7 +303,7 @@ Aggregate everything into per-metric CSVs (and pretty-print the same
 matrices to stdout):
 
 ```bash
-python -m ahb single summary
+uv run python -m ahb single summary
 ls exps/single_task/_summary_run1/   # AUC.csv, F1.csv, MAE.csv, completion.csv, …
 ```
 
@@ -355,3 +357,6 @@ ENCODER=wavlm,ast DATASET=torgo,ravdess JOBS=4 sbatch run_all_slurm.sh
 
 Per-cluster job specs live in `slurm/` (e.g. `slurm/trillium.slurm`).
 
+## TODO: 
+  1. Drop the level/single_avg/single cache tag + class-level prune of probe/pool unreachables (cache → v3, drop output_hidden_state outside model wrappers
+  2. Paralel cache gen
