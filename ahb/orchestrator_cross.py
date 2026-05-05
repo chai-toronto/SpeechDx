@@ -59,6 +59,16 @@ def discover_tasks(datasets: list[str] | None = None,
     (``include_categories=True``) from the registry. Stems missing a yaml
     under ``cross_tasks/`` are dropped, matching the ``paper_tasks``
     behavior in ``ahb/orchestrator.py``.
+
+    A cross stem matches ``-d X`` if X appears in the yaml's
+    ``train_dataset`` / ``test_dataset`` (cross pairs) or
+    ``train_datasets`` / ``test_datasets`` (cross-cat) — i.e. X is
+    involved on either side. It also matches if X equals the legacy
+    combined ``dataset:`` field (e.g. ``edaic_ravdess``).
+
+    A stem matches ``-t Y`` if Y equals the full cross stem (e.g.
+    ``T1_T4``) or either of its train/test components (``T1`` or
+    ``T4``); for cross-cat, ``c1_c2`` matches ``c1`` or ``c2`` too.
     """
     available = {p.stem for p in TASKS_DIR.glob("*.yaml")}
     seed = cross_categories() if include_categories else cross_pairs()
@@ -67,12 +77,47 @@ def discover_tasks(datasets: list[str] | None = None,
     allowed_tasks = set(tasks) if tasks else None
     out = []
     for s in stems:
-        ds = get_task_info(s)[0]
-        if allowed_ds is not None and ds not in allowed_ds:
+        if allowed_ds is not None and not (_stem_datasets(s) & allowed_ds):
             continue
-        if allowed_tasks is not None and s not in allowed_tasks:
+        if allowed_tasks is not None and not (_stem_task_keys(s) & allowed_tasks):
             continue
         out.append(s)
+    return out
+
+
+_STEM_SPLIT_RE = re.compile(r"^([A-Za-z]+\d+)_([A-Za-z]+\d+)$")
+
+
+def _stem_task_keys(task_stem: str) -> set[str]:
+    """Tokens a cross stem matches against ``-t``: the stem itself plus
+    its train/test components when the stem follows the paper
+    ``<train>_<test>`` pattern (e.g. ``T1_T4`` → ``{T1_T4, T1, T4}``,
+    ``c1_c2`` → ``{c1_c2, c1, c2}``)."""
+    keys = {task_stem}
+    m = _STEM_SPLIT_RE.match(task_stem)
+    if m:
+        keys.update(m.groups())
+    return keys
+
+
+def _stem_datasets(task_stem: str) -> set[str]:
+    """All dataset names a cross stem is "involved with": the legacy
+    combined ``dataset:`` plus every entry under
+    ``train_dataset(s)`` / ``test_dataset(s)``."""
+    text = (TASKS_DIR / f"{task_stem}.yaml").read_text()
+    out: set[str] = set()
+    m = re.search(r"^dataset:\s*(\S+)", text, re.MULTILINE)
+    if m:
+        out.add(m.group(1))
+    for key in ("train_dataset", "test_dataset"):
+        m = re.search(rf"^{key}:\s*(\S+)", text, re.MULTILINE)
+        if m:
+            out.add(m.group(1))
+    for key in ("train_datasets", "test_datasets"):
+        m = re.search(rf"^{key}:\s*\[(.*?)\]", text, re.MULTILINE)
+        if m:
+            out.update(tok.strip().strip('"').strip("'")
+                       for tok in m.group(1).split(",") if tok.strip())
     return out
 
 
