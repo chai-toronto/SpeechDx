@@ -46,6 +46,19 @@ from ahb.ray_search import (  # noqa: E402
 from ahb.registry import encoders as registry_encoders  # noqa: E402
 
 
+def _all_trials_errored(output_folder: Path) -> bool:
+    """True iff every Ray Tune trial dir under ``output_folder`` has an
+    ``error.txt`` (and there is at least one trial). Used to skip auto-resume
+    when every trial in the partial state failed — resuming would error again,
+    so wipe-and-restart is the right move.
+    """
+    trial_dirs = [p for p in output_folder.glob("**/hp_optimization/*")
+                  if p.is_dir()]
+    if not trial_dirs:
+        return False
+    return all((t / "error.txt").exists() for t in trial_dirs)
+
+
 def _train_one_trial_cross(config: dict, hparams_file: str, run_opts: dict,
                            overrides: str, resolved_paths: dict) -> None:
     trial_id = tune.get_context().get_trial_id() or "default"
@@ -102,7 +115,7 @@ def _train_one_trial_cross(config: dict, hparams_file: str, run_opts: dict,
 
 
 def cmd_train_cross(task: str, encoder: str, *,
-                    probe: str = "Probe", probe_yaml: str = "Probe.yaml",
+                    probe: str = "AvgTProbe", probe_yaml: str = "Probe.yaml",
                     tag: str = "run1", overrides: str = "") -> None:
     """Cross-task HP search + final eval for one (task, encoder, probe)."""
     ensure_manifest(task)
@@ -145,8 +158,12 @@ def cmd_train_cross(task: str, encoder: str, *,
             has_complete = ((output_folder / "test_results.txt").exists()
                             or (output_folder / "test_results.yaml").exists())
             if has_partial and not has_complete:
-                print(f"Auto-resuming partial Tune state at {output_folder}")
-                hparams["continue_exp"] = True
+                if _all_trials_errored(output_folder):
+                    print(f"All previous Tune trials errored at "
+                          f"{output_folder}; wiping for a fresh run.")
+                else:
+                    print(f"Auto-resuming partial Tune state at {output_folder}")
+                    hparams["continue_exp"] = True
 
         if not hparams.get("continue_exp", False):
             if output_folder.exists():

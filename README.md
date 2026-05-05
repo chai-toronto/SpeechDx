@@ -34,7 +34,7 @@ pip install -r requirements.txt
 uv run python -m ahb single prep  -t T19
 # Drop uv run if run without uv
 uv run python -m ahb single warm  -t T19 -e wavlm
-uv run python -m ahb single train -t T19 -e wavlm
+uv run python -m ahb single train -t T19 -e wavlm -j 4
 
 # 2. Or `run` does the whole pipeline for matching pairs:
 #    download → prep → warm → train → summary. Idempotent — skips
@@ -61,54 +61,92 @@ argument is a command rather than a mode, mode defaults to `single` — so
 | `single`    | Full benchmark — every paper task × every encoder, single dataset per task. Default mode.                              |
 | `cross`     | Zero-shot cross-task — train on dataset A, evaluate on dataset B.                                                      |
 | `cross-cat` | Multi-source cross-category variant (reuses single-mode caches under the hood).                                        |
-| `data-eff`  | Same tasks at 4 reduced training-set sizes (6.25 %, 12.5 %, 25 %, 50 %); reuses single-mode prep / warm.               |
-| `all`       | Chain the command across single → cross → cross-cat → data-eff. Only `all run` and `all status` are wired today; `all prep` / `warm` / `train` / `summary` are stubs — use the per-mode commands. |
+| `data-eff`  | Same tasks at 4 reduced training-set sizes (6.25 %, 12.5 %, 25 %, 50 %); reuses single-mode prep / warm.                |
+| `all`       | Chain the command across single → cross → cross-cat → data-eff. Adds `--skip-mode` and `--stop-on-failure` (continues past failures by default). `all train` runs each mode's train phase in parallel via the orchestrator (caches must be warm); `all summary` drops `--out-dir` (collides across modes). |
 
-The same six commands apply to every mode:
+**Filters** (every command): `-t/--task`, `-e/--encoder`, `-d/--dataset`.
+Repeatable; empty = "every match in scope".
 
-| Command   | What it does                                                                                                                |
-|-----------|-----------------------------------------------------------------------------------------------------------------------------|
-| `prep`    | Download raw data (if public) or yell with contact info; run metadata script if needed; build manifests.                    |
-| `warm`    | Warm the HDF5 cache for every matching (task, encoder) pair. Idempotent. `--overwrite` wipes cache.hdf5 and re-extracts.    |
-| `train`   | Train probe (Ray Tune HP search) on every matching pair; `single train` auto-routes to per-fold CV via the task yaml. `data-eff train` sweeps all levels by default; `--level` narrows. Skips pairs whose results exist; `--overwrite` redoes them. |
-| `run`     | Whole pipeline for matching pairs: download → prep → warm → train → summary. Idempotent.                                    |
-| `status`  | Per-task × per-encoder ☑/☐ completion grid for the mode (data-eff has an extra `level` column).                             |
-| `summary` | Aggregate `test_results.{txt,yaml}` into per-metric CSVs at `<mode-root>/_summary_<tag>/`; also pretty-prints metric tables to stdout. Filters narrow both the CSV columns/rows and the stdout tables. |
+## Commands
 
-**Canonical filters.** Every command accepts `-t/--task`, `-e/--encoder`,
-`-d/--dataset`. Each is repeatable; empty = "every match in scope". So
-`single warm -t T19 -e wavlm` is one pair, `single warm -d c9s` warms
-every c9s task × every encoder, and `single warm` (no filter) warms the
-whole grid.
+`run` is a wrapper that chains `warm → train → summary` for matching
+pairs. It takes the **union** of those phases' flags so you can drive the
+whole pipeline from one call.
 
-**Run-only flags** (every mode's `run`): `--warm-workers` (default `1`),
-`--train-workers` / `-j` (default `3`), `--tag` (default `run1`),
-`--device`, `--test-only` (re-evaluate saved best trial), `--cache-only`
-(warm phase only), `--no-writer` (train phase only — caches must be
-warm), `--overwrite` (redo every matching pair, even complete ones —
-prompts unless `-y/--yes`), `--dry-run` (print the plan and exit).
-`data-eff run` adds `--level`. `all run` adds `--skip-mode` and
-`--continue-on-failure`.
+### `prep`
+Download raw data (if open-access) or fail with the contact info from
+`registry.yaml`; run the metadata script if the processed CSV is missing;
+build manifests. Idempotent.
+- `--overwrite` — rebuild manifests even if they already exist.
 
-**Strict phases.** `run` warms every needed `(dataset, encoder)` cache
-first, trains second, summarizes third. The warm and train phases run
-with independent worker pools — warm dominates GPU, train dominates CPU,
-so serial phases let each saturate its bottleneck without contention.
+### `warm`
+Extract embeddings into the per-`(dataset, encoder)` HDF5 cache for every
+matching pair. Idempotent.
+- `--device` — torch device override (e.g. `cuda:0`).
+- `--workers` — concurrent warm workers (default `1`).
+- `--overwrite` — wipe `cache.hdf5` and re-extract.
 
-**Auto-resume.** If a `train` invocation finds partial Ray Tune state
-on disk (storage/, best_hparams.yaml) and no completed `test_results`,
-it auto-resumes rather than wiping. Pass `--overwrite` to force a fresh
-start. `continue_exp` is no longer a user-facing knob.
+### `train`
+Ray-Tune HP search on top of warmed caches. Auto-routes to per-fold CV
+when the task yaml sets `num_fold`. Skips pairs whose results already
+exist.
+- `--tag` — experiment tag (default `run1`); names the output folder.
+- `--overrides` — extra YAML string forwarded to `load_hyperpyyaml`.
+- `--workers` / `-j` — concurrent train workers (default `3`).
+- `--overwrite` — wipe the experiment folder and retrain.
+- `--test-only` — re-evaluate the saved best trial without retraining;
+  pairs without a trained model are skipped. Mutually exclusive with
+  `--overwrite`.
+- `single train` only: `--level-dir` — reroute output into
+  `exps/data_eff/<level_dir>/`.
+- `data-eff train` only: `--level` — restrict to specific levels
+  (repeatable; default: every level in `registry.yaml`).
 
-**Cache sharing.** Training reads from the per-`(dataset, encoder)`
-HDF5 cache and will fail on miss. Every mode's `run` chains warming
-and training internally; cross / cross-cat warm both delegate to
-`single warm` for every task on each listed dataset, propagating the
-cross task's `num_aug_ver` so caches get extended to the aug count
-the cross trainer needs. So `single`, `cross`, and `cross-cat` runs
-are each self-sufficient; `all run`'s single → cross → cross-cat →
-data-eff ordering also keeps each phase's cache work cheap because
-later phases hit caches earlier phases already populated.
+### `run` — `warm` + `train` + `summary`
+Strict phases: warm everything → train everything → summarize. Skips
+already-complete pairs. Takes every flag from the underlying phases plus
+orchestration flags.
+- Filters; `--tag`; `--device`.
+- Forwarded to train: `--overrides`, `--overwrite`.
+- Forwarded to summary: `--out-dir`.
+- Concurrency: `--warm-workers` (default `1`), `--train-workers` / `-j`
+  (default `3`). Independent pools — warm dominates GPU, train dominates
+  CPU.
+- `--dry-run` — print the plan and exit without doing work.
+- `--overwrite` redo prompts unless `-y`/`--yes`.
+- `data-eff run` / `all run` add `--level`.
+
+### `status`
+Per-task × per-encoder ☑/☐ completion grid for `--tag`. data-eff and all
+add a `level` axis.
+- `--tag`.
+- `data-eff status` / `all status` only: `--level`.
+
+### `summary`
+Aggregate `test_results.{txt,yaml}` into per-metric CSVs at
+`<mode-root>/_summary_<tag>/` and pretty-print to stdout.
+- `--out-dir` (default `<mode-root>/_summary_<tag>`), `--tag`.
+- `data-eff summary` only: `--level`.
+
+### Notes
+
+**Probe is fixed.** Folder tag is always `AvgTProbe`; the actual probe
+loaded is always `probes/Probe.yaml` (`LinearProbe`). To use a different
+probe, edit `probe_params: !include:probes/<name>.yaml` in
+`ahb/configs/main*.yaml`.
+
+**Auto-resume:** if `train` finds partial Ray Tune state on disk
+(`storage/`, `best_hparams.yaml`) and no completed `test_results`, it
+auto-resumes rather than wiping. Pass `--overwrite` to force a fresh
+start.
+
+**Cache sharing:** training reads from the per-`(dataset, encoder)` HDF5
+cache and will fail on miss. cross / cross-cat warm delegate to
+`single warm` for every task on each listed dataset (propagating
+`num_aug_ver`), so `single` / `cross` / `cross-cat` runs are each
+self-sufficient. `all run`'s single → cross → cross-cat → data-eff
+ordering also keeps later phases' cache work cheap because earlier
+phases populated the caches.
 
 ## Encoders
 
@@ -346,14 +384,16 @@ no orchestrator code changes required.
 
 ## Concurrency
 
-`run` runs warm and train in two strict phases with independent worker
-pools: `--warm-workers` (default `1`) and `--train-workers` / `-j`
-(default `3`). Warm dominates GPU; train dominates CPU; serial phases
-let each saturate its bottleneck. Within a phase, a per-`(dataset,
-encoder)` write lock prevents warm-cache races; reader-only jobs (cache
-already populated) run unblocked and short-circuit the encoder load via
-a stub. CLAP requires `--warm-workers 1` because of 48 kHz memory
-pressure (already the default).
+`train` owns the short worker flag `--workers` / `-j` (default `3`).
+`run` also accepts `-j` as the short alias for `--train-workers`, while
+keeping `--warm-workers` for the warm phase. Warm dominates GPU; train
+dominates CPU; strict warm-then-train phases let each saturate its
+bottleneck. `warm` itself owns a per-`(dataset, encoder)` file lock, so
+direct `warm`, delegated cross warm, and separate `run` processes all
+serialize on the same cache boundary. Reader-only jobs (cache already
+populated) run unblocked and short-circuit the encoder load via a stub.
+CLAP requires `--warm-workers 1` because of 48 kHz memory pressure
+(already the default).
 
 ## Multi-host / SLURM
 

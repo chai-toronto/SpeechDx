@@ -28,7 +28,11 @@ import argparse
 import csv
 import json
 import shutil
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _drop_invalid_audio import drop_invalid_audio_rows
 
 DATA_ROOT = Path("data/edaic")
 RAW_ROOT = DATA_ROOT / "raw"
@@ -141,20 +145,22 @@ def chunk_one(src_wav, transcript_csv):
 def chunk_audio_by_transcript(rows, raw_root, dst_audio):
     """For each row, cut audio along transcript & write a chunked wav. Adds `boundaries`.
 
-    Drops rows whose audio or transcript is missing, or whose transcript yielded
-    no usable rows.
+    Rows whose audio or transcript is missing (or whose transcript yields no
+    usable rows) are kept with empty boundaries — their output wav is never
+    written, so drop_invalid_audio_rows will remove them later.
     """
     import soundfile as sf
 
     src_dir = raw_root / "data"
     dst_audio.mkdir(parents=True, exist_ok=True)
-    kept = []
     n_ok = n_skip = 0
 
     for row in rows:
         pid = row["Participant_ID"]
         src_wav = src_dir / f"{pid}_P" / f"{pid}_AUDIO.wav"
         transcript = src_dir / f"{pid}_P" / f"{pid}_Transcript.csv"
+
+        row["boundaries"] = ""
 
         if not src_wav.exists():
             print(f"[skip] {pid}: missing audio {src_wav}")
@@ -177,25 +183,34 @@ def chunk_audio_by_transcript(rows, raw_root, dst_audio):
         sf.write(str(out_path), out_audio, sr, subtype="PCM_16")
 
         row["boundaries"] = json.dumps([round(b, 4) for b in boundaries])
-        kept.append(row)
         n_ok += 1
         print(f"[ok]   {pid}: {len(boundaries)} chunks, {out_audio.shape[0] / sr:.1f}s")
 
     print(f"Chunking: {n_ok} ok, {n_skip} skipped")
-    return kept
+    return rows
 
 
 def write_csv(rows, with_boundaries, out_csv):
+    """Write via pandas so that PTSD Severity upcasts to float (test_split has
+    'NaN' literals) and missing AVECParticipant_ID renders as 'nan' — matches
+    the canonical backup CSV's formatting."""
+    import pandas as pd
+
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = list(BASE_FIELDS)
     if with_boundaries:
         fieldnames.append("boundaries")
-    with open(out_csv, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=fieldnames)
-        w.writeheader()
-        for uid, row in enumerate(rows):
-            row["uid"] = uid
-            w.writerow({k: row.get(k, "") for k in fieldnames})
+
+    for uid, row in enumerate(rows):
+        row["uid"] = uid
+
+    df = pd.DataFrame([{k: row.get(k, "") for k in fieldnames} for row in rows])
+    # Empty AVECParticipant_ID + 'NaN' string in PTSD Severity should both
+    # surface as NaN so they render via na_rep below.
+    df = df.replace({"": pd.NA, "NaN": pd.NA})
+    # Force PTSD Severity to float so integer values render as e.g. "25.0".
+    df["PTSD Severity"] = pd.to_numeric(df["PTSD Severity"], errors="coerce")
+    df.to_csv(out_csv, index=False, na_rep="nan", lineterminator="\r\n")
     print(f"Wrote {out_csv}: {len(rows)} rows")
 
 
@@ -211,28 +226,33 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--no-copy", action="store_true",
                       help="Skip copying audio; write CSV only.")
-    mode.add_argument("--chunk", action="store_true",
-                      help="Cut audio along each participant's transcript and add "
-                           "a `boundaries` column to the CSV.")
+    mode.add_argument("--no-chunk", action="store_true",
+                      help="Copy audio verbatim instead of cutting along the "
+                           "participant transcript (skips the `boundaries` column).")
     args = parser.parse_args()
 
     rows = build_base_rows(args.raw_root)
 
-    if args.chunk:
-        rows = chunk_audio_by_transcript(rows, args.raw_root, args.out_audio)
-        write_csv(rows, with_boundaries=True, out_csv=args.out_csv)
-    else:
+    if args.no_chunk:
         if not args.no_copy:
             copy_audio_verbatim(rows, args.raw_root, args.out_audio)
         else:
             print("Audio: skipped (--no-copy)")
         write_csv(rows, with_boundaries=False, out_csv=args.out_csv)
+    else:
+        rows = chunk_audio_by_transcript(rows, args.raw_root, args.out_audio)
+        write_csv(rows, with_boundaries=True, out_csv=args.out_csv)
 
     print(f"  Train (0): {sum(1 for r in rows if r['split'] == 0)}")
     print(f"  Val   (1): {sum(1 for r in rows if r['split'] == 1)}")
     print(f"  Test  (2): {sum(1 for r in rows if r['split'] == 2)}")
     print(f"  Label 0:   {sum(1 for r in rows if str(r['label']) == '0')}")
     print(f"  Label 1:   {sum(1 for r in rows if str(r['label']) == '1')}")
+
+    if args.no_copy:
+        print("[audio-validate] skipped (--no-copy)")
+    else:
+        drop_invalid_audio_rows(args.out_csv, args.out_audio)
 
 
 if __name__ == "__main__":

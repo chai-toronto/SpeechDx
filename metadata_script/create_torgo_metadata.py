@@ -1,7 +1,11 @@
 import os
+import sys
 import csv
 import shutil
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _drop_invalid_audio import drop_invalid_audio_rows
 
 # Source: data/torgo/raw/<gender>/<pid>/Session*/wav_arrayMic/*.wav (TORGO release layout)
 # Staged into:  data/torgo/processed/audio/<gender>/<pid>/Session*/wav_arrayMic/*.wav
@@ -125,6 +129,9 @@ with open(output_file, 'w', newline='') as csvfile:
         })
 
 print(f"Created {output_file} with {len(wav_files)} wav files")
+
+drop_invalid_audio_rows(output_file, PROCESSED_AUDIO)
+
 print(f"\nSample rows:")
 for i in range(min(5, len(wav_files))):
     print(wav_files[i])

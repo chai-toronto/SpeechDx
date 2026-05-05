@@ -63,6 +63,7 @@ class Emotion2Vec(nn.Module):
         self.model = FunASRAutoModel(
             model=model_path,
             disable_update=True,
+            hub="hf"
         )
         
         self.freeze_encoder = freeze_encoder

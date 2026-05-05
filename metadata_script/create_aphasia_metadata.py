@@ -1,6 +1,10 @@
 import csv
 import shutil
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _drop_invalid_audio import drop_invalid_audio_rows
 
 # AphasiaBank (TalkBank): PWA vs Control speech across multiple protocols
 # (Adler, Kansas, Kurland, SCALE, Wright). Label: Control=0, PWA=1.
@@ -77,6 +81,8 @@ def main():
     print(f"Created {out_csv} with {len(rows)} rows")
     print(f"  Label 0 (Control): {sum(1 for r in rows if r['label'] == 0)}")
     print(f"  Label 1 (PWA):     {sum(1 for r in rows if r['label'] == 1)}")
+
+    drop_invalid_audio_rows(out_csv, out_audio_dir)
 
 
 if __name__ == "__main__":

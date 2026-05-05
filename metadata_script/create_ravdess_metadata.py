@@ -1,8 +1,12 @@
 import os
 import csv
 import shutil
+import sys
 import wave
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _drop_invalid_audio import drop_invalid_audio_rows
 
 # Source (extracted Audio_Speech_Actors_01-24.zip) -> processed/audio/
 RAW_ROOT = Path("data/ravdess/raw")
@@ -148,6 +152,9 @@ with open(output_file, 'w', newline='') as csvfile:
         })
 
 print(f"Created {output_file} with {len(wav_files)} wav files")
+
+drop_invalid_audio_rows(output_file, root_dir)
+
 print(f"\nSample rows:")
 for i in range(min(5, len(wav_files))):
     print(wav_files[i])

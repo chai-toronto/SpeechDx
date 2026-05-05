@@ -1,9 +1,13 @@
 import csv
 import random
 import shutil
+import sys
 from pathlib import Path
 
 import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _drop_invalid_audio import drop_invalid_audio_rows
 
 # AVFAD dataset (voice pathology)
 # Source: data/avfad/raw/  (or passed as argv[1])
@@ -113,8 +117,7 @@ def main():
     dest_audio_dir = OUT_ROOT / "audio"
     dest_audio_dir.mkdir(parents=True, exist_ok=True)
 
-    valid_rows = []
-    copied, skipped, dropped = 0, 0, 0
+    copied, skipped, missing = 0, 0, 0
     for row in rows:
         pid = row["Participant_ID"]
         src = pid_to_src[pid] / f"{pid}{row['audio_type']}.wav"
@@ -127,12 +130,8 @@ def main():
             shutil.copy2(src, dst)
             copied += 1
         else:
-            print(f"WARNING: dropping (missing audio) {src}")
-            dropped += 1
-            continue
-        valid_rows.append(row)
-    rows = valid_rows
-    print(f"Audio: copied {copied}, skipped {skipped}, dropped {dropped}")
+            missing += 1
+    print(f"Audio: copied {copied}, skipped {skipped}, missing {missing}")
 
     # ---- Write CSV ----
     out_path = OUT_ROOT / "avfad.csv"
@@ -152,6 +151,8 @@ def main():
     print(f"  Test (2):  {sum(1 for r in rows if r['split'] == 2)}")
     print(f"  Label 0 (normal): {sum(1 for r in rows if r['label'] == 0)}")
     print(f"  Label 1 (pathol): {sum(1 for r in rows if r['label'] == 1)}")
+
+    drop_invalid_audio_rows(out_path, dest_audio_dir)
 
 
 if __name__ == "__main__":

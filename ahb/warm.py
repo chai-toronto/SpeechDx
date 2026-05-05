@@ -15,9 +15,11 @@ from __future__ import annotations
 import gc
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
+from filelock import FileLock
 import speechbrain as sb
 import torch
 
@@ -32,6 +34,9 @@ from ahb.dataio.pipeline import (
     make_process_signal,
     make_split_signal,
 )
+from ahb.log import _JobDashboard, _now, _run_logged_job, _slug
+
+WARM_LOGS_ROOT = Path("logs/warm")
 
 
 def _cache_mode(hparams: dict[str, Any]) -> str:
@@ -52,6 +57,25 @@ def _cache_dirs(hparams: dict[str, Any]) -> tuple[Path, Path]:
         Path(hparams["train_cache_dir"]) / mode,
         Path(hparams["val_cache_dir"]) / mode,
     )
+
+
+def _cache_root(hparams: dict[str, Any]) -> Path:
+    """Shared ``<tmp>/<dataset>/<encoder>`` parent for the train/val caches."""
+    return Path(hparams["train_cache_dir"]).parent
+
+
+def _lock_path(hparams: dict[str, Any]) -> Path:
+    """Per-cache writer lock shared by every warm caller/process."""
+    return _cache_root(hparams) / ".warm.lock"
+
+
+def _wipe_cache_dirs(train_cache_dir: Path, val_cache_dir: Path) -> None:
+    """Delete the cache payloads while leaving the directory layout intact."""
+    for cache_dir in (train_cache_dir, val_cache_dir):
+        cache_file = cache_dir / "cache.hdf5"
+        if cache_file.exists():
+            cache_file.unlink()
+            print(f"Removed {cache_file}")
 
 
 def _load_manifests(hparams: dict[str, Any]) -> dict[str, dict]:
@@ -180,36 +204,12 @@ def _make_cache_writer(cache_dir: Path, num_versions: int,
     return cache_emb
 
 
-def run_warm(task: str, encoder: str, *,
-             probe: str = "AvgTProbe", device: str | None = None,
-             num_aug_ver: int | None = None) -> None:
-    """Warm the HDF5 cache for one (task, encoder) pair.
-
-    Idempotent: if every (uid, version) for both train and val is already
-    cached, returns without instantiating the encoder.
-
-    ``num_aug_ver`` (optional) overrides the task yaml's value — used by
-    ``cross warm`` / ``cross-cat warm`` to extend the per-(dataset, encoder)
-    cache to whatever aug count the cross task needs. The append-mode
-    HDF5 writer extends the cache; existing aug versions are untouched.
-    """
-    # Phase 1 — pre-flight using the stub encoder so a warm cache check
-    # never pays the real encoder's load cost.
-    hparams_stub = compose_config(task, encoder, probe=probe, mode="read")
-    train_cache_dir, val_cache_dir = _cache_dirs(hparams_stub)
-    train_cache_dir.mkdir(parents=True, exist_ok=True)
-    val_cache_dir.mkdir(parents=True, exist_ok=True)
-
-    base_num_versions = int(hparams_stub["data_params"].get("num_aug_ver", 1))
-    num_versions = max(base_num_versions, int(num_aug_ver)) if num_aug_ver else base_num_versions
-    data_dict = _load_manifests(hparams_stub)
-    all_ids = list(data_dict["all"].keys())
-
-    if _is_fully_warm(train_cache_dir, val_cache_dir, num_versions, all_ids):
-        print(f"Cache fully warm for {task} × {encoder}, nothing to do.")
-        return
-
-    # Phase 2 — load the real encoder and run the warming passes.
+def _warm_uncached(task: str, encoder: str, *,
+                   probe: str, device: str | None,
+                   data_dict: dict[str, dict],
+                   all_ids: list[str],
+                   num_versions: int) -> None:
+    """Load the real encoder and fill whichever cache entries are still missing."""
     hparams = compose_config(task, encoder, probe=probe, mode="warm")
     train_cache_dir, val_cache_dir = _cache_dirs(hparams)
     train_cache_dir.mkdir(parents=True, exist_ok=True)
@@ -270,3 +270,113 @@ def run_warm(task: str, encoder: str, *,
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+
+
+def run_warm(task: str, encoder: str, *,
+             probe: str = "AvgTProbe", device: str | None = None,
+             num_aug_ver: int | None = None,
+             overwrite: bool = False) -> None:
+    """Warm the HDF5 cache for one (task, encoder) pair.
+
+    Idempotent: if every (uid, version) for both train and val is already
+    cached, returns without instantiating the encoder. The per-cache writer
+    lock lives here so every caller (direct ``warm``, ``run``, cross warm
+    delegation, separate processes) shares the same serialization point.
+
+    ``num_aug_ver`` (optional) overrides the task yaml's value — used by
+    ``cross warm`` / ``cross-cat warm`` to extend the per-(dataset, encoder)
+    cache to whatever aug count the cross task needs. The append-mode
+    HDF5 writer extends the cache; existing aug versions are untouched.
+    """
+    # Phase 1 — pre-flight using the stub encoder so a warm cache check
+    # never pays the real encoder's load cost.
+    hparams_stub = compose_config(task, encoder, probe=probe, mode="read")
+    train_cache_dir, val_cache_dir = _cache_dirs(hparams_stub)
+    train_cache_dir.mkdir(parents=True, exist_ok=True)
+    val_cache_dir.mkdir(parents=True, exist_ok=True)
+
+    base_num_versions = int(hparams_stub["data_params"].get("num_aug_ver", 1))
+    num_versions = max(base_num_versions, int(num_aug_ver)) if num_aug_ver else base_num_versions
+    data_dict = _load_manifests(hparams_stub)
+    all_ids = list(data_dict["all"].keys())
+
+    if not overwrite and _is_fully_warm(train_cache_dir, val_cache_dir, num_versions, all_ids):
+        print(f"Cache fully warm for {task} × {encoder}, nothing to do.")
+        return
+
+    lock_path = _lock_path(hparams_stub)
+    print(f"Acquiring warm writer lock: {lock_path}")
+    with FileLock(str(lock_path)):
+        if overwrite:
+            _wipe_cache_dirs(train_cache_dir, val_cache_dir)
+        if _is_fully_warm(train_cache_dir, val_cache_dir, num_versions, all_ids):
+            print(f"Cache fully warm for {task} × {encoder}, nothing to do.")
+            return
+        _warm_uncached(
+            task, encoder,
+            probe=probe, device=device,
+            data_dict=data_dict, all_ids=all_ids, num_versions=num_versions,
+        )
+
+
+def _execute_warm_job(task_stem: str, model_name: str, *,
+                      device: str | None,
+                      num_aug_ver: int | None,
+                      overwrite: bool,
+                      log_path: Path) -> tuple[str, bool, float]:
+    """Run one warm job and capture its stdout/stderr into a per-pair log file."""
+    label = f"{task_stem} × {model_name}"
+    detail_lines = [f"overwrite={overwrite}"]
+    if num_aug_ver is not None:
+        detail_lines.append(f"num_aug_ver={num_aug_ver}")
+    success, elapsed = _run_logged_job(
+        label,
+        log_path,
+        lambda: run_warm(
+            task_stem, model_name,
+            device=device, num_aug_ver=num_aug_ver,
+            overwrite=overwrite,
+        ),
+        detail_lines=detail_lines,
+    )
+    return label, success, elapsed
+
+
+def cmd_warm_jobs(jobs: list[tuple[str, str, int | None]], *,
+                  device: str | None,
+                  overwrite: bool = False,
+                  max_workers: int = 1,
+                  logs_root: Path = WARM_LOGS_ROOT) -> None:
+    """Run one or more warm jobs with the same progress/log UX as ``run``."""
+    total_jobs = len(jobs)
+    max_workers = max(1, max_workers)
+    dashboard = _JobDashboard(
+        total_jobs=total_jobs,
+        logs_root=logs_root,
+        header_lines=(
+            f"[{_now()}] Warm start : {total_jobs} pending",
+            f"           workers : up to {max_workers} concurrent",
+        ),
+    )
+
+    def _execute(job: tuple[str, str, int | None], idx: int) -> tuple[str, bool, float]:
+        task_stem, model_name, num_aug_ver = job
+        label = f"{task_stem} × {model_name}"
+        log_path = dashboard.run_log_dir / f"{_slug(task_stem)}__{_slug(model_name)}.log"
+
+        dashboard.start_job(idx, "writer", label, log_path)
+        result = _execute_warm_job(
+            task_stem, model_name,
+            device=device, num_aug_ver=num_aug_ver,
+            overwrite=overwrite, log_path=log_path,
+        )
+        _, ok, elapsed = result
+        dashboard.finish_job(idx, label, ok=ok, elapsed=elapsed, log_path=log_path)
+        return result
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_execute, job, i): job for i, job in enumerate(jobs)}
+        for future in as_completed(futures):
+            future.result()
+
+    dashboard.print_summary(done_label="cache warmed")

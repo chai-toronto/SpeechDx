@@ -1,6 +1,10 @@
 import csv
 import shutil
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _drop_invalid_audio import drop_invalid_audio_rows
 
 # DAIC-WOZ dataset
 # train_split_Depression_AVEC2017.csv: 107 train participants (PHQ8 columns)
@@ -110,6 +114,8 @@ def main():
     print(f"  Test (2):  {sum(1 for r in rows if r['split'] == 2)}")
     print(f"  Label 0: {sum(1 for r in rows if str(r['label']) == '0')}")
     print(f"  Label 1: {sum(1 for r in rows if str(r['label']) == '1')}")
+
+    drop_invalid_audio_rows(out_path, dest_audio_dir)
 
 
 if __name__ == "__main__":

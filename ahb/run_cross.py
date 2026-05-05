@@ -1,9 +1,9 @@
 """``ahb run-cross`` — orchestrator for cross-task training runs.
 
 Salvaged from ``run_all_cross.py:cmd_run`` (lines 558-748). Same
-writer/reader lock semantics as ``ahb/run.py`` but operates on cross
-tasks (3 caches per pair instead of 2) and dispatches to
-``ahb warm-cross`` + ``ahb train-cross`` subcommands.
+shared-cache reader scheduling as ``ahb/run.py`` but operates on cross
+tasks (3 caches per pair instead of 2) and dispatches to the mode-aware
+``ahb cross warm`` + ``ahb cross train`` subcommands.
 
 The ``exps_root`` parameter lets ``ahb/run_cross_category.py`` reuse
 this entry point with the category-specific output root
@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
-from ahb.log import ROLE_W, _Progress, _emit, _now, _slug, _tail
+from ahb.log import _emit, _now, _slug, _JobDashboard
 from ahb.orchestrator_cross import (
     EXPS_ROOT,
     LOGS_ROOT,
@@ -67,7 +67,8 @@ def _execute_job_cross(task_stem: str, model_name: str, role: str, *,
                        device: str | None, test_only: bool, cache_only: bool,
                        tag: str, log_path: Path,
                        mode: str = "cross",
-                       overwrite: bool = False) -> tuple[str, bool, float]:
+                       overwrite: bool = False,
+                       overrides: str = "") -> tuple[str, bool, float]:
     label = f"{task_stem} × {model_name}"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("w") as f:
@@ -76,9 +77,10 @@ def _execute_job_cross(task_stem: str, model_name: str, role: str, *,
         f.write(f"  Started: {datetime.now().isoformat(timespec='seconds')}\n")
         f.write(f"{'='*60}\n")
 
-    train_extras = ["--tag", tag]
+    train_extras = ["--leaf", "--tag", tag]
     if overwrite:
         train_extras.append("--overwrite")
+    user_ov = ["--overrides", overrides] if overrides else []
     base = ["python", "-m", "ahb", mode]
     target = ["-t", task_stem, "-e", model_name]
     start = time.time()
@@ -90,8 +92,9 @@ def _execute_job_cross(task_stem: str, model_name: str, role: str, *,
             cmd.append(f"--device={device}")
         success = _run_subprocess(cmd, log_path, f"{mode}-warm")
     elif test_only:
+        merged = (overrides + "\n" if overrides else "") + "test_only: true"
         cmd = [*base, "train", *target, *train_extras,
-               "--overrides", "test_only: true"]
+               "--overrides", merged]
         success = _run_subprocess(cmd, log_path, f"{mode}-test")
     elif role == "writer":
         warm_cmd = [*base, "warm", *target]
@@ -100,10 +103,10 @@ def _execute_job_cross(task_stem: str, model_name: str, role: str, *,
         if not _run_subprocess(warm_cmd, log_path, f"{mode}-warm"):
             success = False
         if success:
-            train_cmd = [*base, "train", *target, *train_extras]
+            train_cmd = [*base, "train", *target, *train_extras, *user_ov]
             success = _run_subprocess(train_cmd, log_path, f"{mode}-train")
     else:  # reader
-        cmd = [*base, "train", *target, *train_extras]
+        cmd = [*base, "train", *target, *train_extras, *user_ov]
         success = _run_subprocess(cmd, log_path, f"{mode}-train")
 
     elapsed = time.time() - start
@@ -119,31 +122,26 @@ def cmd_run_cross(args: argparse.Namespace, *,
                   include_categories: bool = False,
                   exps_root: Path | None = None,
                   logs_root: Path | None = None) -> None:
-    """Run all cross-task × encoder combos with writer/reader serialization."""
+    """Run all cross-task × encoder combos with shared-cache reader scheduling."""
     exps_root = exps_root or EXPS_ROOT
     logs_root = logs_root or LOGS_ROOT
 
     tasks = discover_tasks(args.dataset, args.task,
                            include_categories=include_categories)
-    skipped = completed = 0
-    failed: list[str] = []
-    failed_log_paths: dict[str, Path] = {}
+    skipped = 0
     test_only = getattr(args, "test_only", False)
     cache_only = getattr(args, "cache_only", False)
     no_writer = getattr(args, "no_writer", False)
     overwrite = getattr(args, "overwrite", False)
     dry_run = getattr(args, "dry_run", False)
     tag = getattr(args, "tag", "run1")
+    overrides = getattr(args, "overrides", "") or ""
 
     all_encoders = registry_encoders()
     if args.encoder:
         encoders = {e: all_encoders[e] for e in args.encoder}
     else:
         encoders = all_encoders
-
-    run_stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    run_log_dir = logs_root / run_stamp
-    run_log_dir.mkdir(parents=True, exist_ok=True)
 
     pending: list[tuple[str, str]] = []
     completed_by_ds_enc: dict[tuple[str, str], list[str]] = defaultdict(list)
@@ -190,25 +188,32 @@ def cmd_run_cross(args: argparse.Namespace, *,
                 pass
 
     total_jobs = len(pending)
-    progress = _Progress(total_jobs)
     pending.sort(key=lambda j: -task_weight(j[0], exps_root=exps_root))
 
     max_workers = max(1, args.max_workers)
+    header_title = ("Train start" if getattr(args, "command", None) == "train"
+                    else "Run start  ")
+    mode_name = "cross-cat" if include_categories else "cross"
     mode = (
         "cache-only" if cache_only
         else "test-only" if test_only
-        else ("train+test (no-writer)" if no_writer else "train+test")
+        else ("train-only" if no_writer and getattr(args, "command", None) == "train"
+              else ("train+test (no-writer)" if no_writer else "train+test"))
     )
-    _emit(
-        "",
-        f"[{_now()}] Run start  : {total_jobs} pending, {skipped} skipped",
-        f"           workers : up to {max_workers} concurrent",
-        f"           mode    : {mode}  (cross)",
-        f"           tag     : {tag}",
-        f"           logs    : {run_log_dir}/  (one file per job)",
-        "",
+    dashboard = _JobDashboard(
+        total_jobs=total_jobs,
+        logs_root=logs_root,
+        header_lines=(
+            f"[{_now()}] {header_title}: {total_jobs} pending, {skipped} skipped",
+            f"           workers : up to {max_workers} concurrent",
+            f"           mode    : {mode}  ({mode_name})",
+            f"           tag     : {tag}",
+        ),
     )
 
+    # Warm owns the correctness lock at the cache boundary. These per-key
+    # locks are just a same-process scheduler hint so one run invocation
+    # doesn't launch duplicate warmers for the same shared cache.
     ds_enc_locks: dict[tuple[str, str], threading.Lock] = {}
     for ts, mn in pending:
         ds = get_task_info(ts)[0]
@@ -218,32 +223,19 @@ def cmd_run_cross(args: argparse.Namespace, *,
     def _execute(job: tuple[str, str], idx: int, role: str) -> tuple[str, bool, float]:
         task_stem, model_name = job
         label = f"{task_stem} × {model_name}"
-        log_path = run_log_dir / f"{_slug(task_stem)}__{_slug(model_name)}.log"
+        log_path = dashboard.run_log_dir / f"{_slug(task_stem)}__{_slug(model_name)}.log"
 
-        progress.start()
-        _emit(
-            f"[{_now()}] START [{idx+1:>3}/{total_jobs}] {role:<{ROLE_W}} {label}",
-            f"           log : {log_path}",
-            f"           prog: {progress.snap()}",
-        )
+        dashboard.start_job(idx, role, label, log_path)
         result = _execute_job_cross(
             task_stem, model_name, role,
             device=args.device, test_only=test_only, cache_only=cache_only,
             tag=tag, log_path=log_path,
             mode=("cross-cat" if include_categories else "cross"),
             overwrite=overwrite,
+            overrides=overrides,
         )
         _, ok, elapsed = result
-        progress.finish(ok)
-        status = "✓ OK  " if ok else "✗ FAIL"
-        head = (f"[{_now()}] END   [{idx+1:>3}/{total_jobs}] {status:<{ROLE_W}} {label}    "
-                f"elapsed={elapsed/60:.1f} min   prog: {progress.snap()}")
-        if not ok:
-            extra = [f"           tail of {log_path}:"]
-            extra += [f"             | {ln}" for ln in _tail(log_path, 20)]
-            _emit(head, *extra)
-        else:
-            _emit(head)
+        dashboard.finish_job(idx, label, ok=ok, elapsed=elapsed, log_path=log_path)
         return result
 
     def dispatch(job: tuple[str, str], idx: int) -> tuple[str, bool, float]:
@@ -302,22 +294,7 @@ def cmd_run_cross(args: argparse.Namespace, *,
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {pool.submit(dispatch, job, i): job for i, job in enumerate(pending)}
         for future in as_completed(futures):
-            job = futures[future]
-            label, success, _ = future.result()
-            if success:
-                completed += 1
-            else:
-                failed.append(label)
-                ts, mn = job
-                failed_log_paths[label] = run_log_dir / f"{_slug(ts)}__{_slug(mn)}.log"
+            future.result()
 
     done_label = "cache warmed" if cache_only else "completed"
-    print(f"\n{'='*60}")
-    print(f"  Done — {completed} {done_label}, {skipped} skipped, {len(failed)} failed")
-    print(f"  Logs : {run_log_dir}/")
-    if failed:
-        print("  Failed runs:")
-        for name in failed:
-            lp = failed_log_paths.get(name)
-            print(f"    - {name}" + (f"   →  {lp}" if lp else ""))
-    print(f"{'='*60}")
+    dashboard.print_summary(done_label=done_label, skipped=skipped)

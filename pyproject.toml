@@ -27,6 +27,8 @@ dependencies = [
     # SpeechBrain pipeline + hyperparam yaml
     "speechbrain @ git+https://github.com/speechbrain/speechbrain.git@develop",
     "hyperpyyaml>=1.2",
+    # speechbrain's train_logger eagerly imports torch.utils.tensorboard
+    "tensorboard>=2.15",
     # Hyperparameter search
     "ray[tune]>=2.40",
     "optuna>=3.5",
@@ -41,3 +43,13 @@ dependencies = [
     # Notebook kernel for ad-hoc analysis
     "ipykernel>=7.0",
 ]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["ahb*", "model*"]
+
+[tool.setuptools.package-data]
+ahb = ["configs/**/*.yaml"]

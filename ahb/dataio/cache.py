@@ -60,7 +60,7 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
         return [uid for uid in ids if self._version_key(uid, version) not in self.hdf5file]
 
     def _is_cached(self, uid):
-        return self._version_key(uid, self.num_version - 1) in self.hdf5file
+        return all([self._version_key(uid, v) in self.hdf5file for v in range(self.num_version)])
 
     def _load(self, uid):
         version = random.randint(0, self.num_version - 1)

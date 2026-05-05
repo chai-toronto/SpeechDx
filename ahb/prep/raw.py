@@ -26,6 +26,14 @@ def _raw_is_staged(raw_dir: Path) -> bool:
     return raw_dir.exists() and any(raw_dir.iterdir())
 
 
+def _processed_is_staged(dataset: str) -> bool:
+    """True if the user has anything under ``data/<dataset>/processed/`` —
+    in which case we skip the raw check (the user supplied processed data
+    directly, possibly without raw)."""
+    processed_dir = REPO_ROOT / "data" / dataset / "processed"
+    return processed_dir.exists() and any(processed_dir.iterdir())
+
+
 def _processed_csv_path(dataset: str) -> Path:
     return REPO_ROOT / "data" / dataset / "processed" / f"{dataset}.csv"
 
@@ -40,9 +48,15 @@ def _metadata_script(dataset: str) -> Path:
 
 def ensure_raw(dataset: str) -> None:
     """Run the dataset's download script if raw/ is empty and the dataset is
-    public; otherwise raise SystemExit with the contact info."""
+    public; otherwise raise SystemExit with the contact info.
+
+    Short-circuits when ``data/<dataset>/processed/`` already has content —
+    the user supplied processed data directly, so raw isn't needed.
+    """
     raw_dir = REPO_ROOT / "data" / dataset / "raw"
     if _raw_is_staged(raw_dir):
+        return
+    if _processed_is_staged(dataset):
         return
     info = registry_datasets().get(dataset, {})
     script = _download_script(dataset)

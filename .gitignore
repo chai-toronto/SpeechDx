@@ -9,6 +9,7 @@
 __pycache__/
 *.pyc
 .python-version
+*.egg-info/
 
 # Generated per-run config snapshots (cleaned up after each run)
 training/config/_tmp_run_*.yaml

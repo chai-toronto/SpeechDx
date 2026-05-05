@@ -144,17 +144,14 @@ def main():
             rel_path = f"{speaker}/{wav}"
             abs_path = speaker_dir / wav
 
-            # Get duration
+            # Compute duration if readable; leave blank for unreadable/zero-length
+            # (drop_invalid_audio_rows will remove those rows post-CSV).
             try:
                 info = sf.info(abs_path)
-                duration = info.duration
-            except Exception as e:
+                duration = round(info.duration, 4)
+            except Exception:
                 corrupt_files[speaker].append(wav)
-                continue
-
-            if duration == 0:
-                corrupt_files[speaker].append(wav)
-                continue
+                duration = ""
 
             rows.append({
                 "uid": uid,
@@ -162,7 +159,7 @@ def main():
                 "Participant_ID": speaker,
                 "split": split,
                 "label": label,
-                "duration": round(duration, 4),
+                "duration": duration,
                 "path": rel_path,
             })
             uid += 1

@@ -2,7 +2,11 @@ import csv
 import os
 import random
 import shutil
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _drop_invalid_audio import drop_invalid_audio_rows
 
 # Coswara dataset (COVID-19 respiratory sounds)
 # Source: date dirs containing participant dirs with audio files
@@ -179,8 +183,7 @@ def main():
     dest_audio_dir = OUT_ROOT / "audio"
     dest_audio_dir.mkdir(parents=True, exist_ok=True)
 
-    valid_rows = []
-    copied, skipped, dropped = 0, 0, 0
+    copied, skipped, missing = 0, 0, 0
     for row in rows:
         src = audio_root / row["path"]
         dst = dest_audio_dir / row["path"]
@@ -192,24 +195,21 @@ def main():
             shutil.copy2(src, dst)
             copied += 1
         else:
-            print(f"WARNING: dropping (missing audio) {src}")
-            dropped += 1
-            continue
-        valid_rows.append(row)
-    rows = valid_rows
-    print(f"Audio: copied {copied}, skipped {skipped}, dropped {dropped}")
+            missing += 1
+    print(f"Audio: copied {copied}, skipped {skipped}, missing {missing}")
 
     # ---- Write CSV ----
     out_path = OUT_ROOT / "coswara.csv"
 
     fieldnames = [
         "uid", "Participant_ID", "split", "path",
-        "covid_status", "age", "gender", "country", "locality", "state",
+        "covid_status", "test_status",
+        "age", "gender", "country", "locality", "state",
         "record_date", "english_proficient", "returning_user",
         "smoker", "cold", "ht", "diabetes", "cough",
         "ctDate", "ctScan", "ctScore",
         "diarrhoea", "fever", "loss_of_smell", "muscularpain",
-        "testType", "test_date", "test_status",
+        "testType", "test_date",
         "use_mask", "vaccinated", "breathing_difficulty",
         "others_resp", "fatigue", "sore_throat",
         "ischemic_heart_disease", "asthma", "others_preexist",
@@ -234,6 +234,8 @@ def main():
         statuses[r['covid_status']] = statuses.get(r['covid_status'], 0) + 1
     for k, v in sorted(statuses.items()):
         print(f"    {k}: {v}")
+
+    drop_invalid_audio_rows(out_path, OUT_ROOT / "audio")
 
 
 if __name__ == "__main__":

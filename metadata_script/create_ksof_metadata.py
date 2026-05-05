@@ -17,9 +17,13 @@ Split: official KSoF partition (speaker-independent, zero overlap).
   train -> 0, dvel -> 1, test -> 2
 """
 import shutil
+import sys
 from pathlib import Path
 
 import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _drop_invalid_audio import drop_invalid_audio_rows
 
 SRC_DIR = Path("data/ksof/raw")
 DST_DIR = Path("data/ksof/processed")
@@ -79,6 +83,8 @@ def main():
     print(out["label"].value_counts().sort_index().to_dict())
     print("Per-split label positives:")
     print(out.groupby("split")["label"].agg(["sum", "count"]))
+
+    drop_invalid_audio_rows(CSV_DST, AUDIO_DST)
 
 
 if __name__ == "__main__":

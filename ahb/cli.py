@@ -12,21 +12,27 @@ If the first argument is a command rather than a mode, mode defaults to
 ``ahb summary-data-eff``, ``ahb run-all``, ...) are gone as of commit 1 of
 the rewrite.
 
-Stub cells (``cross status`` / ``cross-cat status`` / ``data-eff status`` /
-``all status`` / ``all prep`` / ``all warm`` / ``all train`` /
-``all summary``) raise ``NotImplementedError`` with a pointer to the commit
-that will fill them in. Everything else routes to today's handlers
-unchanged.
+Every (mode, command) cell is wired today. ``all <cmd>`` cells iterate
+single → cross → cross-cat → data-eff, propagating filters and the
+command's flags; ``--skip-mode`` and ``--stop-on-failure`` control the
+chain (continue past failures by default).
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 from typing import Callable
+
+from ahb.log import _JobDashboard, _now, _run_logged_job, _slug
 
 MODES = ("single", "cross", "cross-cat", "data-eff", "all")
 COMMANDS = ("prep", "warm", "train", "run", "status", "summary")
+TRAIN_LOGS_ROOT = Path("logs/train")
+TRAIN_CROSS_LOGS_ROOT = Path("logs/train_cross")
+TRAIN_CROSS_CAT_LOGS_ROOT = Path("logs/train_cross_cat")
+TRAIN_DATA_EFF_LOGS_ROOT = Path("logs/train_data_eff")
 
 
 # ---------------------------------------------------------------------------
@@ -107,22 +113,14 @@ def _proxy_single_tasks_for_cross(cross_yaml: dict) -> list[str]:
     return out
 
 
-def _wipe_warm_cache(task: str, encoder: str, *, probe: str = "AvgTProbe") -> None:
-    """Remove the per-(dataset, encoder) cache.hdf5 files so the next
-    ``run_warm`` rebuilds from scratch. Used by ``warm --overwrite``."""
-    from ahb.warm import _cache_dirs as warm_cache_dirs
-    from ahb.config import compose_config
-    try:
-        hparams = compose_config(task, encoder, probe=probe, mode="read")
-    except Exception as e:
-        print(f"  ⚠ couldn't resolve cache for {task} × {encoder}: {e}")
-        return
-    train_dir, val_dir = warm_cache_dirs(hparams)
-    for d in (train_dir, val_dir):
-        f = d / "cache.hdf5"
-        if f.exists():
-            f.unlink()
-            print(f"  removed {f}")
+def _merged_overrides(args: argparse.Namespace) -> str:
+    """``--test-only`` injects ``test_only: true`` into the override string
+    forwarded to load_hyperpyyaml; merges with any user-supplied overrides
+    via newline join."""
+    base = getattr(args, "overrides", "") or ""
+    if getattr(args, "test_only", False):
+        return (base + "\n" if base else "") + "test_only: true"
+    return base
 
 
 def _train_one(args: argparse.Namespace, task: str, encoder: str, *,
@@ -137,10 +135,150 @@ def _train_one(args: argparse.Namespace, task: str, encoder: str, *,
         from ahb.train import cmd_train as _fn
     _fn(
         task, encoder,
-        probe=args.probe, probe_yaml=args.probe_yaml,
-        tag=args.tag, overrides=args.overrides or "",
+        tag=args.tag, overrides=_merged_overrides(args),
         level_dir=level_dir,
     )
+
+
+def _run_single_train_leaf(args: argparse.Namespace) -> None:
+    """Hidden leaf path used by the run orchestrators for one-pair train jobs."""
+    from ahb.orchestrator import (
+        get_output_folder, is_complete,
+    )
+    from ahb.run import _has_trained_model
+
+    pairs = _resolve_pairs(args, "single")
+    if not pairs:
+        print("train: no matching pairs for filters.")
+        return
+
+    overwrite = getattr(args, "overwrite", False)
+    test_only = getattr(args, "test_only", False)
+    level_dir = getattr(args, "level_dir", None)
+    if level_dir is not None:
+        from ahb.orchestrator_data_eff import (
+            get_output_folder as _level_output_folder,
+        )
+
+    for task, encoder in pairs:
+        folder = (_level_output_folder(task, encoder, level_dir, args.tag)
+                  if level_dir is not None
+                  else get_output_folder(task, encoder, args.tag))
+        if test_only:
+            if not _has_trained_model(folder, task):
+                print(f"  SKIP (no trained model): {task} × {encoder}")
+                continue
+        elif folder.exists() and is_complete(folder, task) and not overwrite:
+            print(f"  SKIP (results exist): {task} × {encoder}")
+            continue
+        if folder.exists() and overwrite:
+            import shutil
+            shutil.rmtree(folder)
+        _train_one(args, task, encoder, level_dir=level_dir)
+
+
+def _run_cross_train_leaf(args: argparse.Namespace) -> None:
+    """Hidden leaf path used by the run orchestrators for one-pair cross jobs."""
+    import shutil
+
+    from ahb.orchestrator_cross import (
+        get_output_folder as cross_output_folder,
+    )
+    from ahb.run_cross_category import CATEGORY_EXPS_ROOT
+    from ahb.status import _is_complete_any
+    from ahb.train_cross import cmd_train_cross
+
+    pairs = _resolve_pairs(args, args.mode)
+    if not pairs:
+        print(f"{args.mode} train: no matching pairs for filters.")
+        return
+
+    overwrite = getattr(args, "overwrite", False)
+    test_only = getattr(args, "test_only", False)
+    exps_root = CATEGORY_EXPS_ROOT if args.mode == "cross-cat" else None
+    for task, encoder in pairs:
+        folder = cross_output_folder(task, encoder, args.tag, exps_root=exps_root)
+        if test_only:
+            if not (folder / "best_hparams.yaml").exists():
+                print(f"  SKIP (no trained model): {task} × {encoder}")
+                continue
+        elif folder.exists() and _is_complete_any(folder) and not overwrite:
+            print(f"  SKIP (results exist): {task} × {encoder}")
+            continue
+        if folder.exists() and overwrite:
+            shutil.rmtree(folder)
+        cmd_train_cross(
+            task, encoder,
+            tag=args.tag, overrides=_merged_overrides(args),
+        )
+
+
+def _run_dataeff_train_leaf(args: argparse.Namespace) -> None:
+    """Hidden leaf path used by the run orchestrators for one-pair data-eff jobs."""
+    import shutil
+
+    from ahb.orchestrator import is_complete
+    from ahb.orchestrator_data_eff import get_output_folder as de_output_folder
+    from ahb.registry import data_eff_levels
+    from ahb.run import _has_trained_model
+
+    pairs = _resolve_pairs(args, "data-eff")
+    if not pairs:
+        print("data-eff train: no matching pairs for filters.")
+        return
+
+    levels = args.level or [name for name, _ in data_eff_levels()]
+    overwrite = getattr(args, "overwrite", False)
+    test_only = getattr(args, "test_only", False)
+    for level in levels:
+        for task, encoder in pairs:
+            folder = de_output_folder(task, encoder, level, args.tag)
+            if test_only:
+                if not _has_trained_model(folder, task):
+                    print(f"  SKIP (no trained model): {task} × {encoder} @ {level}")
+                    continue
+            elif folder.exists() and is_complete(folder, task) and not overwrite:
+                print(f"  SKIP (results exist): {task} × {encoder} @ {level}")
+                continue
+            if folder.exists() and overwrite:
+                shutil.rmtree(folder)
+            _train_one(args, task, encoder, level_dir=level)
+
+
+def _run_dashboard_jobs(
+    jobs: list[tuple[str, Path, str, Callable[[], None], tuple[str, ...]]], *,
+    logs_root: Path,
+    header_lines: tuple[str, ...],
+    done_label: str = "completed",
+    skipped: int = 0,
+) -> None:
+    """Run local jobs under the shared terminal/log dashboard."""
+    dashboard = _JobDashboard(
+        total_jobs=len(jobs),
+        logs_root=logs_root,
+        header_lines=header_lines,
+    )
+    for idx, (label, rel_log_path, role, fn, detail_lines) in enumerate(jobs):
+        log_path = dashboard.run_log_dir / rel_log_path
+        dashboard.start_job(idx, role, label, log_path)
+        ok, elapsed = _run_logged_job(
+            label, log_path, fn, detail_lines=detail_lines,
+        )
+        dashboard.finish_job(idx, label, ok=ok, elapsed=elapsed, log_path=log_path)
+    dashboard.print_summary(done_label=done_label, skipped=skipped)
+
+
+def _delegate_train_to_run(
+    args: argparse.Namespace,
+    run_fn: Callable[[argparse.Namespace], None],
+) -> None:
+    """Run the train subcommand via the existing no-writer orchestrator."""
+    ns = argparse.Namespace(**vars(args))
+    ns.no_writer = True
+    ns.cache_only = False
+    ns.device = getattr(args, "device", None)
+    ns.max_workers = max(1, getattr(args, "workers", 3))
+    run_fn(ns)
 
 
 # ---------------------------------------------------------------------------
@@ -167,46 +305,101 @@ def _h_prep(args: argparse.Namespace) -> None:
 
 def _h_single_warm(args: argparse.Namespace) -> None:
     from ahb.prep.dispatch import ensure_manifest
-    from ahb.warm import run_warm
+    from ahb.warm import cmd_warm_jobs
     pairs = _resolve_pairs(args, "single")
     if not pairs:
         print("warm: no matching (task, encoder) pairs for filters.")
         return
+    if not _confirm_overwrite(
+            args, "warm",
+            what=f"wipe cache.hdf5 for {len(pairs)} (task, encoder) "
+                 "pair(s) and re-extract from scratch."):
+        return
     print(f"warm: {len(pairs)} (task, encoder) pair(s)")
+    jobs: list[tuple[str, str, int | None]] = []
     for task, encoder in pairs:
         ensure_manifest(task)
-        if getattr(args, "overwrite", False):
-            _wipe_warm_cache(task, encoder, probe=args.probe)
-        run_warm(task, encoder, probe=args.probe, device=args.device)
+        jobs.append((task, encoder, None))
+    cmd_warm_jobs(
+        jobs,
+        device=args.device,
+        overwrite=getattr(args, "overwrite", False),
+        max_workers=getattr(args, "workers", 1),
+    )
 
 
 def _h_single_train(args: argparse.Namespace) -> None:
     """Sweep all matching (task, encoder) pairs; per-pair train auto-routes
     to per-fold CV via the task yaml. Skip-if-complete by default; pass
-    ``--overwrite`` to wipe and retrain."""
+    ``--overwrite`` to wipe and retrain. ``--test-only`` re-evaluates the
+    saved best trial without retraining (skips pairs without one)."""
+    _validate_train_flags(args)
+    if getattr(args, "leaf", False):
+        _run_single_train_leaf(args)
+        return
+    level_dir = getattr(args, "level_dir", None)
+    if level_dir is None:
+        from ahb.run import cmd_run
+        _delegate_train_to_run(
+            args,
+            lambda ns: cmd_run(ns, logs_root=TRAIN_LOGS_ROOT),
+        )
+        return
     from ahb.orchestrator import (
         get_output_folder, is_complete,
     )
+    from ahb.run import _has_trained_model
     pairs = _resolve_pairs(args, "single")
     if not pairs:
         print("train: no matching pairs for filters.")
         return
     overwrite = getattr(args, "overwrite", False)
-    level_dir = getattr(args, "level_dir", None)
-    print(f"train: {len(pairs)} pair(s)")
+    test_only = getattr(args, "test_only", False)
+    if level_dir is not None:
+        from ahb.orchestrator_data_eff import (
+            get_output_folder as _level_output_folder,
+        )
     skipped = 0
+    jobs: list[tuple[str, Path, str, Callable[[], None], tuple[str, ...]]] = []
     for task, encoder in pairs:
-        folder = get_output_folder(task, encoder, args.tag)
-        if folder.exists() and is_complete(folder, task) and not overwrite:
+        folder = (_level_output_folder(task, encoder, level_dir, args.tag)
+                  if level_dir is not None
+                  else get_output_folder(task, encoder, args.tag))
+        if test_only:
+            if not _has_trained_model(folder, task):
+                print(f"  SKIP (no trained model): {task} × {encoder}")
+                skipped += 1
+                continue
+        elif folder.exists() and is_complete(folder, task) and not overwrite:
             print(f"  SKIP (results exist): {task} × {encoder}")
             skipped += 1
             continue
-        if folder.exists() and overwrite:
-            import shutil
-            shutil.rmtree(folder)
-        _train_one(args, task, encoder, level_dir=level_dir)
-    if skipped:
-        print(f"train: skipped {skipped} complete pair(s); pass --overwrite to redo.")
+        label = f"{task} × {encoder}"
+        rel_log_path = Path(f"{_slug(task)}__{_slug(encoder)}.log")
+
+        def _fn(task=task, encoder=encoder, folder=folder, level_dir=level_dir):
+            if folder.exists() and overwrite:
+                import shutil
+                shutil.rmtree(folder)
+            _train_one(args, task, encoder, level_dir=level_dir)
+
+        detail_lines = (
+            f"tag={args.tag}",
+            f"test_only={test_only}",
+            f"overwrite={overwrite}",
+        )
+        jobs.append((label, rel_log_path, "train", _fn, detail_lines))
+
+    _run_dashboard_jobs(
+        jobs,
+        logs_root=TRAIN_LOGS_ROOT,
+        header_lines=(
+            f"[{_now()}] Train start: {len(jobs)} pending, {skipped} skipped",
+            f"           mode    : train",
+            f"           tag     : {args.tag}",
+        ),
+        skipped=skipped,
+    )
 
 
 def _h_single_run(args: argparse.Namespace) -> None:
@@ -235,22 +428,28 @@ def _h_cross_warm(args: argparse.Namespace) -> None:
     ``<tmp>/<dataset>/<encoder>/{train,val}`` — identical to single's
     layout, just resolved against train_dataset and test_dataset). So
     rather than maintain a separate warm_cross writer, we iterate the
-    underlying single tasks on each listed dataset and call run_warm
-    with the cross task's ``num_aug_ver`` so the cache gets extended to
-    the aug count the cross trainer needs.
+    underlying single tasks on each listed dataset and queue single-warm
+    jobs with the cross task's ``num_aug_ver`` so the cache gets
+    extended to the aug count the cross trainer needs.
 
     Cross-cat: every task on every listed dataset (Q3 b — cache is keyed
     by (dataset, encoder), so multiple tasks per dataset no-op after the
     first).
     """
     from ahb.prep.dispatch import ensure_manifest
-    from ahb.warm import run_warm
+    from ahb.warm import cmd_warm_jobs
     pairs = _resolve_pairs(args, args.mode)
     if not pairs:
         print(f"{args.mode} warm: no matching pairs for filters.")
         return
+    if not _confirm_overwrite(
+            args, f"{args.mode} warm",
+            what=f"wipe cache.hdf5 for the proxy single tasks of "
+                 f"{len(pairs)} cross pair(s) and re-extract from scratch."):
+        return
     print(f"{args.mode} warm: {len(pairs)} cross pair(s) "
           f"→ delegating to single warm")
+    jobs_by_pair: dict[tuple[str, str], int | None] = {}
     for cross_task, encoder in pairs:
         ensure_manifest(cross_task)
         cross_yaml = _load_cross_yaml(cross_task)
@@ -263,50 +462,53 @@ def _h_cross_warm(args: argparse.Namespace) -> None:
               f"{len(proxy_tasks)} proxy single task(s))")
         for proxy in proxy_tasks:
             ensure_manifest(proxy)
-            if getattr(args, "overwrite", False):
-                _wipe_warm_cache(proxy, encoder, probe=args.probe)
-            run_warm(proxy, encoder, probe=args.probe,
-                     device=args.device, num_aug_ver=num_aug)
+            key = (proxy, encoder)
+            prev = jobs_by_pair.get(key)
+            jobs_by_pair[key] = num_aug if prev is None else max(prev, num_aug)
+    jobs = [
+        (task, encoder, num_aug)
+        for (task, encoder), num_aug in sorted(jobs_by_pair.items())
+    ]
+    if jobs:
+        cmd_warm_jobs(
+            jobs,
+            device=args.device,
+            overwrite=getattr(args, "overwrite", False),
+            max_workers=getattr(args, "workers", 1),
+        )
 
 
 def _h_cross_train(args: argparse.Namespace) -> None:
     """``cmd_train_cross`` auto-detects category vs non-category via the task
     yaml, so the per-pair entry point is shared with ``cross-cat train``.
     Skip-if-complete by default; ``--overwrite`` wipes and retrains.
+    ``--test-only`` re-evaluates the saved best trial (skips pairs without
+    one).
 
     Uses a mode-agnostic completeness check (``test_results.{txt,yaml}``);
     cross task stems aren't in single's TASKS_DIR, so the orchestrator's
     ``is_complete`` (which goes through ``is_cv``) would crash."""
-    import shutil
-    from ahb.orchestrator_cross import (
-        get_output_folder as cross_output_folder,
-    )
-    from ahb.run_cross_category import CATEGORY_EXPS_ROOT
-    from ahb.status import _is_complete_any
-    from ahb.train_cross import cmd_train_cross
-    pairs = _resolve_pairs(args, args.mode)
-    if not pairs:
-        print(f"{args.mode} train: no matching pairs for filters.")
+    _validate_train_flags(args)
+    if getattr(args, "leaf", False):
+        _run_cross_train_leaf(args)
         return
-    overwrite = getattr(args, "overwrite", False)
-    exps_root = CATEGORY_EXPS_ROOT if args.mode == "cross-cat" else None
-    print(f"{args.mode} train: {len(pairs)} pair(s)")
-    skipped = 0
-    for task, encoder in pairs:
-        folder = cross_output_folder(task, encoder, args.tag, exps_root=exps_root)
-        if folder.exists() and _is_complete_any(folder) and not overwrite:
-            print(f"  SKIP (results exist): {task} × {encoder}")
-            skipped += 1
-            continue
-        if folder.exists() and overwrite:
-            shutil.rmtree(folder)
-        cmd_train_cross(
-            task, encoder,
-            probe=args.probe, probe_yaml=args.probe_yaml,
-            tag=args.tag, overrides=args.overrides or "",
+    from ahb.run_cross import cmd_run_cross
+    from ahb.run_cross_category import CATEGORY_EXPS_ROOT
+    if args.mode == "cross-cat":
+        _delegate_train_to_run(
+            args,
+            lambda ns: cmd_run_cross(
+                ns,
+                include_categories=True,
+                exps_root=CATEGORY_EXPS_ROOT,
+                logs_root=TRAIN_CROSS_CAT_LOGS_ROOT,
+            ),
         )
-    if skipped:
-        print(f"{args.mode} train: skipped {skipped} complete pair(s); pass --overwrite to redo.")
+        return
+    _delegate_train_to_run(
+        args,
+        lambda ns: cmd_run_cross(ns, logs_root=TRAIN_CROSS_LOGS_ROOT),
+    )
 
 
 def _h_cross_run(args: argparse.Namespace) -> None:
@@ -370,32 +572,17 @@ def _h_dataeff_warm(args: argparse.Namespace) -> None:
 def _h_dataeff_train(args: argparse.Namespace) -> None:
     """Sweep all matching (task, encoder) pairs at every data-eff level by
     default; ``--level`` filters to specific levels. Skip-if-complete by
-    default; pass ``--overwrite`` to wipe and retrain."""
-    import shutil
-    from ahb.orchestrator import is_complete
-    from ahb.orchestrator_data_eff import get_output_folder as de_output_folder
-    from ahb.registry import data_eff_levels
-    pairs = _resolve_pairs(args, "data-eff")
-    if not pairs:
-        print("data-eff train: no matching pairs for filters.")
+    default; pass ``--overwrite`` to wipe and retrain. ``--test-only``
+    re-evaluates the saved best trial (skips pairs without one)."""
+    _validate_train_flags(args)
+    if getattr(args, "leaf", False):
+        _run_dataeff_train_leaf(args)
         return
-    levels = args.level or [name for name, _ in data_eff_levels()]
-    overwrite = getattr(args, "overwrite", False)
-    print(f"data-eff train: {len(pairs)} pair(s) × {len(levels)} level(s)")
-    skipped = 0
-    for level in levels:
-        for task, encoder in pairs:
-            folder = de_output_folder(task, encoder, level, args.tag)
-            if folder.exists() and is_complete(folder, task) and not overwrite:
-                print(f"  SKIP (results exist): {task} × {encoder} @ {level}")
-                skipped += 1
-                continue
-            if folder.exists() and overwrite:
-                shutil.rmtree(folder)
-            _train_one(args, task, encoder, level_dir=level)
-    if skipped:
-        print(f"data-eff train: skipped {skipped} complete pair(s); "
-              f"pass --overwrite to redo.")
+    from ahb.run_data_eff import cmd_run_data_eff
+    _delegate_train_to_run(
+        args,
+        lambda ns: cmd_run_data_eff(ns, logs_root=TRAIN_DATA_EFF_LOGS_ROOT),
+    )
 
 
 def _h_dataeff_run(args: argparse.Namespace) -> None:
@@ -416,22 +603,73 @@ def _h_dataeff_summary(args: argparse.Namespace) -> None:
     cmd_summary_data_eff(args)
 
 
+def _all_forward(args: argparse.Namespace,
+                 modes: list[tuple[str, Callable[[argparse.Namespace], None]]],
+                 *, label: str,
+                 mutate: Callable[[argparse.Namespace, str], None] | None = None) -> None:
+    """Iterate ``modes``, calling each handler with a copy of ``args`` whose
+    ``mode`` is set to that mode's name. ``mutate`` is an optional per-mode
+    namespace patch (e.g. resolve sentinel defaults). Continues past mode
+    failures by default; ``--stop-on-failure`` aborts the chain instead."""
+    skip = set(getattr(args, "skip_mode", None) or [])
+    failures: list[tuple[str, BaseException]] = []
+    for name, fn in modes:
+        if name in skip:
+            print(f"=== {label}: skipping mode {name!r} (--skip-mode) ===")
+            continue
+        print(f"\n=== {label}: starting mode {name!r} ===")
+        ns = argparse.Namespace(**vars(args))
+        ns.mode = name
+        if mutate is not None:
+            mutate(ns, name)
+        try:
+            fn(ns)
+        except BaseException as e:
+            failures.append((name, e))
+            print(f"=== {label}: mode {name!r} FAILED: {e!r} ===")
+            if getattr(args, "stop_on_failure", False):
+                raise
+    if failures:
+        names = ", ".join(n for n, _ in failures)
+        raise SystemExit(f"{label}: {len(failures)} mode(s) failed: {names}")
+
+
 def _h_all_prep(args: argparse.Namespace) -> None:
-    raise NotImplementedError(
-        "`ahb all prep` is a starting-point stub — fleshed out in a later commit. "
-        "Use mode-specific prep (e.g. `ahb single prep <task>`) for now.")
+    """Build manifests across single → cross → cross-cat → data-eff."""
+    modes = [
+        ("single",    _h_prep),
+        ("cross",     _h_prep),
+        ("cross-cat", _h_prep),
+        ("data-eff",  _h_dataeff_prep),
+    ]
+    _all_forward(args, modes, label="all prep")
 
 
 def _h_all_warm(args: argparse.Namespace) -> None:
-    raise NotImplementedError(
-        "`ahb all warm` is a starting-point stub — fleshed out in a later commit. "
-        "Use mode-specific warm or `ahb all run --cache-only` for now.")
+    """Warm caches across every mode."""
+    modes = [
+        ("single",    _h_single_warm),
+        ("cross",     _h_cross_warm),
+        ("cross-cat", _h_crosscat_warm),
+        ("data-eff",  _h_dataeff_warm),
+    ]
+    _all_forward(args, modes, label="all warm")
 
 
 def _h_all_train(args: argparse.Namespace) -> None:
-    raise NotImplementedError(
-        "`ahb all train` is a starting-point stub — fleshed out in a later commit. "
-        "Use mode-specific train or `ahb all run --no-writer` for now.")
+    """Sequentially train every mode (single → cross → cross-cat → data-eff).
+
+    Equivalent to ``all run --no-writer``: skips the warm phase in each mode,
+    assuming caches are already warm. Use ``all run`` to warm-then-train.
+    Filters and ``-j`` (train workers) propagate uniformly to every mode.
+    """
+    modes = [
+        ("single",    _h_single_train),
+        ("cross",     _h_cross_train),
+        ("cross-cat", _h_crosscat_train),
+        ("data-eff",  _h_dataeff_train),
+    ]
+    _all_forward(args, modes, label="all train")
 
 
 def _h_all_run(args: argparse.Namespace) -> None:
@@ -446,23 +684,7 @@ def _h_all_run(args: argparse.Namespace) -> None:
         ("cross-cat", _h_crosscat_run),
         ("data-eff",  _h_dataeff_run),
     ]
-    skip = set(args.skip_mode or [])
-    failures: list[tuple[str, BaseException]] = []
-    for name, fn in modes:
-        if name in skip:
-            print(f"=== all run: skipping mode {name!r} (--skip-mode) ===")
-            continue
-        print(f"\n=== all run: starting mode {name!r} ===")
-        try:
-            fn(args)
-        except BaseException as e:
-            failures.append((name, e))
-            print(f"=== all run: mode {name!r} FAILED: {e!r} ===")
-            if not args.continue_on_failure:
-                raise
-    if failures:
-        names = ", ".join(n for n, _ in failures)
-        raise SystemExit(f"all run: {len(failures)} mode(s) failed: {names}")
+    _all_forward(args, modes, label="all run")
 
 
 def _h_all_status(args: argparse.Namespace) -> None:
@@ -471,9 +693,22 @@ def _h_all_status(args: argparse.Namespace) -> None:
 
 
 def _h_all_summary(args: argparse.Namespace) -> None:
-    raise NotImplementedError(
-        "`ahb all summary` is a starting-point stub — fleshed out in a later commit. "
-        "Run mode-specific summaries (`ahb single summary`, etc.) for now.")
+    """Aggregate results across every mode. Each mode writes under its own
+    ``<mode-root>/_summary_<tag>`` — ``all summary`` does not accept
+    ``--out-dir`` because a single dir would collide across modes; run
+    per-mode summary if you need that. ``--level`` is consumed by data-eff
+    only."""
+    modes = [
+        ("single",    _h_single_summary),
+        ("cross",     _h_cross_summary),
+        ("cross-cat", _h_crosscat_summary),
+        ("data-eff",  _h_dataeff_summary),
+    ]
+
+    def _seed_out_dir(ns: argparse.Namespace, _name: str) -> None:
+        ns.out_dir = None
+
+    _all_forward(args, modes, label="all summary", mutate=_seed_out_dir)
 
 
 def _validate_run_flags(args: argparse.Namespace) -> None:
@@ -483,19 +718,30 @@ def _validate_run_flags(args: argparse.Namespace) -> None:
         raise SystemExit("--cache-only and --no-writer are mutually exclusive")
 
 
-def _confirm_overwrite(args: argparse.Namespace, mode_label: str) -> bool:
-    """Interactive ``[y/N]`` prompt before destructive `run --overwrite`.
+def _validate_train_flags(args: argparse.Namespace) -> None:
+    if getattr(args, "test_only", False) and getattr(args, "overwrite", False):
+        raise SystemExit("--test-only and --overwrite are mutually exclusive")
+
+
+def _confirm_overwrite(args: argparse.Namespace, mode_label: str,
+                       *, what: str | None = None) -> bool:
+    """Interactive ``[y/N]`` prompt before a destructive ``--overwrite``.
 
     Bypassed by ``--yes``. Also bypassed when ``--dry-run`` is set (nothing
-    actually gets destroyed). Returns True if the run should proceed.
+    actually gets destroyed). Returns True if the action should proceed.
+    ``what`` overrides the default ``run``-flavored description for callers
+    like ``warm`` whose destruction target is different.
     """
     if not getattr(args, "overwrite", False):
         return True
     if getattr(args, "yes", False) or getattr(args, "dry_run", False):
         return True
-    print(f"\n!! {mode_label} --overwrite will redo every matching pair, "
-          f"including ones whose results already exist.")
-    print("   Existing results will be wiped. This is not reversible.")
+    detail = what or (
+        "redo every matching pair, including ones whose results already "
+        "exist.\n   Existing results will be wiped."
+    )
+    print(f"\n!! {mode_label} --overwrite will {detail}")
+    print("   This is not reversible.")
     try:
         resp = input("   Proceed? [y/N] ").strip().lower()
     except EOFError:
@@ -640,34 +886,40 @@ def _add_prep_args(p: argparse.ArgumentParser) -> None:
                    help="Rebuild manifests even if they already exist.")
 
 
-def _add_warm_args(p: argparse.ArgumentParser, *, default_probe: str = "AvgTProbe") -> None:
+def _add_warm_args(p: argparse.ArgumentParser) -> None:
     _add_filter_args(p)
-    p.add_argument("--probe", default=default_probe,
-                   help=f"Probe name (default: {default_probe})")
-    p.add_argument("--probe-yaml", default="Probe.yaml",
-                   help="Probe yaml filename under ahb/configs/probes/")
     p.add_argument("--device", default=None,
                    help="Torch device override (e.g. cuda:0)")
+    p.add_argument("--workers", type=int, default=1,
+                   help="Concurrent warm workers (default: 1). Warm jobs are "
+                        "now lock-safe across processes, but each worker still "
+                        "loads a full encoder, so increase only with headroom.")
     p.add_argument("--overwrite", action="store_true",
                    help="Wipe the per-(dataset, encoder) cache.hdf5 files "
-                        "before re-extracting.")
+                        "before re-extracting. Prompts for confirmation "
+                        "unless --yes is also passed.")
+    p.add_argument("--yes", "-y", action="store_true",
+                   help="Skip the --overwrite confirmation prompt.")
 
 
 def _add_train_args(p: argparse.ArgumentParser, *,
-                    default_probe: str = "AvgTProbe",
                     include_level_dir: bool = False,
                     include_level: bool = False) -> None:
     _add_filter_args(p)
-    p.add_argument("--probe", default=default_probe,
-                   help=f"Probe name (default: {default_probe})")
-    p.add_argument("--probe-yaml", default="Probe.yaml")
     p.add_argument("--tag", default="run1",
                    help="Experiment tag (default: run1)")
     p.add_argument("--overrides", default="",
                    help="Extra YAML overrides forwarded to load_hyperpyyaml")
+    p.add_argument("--workers", "-j", type=int, default=3,
+                   help="Concurrent train workers (default: 3).")
+    p.add_argument("--leaf", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--overwrite", action="store_true",
                    help="Wipe the experiment folder and retrain. By default, "
                         "pairs whose results already exist are skipped.")
+    p.add_argument("--test-only", action="store_true",
+                   help="Re-evaluate the saved best trial without retraining. "
+                        "Pairs without a trained model are skipped. Mutually "
+                        "exclusive with --overwrite.")
     if include_level_dir:
         p.add_argument("--level-dir", default=None,
                        help="Reroute output_folder + manifest paths from "
@@ -680,6 +932,8 @@ def _add_train_args(p: argparse.ArgumentParser, *,
 
 def _add_run_args(p: argparse.ArgumentParser, *,
                   include_level: bool = False) -> None:
+    """``run`` is the union of prep + warm + train + summary, so its flag
+    surface forwards each phase's own flags."""
     p.add_argument("--device", type=str, default=None,
                    help="Device override (e.g. cuda:0)")
     p.add_argument("--warm-workers", type=int, default=1,
@@ -693,13 +947,15 @@ def _add_run_args(p: argparse.ArgumentParser, *,
         p.add_argument("--level", type=str, default=None, action="append",
                        help="Restrict to these level dirs (repeatable; "
                             "default: all levels in registry.yaml)")
-    p.add_argument("--test-only", action="store_true",
-                   help="Re-evaluate saved best trial; no warm or train "
-                        "(single phase, uses --train-workers).")
+    p.add_argument("--overrides", default="",
+                   help="Extra YAML overrides forwarded to train's "
+                        "load_hyperpyyaml.")
+    p.add_argument("--out-dir", type=str, default=None,
+                   help="Summary output dir (default: "
+                        "<mode-root>/_summary_<tag>).")
     p.add_argument("--cache-only", action="store_true",
-                   help="Warm phase only (skips train phase).")
-    p.add_argument("--no-writer", action="store_true",
-                   help="Train phase only — cache must already be warm.")
+                   help="Warm phase only (skips train phase). For train-only "
+                        "without re-warming, use the `train` subcommand.")
     p.add_argument("--overwrite", action="store_true",
                    help="Redo every matching pair, including ones whose "
                         "results already exist. Prompts for confirmation "
@@ -721,6 +977,17 @@ def _add_status_args(p: argparse.ArgumentParser, *,
     if include_level:
         p.add_argument("--level", type=str, default=None, action="append",
                        help="Restrict to these level dirs (repeatable)")
+
+
+def _add_all_chain_args(p: argparse.ArgumentParser) -> None:
+    """Shared ``all <cmd>`` chain controls: which modes to skip and whether
+    to abort on the first per-mode failure."""
+    p.add_argument("--skip-mode", action="append", default=None,
+                   choices=list(MODES[:-1]),
+                   help="Mode(s) to skip (repeatable)")
+    p.add_argument("--stop-on-failure", action="store_true",
+                   help="Abort the chain on the first mode failure. "
+                        "Default: continue and report failures at the end.")
 
 
 def _add_summary_args(p: argparse.ArgumentParser, *,
@@ -762,10 +1029,8 @@ def build_parser() -> argparse.ArgumentParser:
     cp = mode_sub.add_parser("cross", help="Zero-shot cross-task mode.")
     sub = cp.add_subparsers(dest="command", required=True)
     _add_prep_args(sub.add_parser("prep", help="Build manifests for one or more cross tasks."))
-    _add_warm_args(sub.add_parser("warm", help="Warm cross-task caches."),
-                   default_probe="Probe")
-    _add_train_args(sub.add_parser("train", help="Train probe on a cross task."),
-                    default_probe="Probe")
+    _add_warm_args(sub.add_parser("warm", help="Warm cross-task caches."))
+    _add_train_args(sub.add_parser("train", help="Train probe on a cross task."))
     _add_run_args(sub.add_parser("run", help="Sweep all incomplete cross runs."))
     _add_status_args(sub.add_parser("status", help="Per-task × per-encoder completion grid for cross."))
     _add_summary_args(sub.add_parser("summary", help="Aggregate cross results."),
@@ -775,10 +1040,8 @@ def build_parser() -> argparse.ArgumentParser:
     cap = mode_sub.add_parser("cross-cat", help="Multi-source cross-category mode.")
     sub = cap.add_subparsers(dest="command", required=True)
     _add_prep_args(sub.add_parser("prep", help="Build manifests for one or more category tasks."))
-    _add_warm_args(sub.add_parser("warm", help="Warm category-task caches."),
-                   default_probe="Probe")
-    _add_train_args(sub.add_parser("train", help="Train probe on a category task."),
-                    default_probe="Probe")
+    _add_warm_args(sub.add_parser("warm", help="Warm category-task caches."))
+    _add_train_args(sub.add_parser("train", help="Train probe on a category task."))
     _add_run_args(sub.add_parser("run", help="Sweep all incomplete cross-category runs."))
     _add_status_args(sub.add_parser("status", help="Per-task × per-encoder completion grid for cross-cat."))
     _add_summary_args(sub.add_parser("summary", help="Aggregate cross-category results."),
@@ -802,19 +1065,31 @@ def build_parser() -> argparse.ArgumentParser:
     # ---- all ----
     ap = mode_sub.add_parser("all", help="Apply command to every mode in turn.")
     sub = ap.add_subparsers(dest="command", required=True)
-    sub.add_parser("prep", help="(stub — fleshed out in a later commit)")
-    sub.add_parser("warm", help="(stub — fleshed out in a later commit)")
-    sub.add_parser("train", help="(stub — fleshed out in a later commit)")
+    all_prep = sub.add_parser("prep", help="Build manifests across every mode.")
+    _add_prep_args(all_prep)
+    _add_all_chain_args(all_prep)
+    all_warm = sub.add_parser("warm", help="Warm caches across every mode.")
+    _add_warm_args(all_warm)
+    _add_all_chain_args(all_warm)
+    all_train = sub.add_parser(
+        "train",
+        help="Train every mode assuming caches are warm "
+             "(equivalent to `all run --no-writer`).")
+    _add_train_args(all_train, include_level=True)
+    _add_all_chain_args(all_train)
     all_run = sub.add_parser("run", help="Sequentially run every mode (single → cross → cross-cat → data-eff).")
     _add_run_args(all_run, include_level=True)
-    all_run.add_argument("--skip-mode", action="append", default=None,
-                         choices=list(MODES[:-1]),
-                         help="Mode(s) to skip (repeatable)")
-    all_run.add_argument("--continue-on-failure", action="store_true",
-                         help="Run later modes even if an earlier one raises")
+    _add_all_chain_args(all_run)
     _add_status_args(sub.add_parser("status", help="Stacked completion grids for every mode."),
                      include_level=True)
-    sub.add_parser("summary", help="(stub — fleshed out in a later commit)")
+    all_summary = sub.add_parser("summary", help="Summarize results across every mode.")
+    _add_filter_args(all_summary)
+    all_summary.add_argument("--tag", type=str, default="run1",
+                             help="Experiment tag to scan (default: run1)")
+    all_summary.add_argument("--level", type=str, default=None, action="append",
+                             help="Restrict to these data-eff level dirs "
+                                  "(repeatable; ignored by single/cross/cross-cat)")
+    _add_all_chain_args(all_summary)
 
     return parser
 

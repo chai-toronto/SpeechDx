@@ -18,7 +18,11 @@ Output:
 
 import csv
 import shutil
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _drop_invalid_audio import drop_invalid_audio_rows
 
 DATA_ROOT = Path("data")
 C9S_DIR = DATA_ROOT / "c9s"
@@ -177,11 +181,12 @@ def step3_merge_task2(rows):
 
 
 def step4_copy_audio(rows):
-    """Build paths, copy voice audio, drop missing."""
+    """Build paths and copy voice audio. Rows whose audio is missing or
+    has no recognized extension are kept in the CSV — they'll be dropped
+    later by drop_invalid_audio_rows when the file fails to open."""
     dest_audio = OUT_ROOT / "audio"
     dest_audio.mkdir(parents=True, exist_ok=True)
 
-    valid_rows = []
     copied, skipped, missing = 0, 0, 0
 
     for row in rows:
@@ -193,12 +198,9 @@ def step4_copy_audio(rows):
         csv_src = SRC_AUDIO / src_uid / folder / voice_fn
         actual_src = find_audio(csv_src)
 
-        if actual_src is None:
-            missing += 1
-            continue
-
-        # Drop files without a recognized audio extension
-        if actual_src.suffix == "":
+        if actual_src is None or actual_src.suffix == "":
+            # No usable source — record the expected path and move on.
+            row["path"] = f"{row['Participant_ID']}/{folder}/{voice_fn}"
             missing += 1
             continue
 
@@ -215,10 +217,8 @@ def step4_copy_audio(rows):
             shutil.copy2(actual_src, dst)
             copied += 1
 
-        valid_rows.append(row)
-
-    print(f"Step 4: Audio copied={copied}, skipped={skipped}, dropped={missing}")
-    return valid_rows
+    print(f"Step 4: Audio copied={copied}, skipped={skipped}, missing={missing}")
+    return rows
 
 
 def step5_write_csv(rows):
@@ -249,6 +249,8 @@ def step5_write_csv(rows):
     t2_count = sum(1 for r in rows if r.get("label_t2") != "")
     print(f"  label_t1 populated: {t1_count}")
     print(f"  label_t2 populated: {t2_count}")
+
+    drop_invalid_audio_rows(out_path, OUT_ROOT / "audio")
 
 
 def main():
