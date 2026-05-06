@@ -288,8 +288,7 @@ def _delegate_train_to_run(
 
 def _h_prep(args: argparse.Namespace) -> None:
     """Mode-agnostic prep — works for single, cross, and cross-cat stems."""
-    from ahb.orchestrator import manifest_paths
-    from ahb.prep.dispatch import ensure_manifest
+    from ahb.prep.dispatch import ensure_manifest, manifest_paths
     tasks = _resolve_tasks(args, args.mode)
     if not tasks:
         print("prep: no matching tasks for filters.")
@@ -559,9 +558,23 @@ def _h_crosscat_summary(args: argparse.Namespace) -> None:
 
 
 def _h_dataeff_prep(args: argparse.Namespace) -> None:
-    """data-eff manifests are identical to single — caches/manifests are
-    level-agnostic."""
+    """Build per-level subsampled manifests under exps/data_eff/<level>/<task>/.
+
+    Ensures the upstream single-task source is up to date first (delegating to
+    ``_h_prep``), then subsamples it into each level's manifest dir. Honors
+    ``--overwrite`` so changes to the source manifest propagate downstream;
+    without it, ``ensure_manifest_data_eff`` short-circuits when the level
+    files already exist.
+    """
     _h_prep(args)
+    from ahb.orchestrator_data_eff import (
+        LEVELS, discover_tasks, ensure_manifest_data_eff,
+    )
+    tasks = discover_tasks(args.dataset, args.task)
+    overwrite = bool(getattr(args, "overwrite", False))
+    for ts in tasks:
+        for level_dir, _ in LEVELS:
+            ensure_manifest_data_eff(ts, level_dir, overwrite=overwrite)
 
 
 def _h_dataeff_warm(args: argparse.Namespace) -> None:

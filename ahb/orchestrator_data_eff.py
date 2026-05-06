@@ -96,10 +96,13 @@ def is_cv(task_stem: str) -> bool:
     return _load_task_yaml(task_stem).get("num_fold") is not None
 
 
-def ensure_manifest_data_eff(task_stem: str, level_dir: str) -> None:
+def ensure_manifest_data_eff(task_stem: str, level_dir: str,
+                              *, overwrite: bool = False) -> None:
     """Subsample the source manifest into ``exps/data_eff/<level>/.../manifest/``.
 
-    Idempotent: skips when the destination already has the expected files.
+    Idempotent: skips when the destination already has the expected files,
+    unless ``overwrite=True`` forces a rebuild (used by ``ahb data-eff prep
+    --overwrite`` after the upstream single-task source manifest changes).
     Source manifests under ``exps/single_task/<...>/manifest/`` are produced
     on demand via ``ahb.prep.dispatch.ensure_manifest``.
     """
@@ -107,7 +110,7 @@ def ensure_manifest_data_eff(task_stem: str, level_dir: str) -> None:
     dst_tr, dst_va, dst_te = manifest_paths(task_stem, level_dir)
     cv = is_cv(task_stem)
 
-    if dst_tr.exists() and dst_va.exists() and (cv or dst_te.exists()):
+    if not overwrite and dst_tr.exists() and dst_va.exists() and (cv or dst_te.exists()):
         return
 
     ensure_source_manifest(task_stem)
