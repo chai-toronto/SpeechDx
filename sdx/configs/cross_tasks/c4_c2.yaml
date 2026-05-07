@@ -1,0 +1,48 @@
+task: c4_c2
+task_type: B
+
+dataset: cross_tasks
+train_datasets: ["c19sounds", "coswara", "avfad"]
+test_datasets: ["aphasia", "dementiabank"]
+
+data_io_script: training.dataio.prep_category_c2_c4
+prepare_data_fn: prepare_category_c4_c2
+
+label_key: label_encoded
+skip_prep: False
+num_labels: 1
+loss: !new:torch.nn.BCEWithLogitsLoss
+
+setting_1:  # train_datasets[0] = 'c19sounds' (aug params from T19.yaml)
+  split_by_boundary: false
+  num_aug_ver: 3
+  snr_low: 0
+  snr_high: 7
+  speed: !new:builtins.list
+    - !new:builtins.range
+      - 95
+      - 105
+      - 1
+setting_2:  # train_datasets[1] = 'coswara' (aug params from T24.yaml)
+  split_by_boundary: false
+  num_aug_ver: 3
+  snr_low: 0
+  snr_high: 15
+  speed: !new:builtins.list
+    - !new:builtins.range
+      - 90
+      - 110
+      - 1
+setting_3:  # train_datasets[2] = 'avfad' (aug params from T27.yaml)
+  split_by_boundary: false
+  num_aug_ver: 3
+  snr_low: 0
+  snr_high: 15
+  speed: !new:builtins.list
+    - !new:builtins.range
+      - 90
+      - 110
+      - 1
+
+test_setting_1: {split_by_boundary: false}
+test_setting_2: {split_by_boundary: false}

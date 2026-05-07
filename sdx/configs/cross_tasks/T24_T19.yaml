@@ -1,0 +1,28 @@
+task: T24_T19
+task_type: B
+
+dataset: coswara_c19sounds
+train_dataset: coswara
+test_dataset: c19sounds
+
+data_io_script: training.dataio.prep_c19sounds_coswara
+prepare_data_fn: prepare_coswara_c19sounds_sympC_t1
+
+label_key: label_encoded
+skip_prep: False
+
+num_labels: 1
+
+loss: !new:torch.nn.BCEWithLogitsLoss
+
+train_split_by_boundary: false
+test_split_by_boundary: false
+
+num_aug_ver: 3
+snr_low: 0
+snr_high: 15
+speed: !new:builtins.list
+  - !new:builtins.range
+    - 90 #start
+    - 110 #stop
+    - 1 #step

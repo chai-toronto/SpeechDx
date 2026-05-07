@@ -1,0 +1,28 @@
+task: T12_T13
+task_type: B
+
+dataset: uaspeech_mdvr
+train_dataset: uaspeech
+test_dataset: mdvr
+
+data_io_script: training.dataio.prep_mdvr_uaspeech
+prepare_data_fn: prepare_uaspeech_mdvr_dysC_parkC
+
+label_key: label_encoded
+skip_prep: False
+
+num_labels: 1
+
+loss: !new:torch.nn.BCEWithLogitsLoss
+
+train_split_by_boundary: false
+test_split_by_boundary: false
+
+num_aug_ver: 3
+snr_low: 0
+snr_high: 15
+speed: !new:builtins.list
+  - !new:builtins.range
+    - 90 #start
+    - 110 #stop
+    - 1 #step

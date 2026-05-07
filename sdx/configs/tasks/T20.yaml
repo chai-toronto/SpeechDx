@@ -1,0 +1,34 @@
+task: T20
+task_type: B
+
+dataset: c19sounds
+
+# ----------------------------------
+# DYNAMIC SCRIPT CONFIGURATION (Generic)
+# ----------------------------------
+# Path to the file containing the dataset-specific preparation and IO functions
+data_io_script: training.dataio.prep_c19sounds
+
+# Name of the function to call for manifest generation
+prepare_data_fn: prepare_c19sounds_L_t1
+
+# Key used in the SpeechBrain batch object for the label
+label_key: label_encoded
+
+# Data preparation
+skip_prep: False
+
+num_labels: 1
+
+loss: !new:torch.nn.BCEWithLogitsLoss
+
+# Augmentation
+# For all data that can be trained, during training with cached repr, will sample from versions
+num_aug_ver: 1
+snr_low: 0
+snr_high: 7
+speed: !new:builtins.list
+  - !new:builtins.range
+    - 95 #start
+    - 105 #stop
+    - 1 #step

@@ -1,0 +1,58 @@
+task: c3_c2
+task_type: B
+
+dataset: cross_tasks
+train_datasets: ["torgo", "uaspeech", "mdvr", "ksof"]
+test_datasets: ["aphasia", "dementiabank"]
+
+data_io_script: training.dataio.prep_category_c2_c3
+prepare_data_fn: prepare_category_c3_c2
+
+label_key: label_encoded
+skip_prep: False
+num_labels: 1
+loss: !new:torch.nn.BCEWithLogitsLoss
+
+setting_1:  # train_datasets[0] = 'torgo' (aug params from T10.yaml)
+  split_by_boundary: false
+  num_aug_ver: 3
+  snr_low: 0
+  snr_high: 15
+  speed: !new:builtins.list
+    - !new:builtins.range
+      - 90
+      - 110
+      - 1
+setting_2:  # train_datasets[1] = 'uaspeech' (aug params from T12.yaml)
+  split_by_boundary: false
+  num_aug_ver: 3
+  snr_low: 0
+  snr_high: 15
+  speed: !new:builtins.list
+    - !new:builtins.range
+      - 90
+      - 110
+      - 1
+setting_3:  # train_datasets[2] = 'mdvr' (aug params from T13.yaml)
+  split_by_boundary: false
+  num_aug_ver: 5
+  snr_low: 0
+  snr_high: 15
+  speed: !new:builtins.list
+    - !new:builtins.range
+      - 90
+      - 110
+      - 1
+setting_4:  # train_datasets[3] = 'ksof' (aug params from T17.yaml)
+  split_by_boundary: false
+  num_aug_ver: 3
+  snr_low: 0
+  snr_high: 15
+  speed: !new:builtins.list
+    - !new:builtins.range
+      - 90
+      - 110
+      - 1
+
+test_setting_1: {split_by_boundary: false}
+test_setting_2: {split_by_boundary: false}

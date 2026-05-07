@@ -9,14 +9,13 @@ metadata CSV that the training pipeline understands.
 | `create_aphasia_metadata.py`          | aphasia       | `data/aphasia/processed/aphasia.csv`            |
 | `create_audio_metadata.py`            | (generic)     | helper for ad-hoc audio folders                 |
 | `create_avfad_metadata.py`            | avfad         | `data/avfad/processed/avfad.csv`                |
-| `create_c9s_metadata.py`              | c9s           | `data/c9s/processed/c9s.csv` (unified t1+t2 splits) |
+| `create_c19sounds_metadata.py`              | c19sounds           | `data/c19sounds/processed/c19sounds.csv` (unified t1+t2 splits) |
 | `create_coswara_metadata.py`          | coswara       | `data/coswara/processed/coswara.csv`            |
-| `create_dbank_metadata.py`            | DementiaBank (ADReSS-M) | `data/dbank/processed/dbank.csv`      |
-| `create_daic_woz_metadata.py`         | DAIC-WOZ      | unused — superseded by EDAIC                    |
+| `create_dementiabank_metadata.py`            | DementiaBank (ADReSS-M) | `data/dementiabank/processed/dementiabank.csv`      |
 | `create_edaic_metadata.py`            | EDAIC-WOZ     | `data/edaic/processed/edaic.csv`                |
 | `create_iemocap_metadata.py`          | IEMOCAP       | `data/iemocap/processed/iemocap.csv`            |
 | `create_ksof_metadata.py`             | KSoF          | `data/ksof/processed/ksof.csv`                  |
-| `create_mvdr_metadata.py`             | MVDR          | `data/mvdr/processed/mvdr.csv`                  |
+| `create_mdvr_metadata.py`             | MDVR          | `data/mdvr/processed/mdvr.csv`                  |
 | `create_nemours_metadata.py`          | Nemours       | `data/nemours/processed/nemours.csv`            |
 | `create_ravdess_metadata.py`          | RAVDESS       | `data/ravdess/processed/ravdess.csv`            |
 | `create_torgo_metadata.py`            | TORGO         | `data/torgo/processed/torgo.csv`                |

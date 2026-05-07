@@ -4,8 +4,8 @@ convert them to .wav using ffmpeg, and update the CSV paths accordingly.
 
 Usage:
     python -m metadata_script.convert_to_soundfile_compat \
-        --csv data/c9s/processed/c9s.csv \
-        --audio-root data/c9s/processed/audio
+        --csv data/c19sounds/processed/c19sounds.csv \
+        --audio-root data/c19sounds/processed/audio
 """
 
 import argparse

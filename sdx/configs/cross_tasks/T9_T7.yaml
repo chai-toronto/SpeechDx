@@ -1,0 +1,28 @@
+task: T9_T7
+task_type: B
+
+dataset: aphasia_dementiabank
+train_dataset: aphasia
+test_dataset: dementiabank
+
+data_io_script: training.dataio.prep_aphasia_dementiabank
+prepare_data_fn: prepare_aphasia_dementiabank_pwaC_adC
+
+label_key: label_encoded
+skip_prep: False
+
+num_labels: 1
+
+loss: !new:torch.nn.BCEWithLogitsLoss
+
+train_split_by_boundary: false
+test_split_by_boundary: false
+
+num_aug_ver: 3
+snr_low: 0
+snr_high: 15
+speed: !new:builtins.list
+  - !new:builtins.range
+    - 90 #start
+    - 110 #stop
+    - 1 #step

@@ -1,0 +1,28 @@
+task: T6_T4
+task_type: B
+
+dataset: iemocap_ravdess
+train_dataset: iemocap
+test_dataset: ravdess
+
+data_io_script: training.dataio.prep_ravdess_iemocap
+prepare_data_fn: prepare_iemocap_ravdess_emoBC_emoBC
+
+label_key: label_encoded
+skip_prep: False
+
+num_labels: 1
+
+loss: !new:torch.nn.BCEWithLogitsLoss
+
+train_split_by_boundary: false
+test_split_by_boundary: false
+
+num_aug_ver: 3
+snr_low: 0
+snr_high: 15
+speed: !new:builtins.list
+  - !new:builtins.range
+    - 90 #start
+    - 110 #stop
+    - 1 #step

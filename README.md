@@ -1,5 +1,5 @@
 
-# Audio Health Benchmark
+# SpeechDx
 
 📊 [**Leaderboard**](./leaderboard.csv)
 
@@ -8,10 +8,10 @@ tasks (depression, dementia, dysarthria, COVID-19, emotion, …). Each task
 trains a lightweight probe on top of a frozen encoder and reports AUROC /
 macro-AUROC / MAE with bootstrap confidence intervals.
 
-## Quickstart
+## Install
 
 ```bash
-git clone <this repo> && cd Audio-Health-Benchmark
+git clone <this repo> && cd SpeechDx
 uv sync
 ```
 
@@ -22,41 +22,74 @@ python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+(Drop the `uv run` prefix from every command below if you went the venv route.)
+
+## Reproducing the full benchmark
+
+End-to-end, single command, all four modes:
+
 ```bash
-# 1. Control what dataset + task to work on. `prep` will:
-#    - download raw data if the dataset is public (mvdr, ravdess, coswara,
-#      torgo) and a `scripts/download_<name>.sh` exists,
-#    - else fail loudly with the contact info from registry.yaml,
-#    - run metadata_script/create_<name>_metadata.py if processed/<name>.csv
-#      is missing,
-#    - build the train/valid/test manifests.
-#    Filters: `-t/--task`, `-e/--encoder`, `-d/--dataset` (repeatable;
-#    empty = "every match in scope"). `single` is the default mode, so
-#    `ahb prep ...` ≡ `ahb single prep ...`.
-uv run python -m ahb single prep  -t T19
-# Drop uv run if run without uv
-uv run python -m ahb single warm  -t T19 -e wavlm
-uv run python -m ahb single train -t T19 -e wavlm -j 4
+# Stage every dataset the registry knows about (open ones auto-download;
+# restricted ones print a warning + skip — drop their archive at
+# data/<name>/raw/ and re-run to include them):
+uv run python -m sdx all prep
 
-# 2. Or `run` does the whole pipeline for matching pairs:
-#    download → prep → warm → train → summary. Idempotent — skips
-#    pairs whose results already exist; pass --overwrite to redo.
-uv run python -m ahb single run -j 4
-
-# 3. … or chain every mode (single → cross → cross-cat → data-eff). 
-# When the datasets are in place, this will completely reproduce. 
-uv run python -m ahb all run -j 4
-
-# 4. Inspect.
-uv run python -m ahb single status         # task × encoder grid of ☑ / ☐ for --tag
-uv run python -m ahb single summary        # per-metric CSVs + stdout tables
+# Run every (task, encoder) pair across single → cross → cross-cat → data-eff.
+# Idempotent: skips pairs whose results already exist. -j is train workers.
+uv run python -m sdx all run -j 4
 ```
+
+`all run` chains `warm → train → summary` for each of the four modes in
+order, so caches populated by `single` are reused by `cross`, `cross-cat`,
+and `data-eff`. It survives partial failures by default (pass
+`--stop-on-failure` to abort on the first one).
+
+> **Missing data is a soft skip.** Every paper task and cross task is
+> live in `sdx/configs/registry.yaml`, but at run time tasks whose
+> dataset isn't on disk (and whose `scripts/download_<name>.sh` either
+> doesn't exist or fails) are dropped from the queue with a warning
+> showing the registry's contact info — the rest of the run keeps going.
+> So `sdx all run` on a fresh clone trains on whatever is staged
+> (out of the box that's `ravdess` / `coswara` / `mdvr` / `torgo`), and
+> simply re-running after you obtain a new corpus extends the run to it.
+> See [Datasets](#datasets) for staging conventions.
+
+### Where the results land
+
+Each `(task, encoder)` writes into `exps/<mode-root>/<task>/<encoder>-AvgTProbe-run1/`:
+
+- `test_results.txt` — flat `key: value` (AUROC, F1, accuracy, AUROC_CI_low/high, MAE, …).
+- `test_results.yaml` — per-fold detail for CV tasks (see [Cross-validation tasks](#cross-validation-tasks)).
+- `events.out.tfevents.*` — TensorBoard scalar logs.
+- `best_hparams.yaml` — winning Ray-Tune trial.
+
+Mode roots: `exps/single_task/`, `exps/cross/`, `exps/cross_cat/`, `exps/data_eff/<level>/`.
+
+### Aggregating and inspecting results
+
+`run` already invokes `summary` as its last phase, but you can re-aggregate any time:
+
+```bash
+uv run python -m sdx single   summary    # → exps/single_task/_summary_run1/
+uv run python -m sdx cross    summary    # → exps/cross/_summary_run1/
+uv run python -m sdx cross-cat summary   # → exps/cross_cat/_summary_run1/
+uv run python -m sdx data-eff summary    # → exps/data_eff/_summary_run1/<level>/
+uv run python -m sdx all      summary    # all four, stacked
+
+uv run python -m sdx all status          # ☑/☐ completion grid for --tag (default run1)
+```
+
+Each `_summary_<tag>/` directory holds per-metric CSVs (`AUC.csv`,
+`AUC_CI.csv`, `Acc.csv`, `F1.csv`, `MAE.csv`, `MAE_CI.csv`, `MSE.csv`,
+`PearsonR.csv`, `R2.csv`, `completion.csv`) — rows are tasks, columns are
+encoders. The same matrices are pretty-printed to stdout at the end of
+the command.
 
 ## Modes
 
-The CLI surface is `python -m ahb <mode> <command> [flags]`. If the first
+The CLI surface is `python -m sdx <mode> <command> [flags]`. If the first
 argument is a command rather than a mode, mode defaults to `single` — so
-`python -m ahb run` is shorthand for `python -m ahb single run`.
+`python -m sdx run` is shorthand for `python -m sdx single run`.
 
 | Mode        | What it does                                                                                                           |
 |-------------|------------------------------------------------------------------------------------------------------------------------|
@@ -132,25 +165,214 @@ Aggregate `test_results.{txt,yaml}` into per-metric CSVs at
 
 ### Notes
 
+**Probe is fixed.** Folder tag is always `AvgTProbe`; the actual probe
+loaded is always `probes/Probe.yaml` (`LinearProbe`). To use a different
+probe, edit `probe_params: !include:probes/<name>.yaml` in
+`sdx/configs/main*.yaml`.
+
 **Auto-resume:** if `train` finds partial Ray Tune state on disk
 (`storage/`, `best_hparams.yaml`) and no completed `test_results`, it
 auto-resumes rather than wiping. Pass `--overwrite` to force a fresh
 start.
 
-**Cache sharing:** training reads from the per-`(dataset, encoder)` HDF5
-cache and will fail on miss. cross / cross-cat warm delegate to
-`single warm` for every task on each listed dataset (propagating
-`num_aug_ver`), so `single` / `cross` / `cross-cat` runs are each
-self-sufficient. `all run`'s single → cross → cross-cat → data-eff
-ordering also keeps later phases' cache work cheap because earlier
-phases populated the caches.
+**Cache sharing.** Training reads from the per-`(dataset, encoder)` HDF5
+cache and will fail on miss. The on-disk layout is
+`<slurm_tmpdir>/<dataset>/<encoder>/{train,val}/single_avg/cache.hdf5`,
+shared across all modes that touch that `(dataset, encoder)` pair.
+
+Each mode's warmer is self-contained — it reads its own task yaml +
+mode-specific `main*.yaml` only:
+- `single warm` reads `tasks/<stem>.yaml` + `main.yaml`. Writes train
+  (`num_aug_ver` augmented versions) and val (1 unaugmented).
+- `cross warm` reads `cross_tasks/<stem>.yaml` + `main_cross.yaml`. Per
+  cross pair, writes 3 caches: `<train_dataset>/{train,val}` (using
+  `num_aug_ver` and `train_split_by_boundary`) and `<test_dataset>/val`
+  (1 version, `test_split_by_boundary`). Test side is never augmented.
+- `cross-cat warm` reads `cross_tasks/<stem>.yaml` +
+  `main_cross_category.yaml`. Per train dataset (`setting_<N>`) writes
+  `<dataset>/{train,val}`; per test dataset (`test_setting_<N>`) writes
+  `<dataset>/val`.
+
+Caches append-extend: if a previous mode wrote 3 versions and a later
+mode wants 5, only the missing 2 versions get computed. `all run`'s
+`single → cross → cross-cat → data-eff` ordering takes advantage of
+this — later phases skip whatever earlier phases populated.
+
+## Examples
+
+Each block below shows a typical (mode, command) combination, the call,
+and a representative slice of its output.
+
+### Single task × single encoder (smoke test)
+
+Stage one dataset, warm one cache, train one probe — fastest way to
+sanity-check a fresh checkout.
+
+```bash
+uv run python -m sdx single run -t T19 -e wavlm -j 4
+```
+
+Final stdout (the `summary` phase):
+
+```
+=== AUC.csv ===
+task             | wavlm
+-----------------+-------
+T19 (c19sounds_t1) | 0.6553
+
+Parsed 1 result files, 0 missing
+Wrote 2 CSV(s) to exps/single_task/_summary_run1/
+```
+
+Result file [exps/single_task/T19/wavlm-AvgTProbe-run1/test_results.txt](exps/single_task/T19/wavlm-AvgTProbe-run1/test_results.txt):
+
+```
+AUROC: 0.6553
+F1: 0.6234
+accuracy: 0.6087
+AUROC_CI_low: 0.5269
+AUROC_CI_high: 0.8324
+loss: 0.6690
+```
+
+### Full single benchmark (all paper tasks × all 12 encoders)
+
+```bash
+uv run python -m sdx single run -j 4
+```
+
+Final stdout (truncated — full matrix has 12 encoder columns and one
+row per paper task). The same numbers are written to per-metric CSVs
+under `exps/single_task/_summary_run1/`:
+
+```
+=== AUC.csv ===
+task              | ast    | audiomae | … | wavlm  | whisper
+------------------+--------+----------+---+--------+--------
+T3 (ravdess_emoC) | 0.7421 | 0.7588   | … | 0.8104 | 0.7693
+T4 (ravdess_emoBC)| 0.8132 | 0.8044   | … | 0.8627 | 0.8210
+T10 (torgo_dysC)  | 0.8910 | 0.8745   | … | 0.9012 | 0.8830
+…
+
+=== MAE.csv ===
+task              | ast    | … | wavlm  | whisper
+------------------+--------+---+--------+--------
+T11 (torgo_sevR)  | 1.2304 | … | 1.0917 | 1.1822
+T14 (mdvr_updrs5R)| 8.5632 | … | 7.9412 | 8.1108
+…
+
+Parsed 144 result files, 0 missing
+Wrote 11 CSV(s) to exps/single_task/_summary_run1/
+```
+
+### Cross-task (zero-shot transfer)
+
+Train on one dataset, evaluate on another. Stems are `T<train>_T<test>`
+for pairs and `c<train>_c<test>` for category groups.
+
+```bash
+uv run python -m sdx cross run -t T13_T10 -e wavlm hubert
+```
+
+Final stdout — rows use the descriptive `<train>_<test>` stem from the
+cross-task yaml:
+
+```
+=== AUC.csv ===
+task                 | hubert | wavlm
+---------------------+--------+-------
+mdvr_torgo_parkC_dysC| 0.6418 | 0.7102
+
+Parsed 2 result files, 0 missing
+Wrote 5 CSV(s) to exps/cross/_summary_run1/
+```
+
+### Cross-category (multi-source train/test groups)
+
+```bash
+uv run python -m sdx cross-cat run -t c2_c3 -e wavlm
+```
+
+The probe is trained on the union of one category's datasets and
+evaluated on another's. Stdout matches `cross`, with `cN_cM`-style
+stems:
+
+```
+=== AUC.csv ===
+task              | wavlm
+------------------+-------
+c2_c3 (category_c2_c3) | 0.7209
+
+Parsed 1 result files, 0 missing
+Wrote 5 CSV(s) to exps/cross_cat/_summary_run1/
+```
+
+### Data-efficiency sweep
+
+Re-runs `train` four times per pair at 6.25 / 12.5 / 25 / 50 % of
+training data; reuses the single-mode `prep` and `warm` caches.
+
+```bash
+uv run python -m sdx data-eff run -t T19 -e wavlm --level 06p25 50
+```
+
+`data-eff summary` prints one parsed/missing line per level rather than
+the metric tables (the per-level + combined matrices land on disk):
+
+```
+  level 06p25: parsed 1, missing 0
+  level 50:    parsed 1, missing 0
+
+Parsed 2 result files, 0 missing
+Wrote 12 CSV(s) under exps/data_eff/_summary_run1/
+```
+
+The combined progression CSV (e.g.
+`exps/data_eff/_summary_run1/AUC.csv`) has columns
+`(encoder × level)` so you can read accuracy vs. training-set size off
+a single row.
+
+### Status grid
+
+```bash
+uv run python -m sdx single status
+```
+
+```
+task              | ast | audiomae | clap | emotion2vec | hubert | … | whisper
+------------------+-----+----------+------+-------------+--------+---+--------
+T3 (ravdess_emoC) | ☑   | ☑        | ☑    | ☐           | ☑      | … | ☑
+T10 (torgo_dysC)  | ☑   | ☑        | ☑    | ☑           | ☑      | … | ☑
+…
+
+Legend: ☑ complete, ☐ incomplete
+Summary (single): 132/144 complete, 12 remaining
+```
+
+### Re-evaluate without retraining
+
+Loads the saved best trial, runs the test loop, overwrites
+`test_results.txt`. Pairs without a trained model are skipped.
+
+```bash
+uv run python -m sdx single train --test-only -t T19 -e wavlm
+```
+
+Stdout is the SpeechBrain test loop followed by the new metrics being
+written:
+
+```
+[…brain test loop…]
+Test stats: AUROC: 6.55e-01, F1: 6.23e-01, accuracy: 6.09e-01, loss: 6.69e-01
+Wrote exps/single_task/T19/wavlm-AvgTProbe-run1/test_results.txt
+```
 
 ## Encoders
 
 12 frozen backbones ship by default. The `Source` column is the identifier
 passed to `from_pretrained(...)`; the underlying weight files are downloaded
 on first use. Sizes / layer counts / sample rates live in the per-encoder yaml
-under [`ahb/configs/encoders/`](ahb/configs/encoders/) — that's the source of
+under [`sdx/configs/encoders/`](sdx/configs/encoders/) — that's the source of
 truth, not the table below.
 
 | Name (`--encoder`) | Source                                          | Hub        | Notes                                              |
@@ -185,37 +407,6 @@ truth, not the table below.
 | `emotion2vec` | `emotion2vec/emotion2vec_plus_large` (HF)         | `6c303ba987b86b93193de93e34bb2b077a6bedc4` | 2024-06-24  |
 | `opera_gt`    | `evelyn0414/OPERA`                                | `d8de4322870b596f0a6ff6ea907b9a6996cd243a` | 2024-11-15  |
 
-## Repository layout
-
-```
-.
-├── ahb/                    Harness — CLI, orchestrators, prep, dataio, brain
-│   ├── cli.py              python -m ahb …
-│   ├── orchestrator*.py    Task discovery, completion checks, run scheduling
-│   ├── train*.py           Probe training (single / cross / per-fold CV)
-│   ├── warm*.py            Encoder cache warmers
-│   ├── run*.py             Top-level run loops per mode
-│   ├── prep/               Per-dataset manifest builders
-│   ├── dataio/             HDF5 cache + speechbrain pipeline glue
-│   └── configs/            YAML hierarchy (tasks/, encoders/, probes/, registry.yaml)
-├── model/                  Encoder + probe + pooling implementations
-├── metadata_script/        One create_<dataset>_metadata.py per dataset
-├── scripts/                Per-dataset download scripts (open-access corpora)
-├── slurm/                  SLURM job templates
-├── third_party/OPERA/      Vendored OPERA encoder loader
-├── data/                   Audio + per-dataset CSVs (gitignored, large)
-├── exps/                   All experiment results, grouped by mode
-│   ├── single_task/        single-mode results (one folder per task per encoder)
-│   ├── cross/              cross-mode results
-│   ├── cross_cat/          cross-category-mode results
-│   ├── data_eff/           data-eff results, one subdir per level
-│   └── slurm_logs/         SLURM stdout/stderr (top-level; spans modes)
-├── embeddings_avg_finalv*/ Pre-computed encoder caches (HDF5, gitignored)
-├── logs/                   Per-run training logs
-├── run_all_slurm.sh        SLURM submission template
-└── invalidate_caches.sh    Edit-and-run cache invalidator
-```
-
 ## Datasets
 
 13 health-speech corpora ship with prep modules and metadata builders. Most
@@ -227,15 +418,15 @@ name under `data/` and the prefix used in task ids.
 |--------------|------------------------------------------------|--------|-------------------------------------------------------------------------------------------------------------------------------|
 | `ravdess`    | RAVDESS (Speech)                               | open   | https://zenodo.org/records/1188976 — `scripts/download_ravdess.sh`                                                             |
 | `coswara`    | Project Coswara (IISc)                         | open   | https://github.com/iiscleap/Coswara-Data — `scripts/download_coswara.sh`                                                       |
-| `mvdr`       | MDVR-KCL (King's College London + Fraunhofer)  | open   | https://zenodo.org/records/2867216 — `scripts/download_mvdr.sh` (CC BY 4.0)                                                    |
+| `mdvr`       | MDVR-KCL (King's College London + Fraunhofer)  | open   | https://zenodo.org/records/2867216 — `scripts/download_mdvr.sh` (CC BY 4.0)                                                    |
 | `ksof`       | Kassel State of Fluency                        | EULA   | https://zenodo.org/records/6801844 — sign EULA at https://th-nuernberg.github.io/kassel-state-of-fluency/                     |
 | `torgo`      | TORGO Database of Dysarthric Articulation      | open   | http://www.cs.toronto.edu/~complingweb/data/TORGO/torgo.html (pending cluster shutdown to verify)                             |
 | `uaspeech`   | UASpeech                                       | email  | https://speechtechnology.web.illinois.edu/uaspeech/ — request via uaspeech-requests@lists.illinois.edu                        |
 | `iemocap`    | IEMOCAP                                        | release form | https://sail.usc.edu/iemocap/ — academic release form to USC SAIL                                                             |
-| `dbank`      | DementiaBank ADReSS-M (ICASSP 2023 SPGC)       | DTA    | https://luzs.gitlab.io/madress-2023/ — request via madress2023@ed.ac.uk; data on TalkBank                                     |
+| `dementiabank`      | DementiaBank ADReSS-M (ICASSP 2023 SPGC)       | DTA    | https://luzs.gitlab.io/madress-2023/ — request via madress2023@ed.ac.uk; data on TalkBank                                     |
 | `aphasia`    | AphasiaBank (TalkBank)                         | registration | https://aphasia.talkbank.org/ — TalkBank account; some sub-corpora (APROCSA, Dysphagia) require extra approval                |
 | `edaic`      | E-DAIC (AVEC 2019 / DAIC-WOZ extended)         | DTA    | https://dcapswoz.ict.usc.edu/ — academic form to USC ICT                                                                      |
-| `c9s`        | COVID-19 Sounds (Cambridge)                    | DTA    | https://covid-19-sounds.org/ — DTA via covid-19-sounds@cl.cam.ac.uk                                                           |
+| `c19sounds`        | COVID-19 Sounds (Cambridge)                    | DTA    | https://covid-19-sounds.org/ — DTA via covid-19-sounds@cl.cam.ac.uk                                                           |
 | `avfad`      | Advanced Voice Function Assessment Database    | email  | https://acsa.web.ua.pt/AVFAD.htm — request via ieeta-acsa@ua.pt                                                               |
 
 **Staging contract.** Once raw data is on disk at `data/<name>/raw/`, a
@@ -244,19 +435,40 @@ writes the CSV to `data/<name>/processed/<name>.csv`. The CSV must have at
 least `uid, Participant_ID, split, label, path` — see
 [`metadata_script/README.md`](metadata_script/README.md).
 
-`ahb prep` automates the whole chain: it runs `scripts/download_<name>.sh`
+`sdx prep` automates the whole chain: it runs `scripts/download_<name>.sh`
 when raw is missing and the dataset is open, then `metadata_script/create_<name>_metadata.py`
-when the processed CSV is missing, then builds manifests. Datasets with
-restricted access fail loudly with the contact info from
-`ahb/configs/registry.yaml` (`datasets.<name>.contact`). Drop the upstream
-archive at `data/<name>/raw/` and re-run.
+when the processed CSV is missing, then builds manifests.
+
+**Missing data → soft skip with a warning.** Every paper task and cross
+task in [`sdx/configs/registry.yaml`](sdx/configs/registry.yaml) is
+enabled. Each `run` / `prep` invocation runs a pre-flight check
+([`sdx/prep/raw.py:dataset_available`](sdx/prep/raw.py)) — a dataset
+counts as "available" if `data/<name>/raw/` is staged, the processed
+CSV is on disk, *or* a `scripts/download_<name>.sh` exists. Tasks whose
+datasets are unavailable are dropped from the run with one warning per
+missing dataset:
+
+```
+[12:34:56] SKIP (no data)         : T7 (missing: dementiabank)
+…
+  ⚠ 'dementiabank': not staged. Contact: madress2023@ed.ac.uk (https://luzs.gitlab.io/madress-2023/)
+```
+
+`sdx all run` therefore proceeds against whatever is staged — out of
+the box that's the four open-access corpora (`ravdess`, `coswara`,
+`mdvr`, `torgo`). To bring a restricted dataset into scope: obtain it
+via the contacts in the table above, drop the archive at
+`data/<name>/raw/` (or a pre-built CSV at `data/<name>/processed/<name>.csv`),
+and re-run — no registry edits required. The `exclude_datasets:` list
+in `registry.yaml` is an emergency hatch for forcing skips even when
+data *is* staged, and is empty by default.
 
 
 ## Adding a task
 
-A task is one (dataset, label) pair — e.g. *T19* (`c9s_t1` internally) trains
+A task is one (dataset, label) pair — e.g. *T19* (`c19sounds_t1` internally) trains
 binary COVID classification on the COVID-19 Sounds dataset. Paper tasks are
-identified by ID (T1…T27) — see `paper_tasks` in `ahb/configs/registry.yaml`
+identified by ID (T1…T27) — see `paper_tasks` in `sdx/configs/registry.yaml`
 for the full ID-to-(dataset, label) mapping.
 
 1. **Stage the dataset.** Audio under `data/<dataset>/processed/audio/`,
@@ -264,10 +476,10 @@ for the full ID-to-(dataset, label) mapping.
    columns: `uid, Participant_ID, split, label, path` (`path` is relative to
    `processed/audio/`). See [`metadata_script/`](metadata_script/) for
    per-dataset builders.
-2. **Write a `prepare_*` function** under `ahb/prep/<dataset>.py`. It builds
-   train/valid/test manifests from the metadata CSV. `ahb/prep/c9s.py` and
-   `ahb/prep/torgo.py` are the templates.
-3. **Add a task yaml** at `ahb/configs/tasks/T<N>.yaml` (next free ID;
+2. **Write a `prepare_*` function** under `sdx/prep/<dataset>.py`. It builds
+   train/valid/test manifests from the metadata CSV. `sdx/prep/c19sounds.py` and
+   `sdx/prep/torgo.py` are the templates.
+3. **Add a task yaml** at `sdx/configs/tasks/T<N>.yaml` (next free ID;
    non-paper / scratch tasks may keep descriptive `<dataset>_<task>.yaml`
    stems instead) pointing at the prep function (`data_io_script`,
    `prepare_data_fn`), the label column (`label_key`), the loss, and
@@ -277,7 +489,7 @@ for the full ID-to-(dataset, label) mapping.
    `exps/single_task/T<N>/` and auxiliary tasks at the descriptive name —
    renaming a stem moves the on-disk results with it.
 4. **Register the task** by adding its stem (e.g. `T28`) to `paper_tasks` in
-   `ahb/configs/registry.yaml`. That's the single source of truth used by
+   `sdx/configs/registry.yaml`. That's the single source of truth used by
    every orchestrator.
 
 For per-dataset staging conventions and the full CSV schema, see
@@ -287,31 +499,49 @@ For per-dataset staging conventions and the full CSV schema, see
 
 A cross task trains on one dataset and evaluates on another (`cross`) or on
 multi-source train/test groups (`cross-cat`). The shape mirrors single-mode but
-configs live under `ahb/configs/cross_tasks/` and registration goes into a
-different list.
+configs live under `sdx/configs/cross_tasks/`, registration goes into a
+different list, and the cross / cross-cat yamls now own every warm-time
+knob themselves (no fall-through to single-task yamls).
 
-1. **Stage both datasets.** Same contract as single — audio under
+1. **Stage every dataset.** Same contract as single — audio under
    `data/<dataset>/processed/audio/`, CSV at
-   `data/<dataset>/processed/<dataset>.csv` for *each* dataset the cross task
+   `data/<dataset>/processed/<dataset>.csv` for each dataset the cross task
    touches.
-2. **Write a `prepare_*` function** under `ahb/prep/cross_<train>_<test>.py`
-   (or extend `ahb/prep/category.py` for cross-cat). It builds the manifests
-   by joining the per-dataset CSVs. `ahb/prep/cross_aphasia_dbank.py` and
-   `ahb/prep/category.py` are the templates.
-3. **Add a cross-task yaml** at `ahb/configs/cross_tasks/<stem>.yaml`. Stems
+2. **Write a `prepare_*` function** under `sdx/prep/cross_<train>_<test>.py`
+   (or extend `sdx/prep/category.py` for cross-cat). It builds the manifests
+   by joining the per-dataset CSVs. `sdx/prep/cross_aphasia_dementiabank.py`
+   and `sdx/prep/category.py` are the templates.
+3. **Add a cross-task yaml** at `sdx/configs/cross_tasks/<stem>.yaml`. Stems
    follow the paper IDs of the underlying single tasks: pair tasks use
    `T<train>_T<test>` (e.g. `T9_T7`), category tasks use `c<train>_c<test>`
-   (e.g. `c2_c3`). The stem also names the experiment folder on disk
+   (e.g. `c2_c3`). The stem names the experiment folder on disk
    (`exps/cross/T9_T7/...`, `exps/cross_cat/c2_c3/...`).
-   - Pair tasks use singular `train_dataset` / `test_dataset` and a combined
-     `dataset:` field (e.g. `aphasia_dbank`).
-     See [`T9_T7.yaml`](ahb/configs/cross_tasks/T9_T7.yaml).
-   - Category tasks use plural `train_datasets` / `test_datasets` lists and
-     `setting_1/2/3` blocks; `dataset:` should be `cross_tasks`.
-     See [`c1_c2.yaml`](ahb/configs/cross_tasks/c1_c2.yaml).
-   Both schemas point at the prep function via `data_io_script` /
-   `prepare_data_fn` and set `label_key`, `loss`, and `task_type`.
-4. **Register the task** in `ahb/configs/registry.yaml`:
+
+   **Cross pair schema** ([`T9_T7.yaml`](sdx/configs/cross_tasks/T9_T7.yaml)):
+   - `train_dataset`, `test_dataset` (singular), combined `dataset:` field
+     (e.g. `aphasia_dementiabank`).
+   - `data_io_script`, `prepare_data_fn`, `label_key`, `loss`, `task_type`.
+   - **Train-side warm knobs** (only the train cache is augmented):
+     `num_aug_ver`, `snr_low`, `snr_high`, `speed`,
+     `train_split_by_boundary`.
+   - **Test-side warm knob:** `test_split_by_boundary`. Test cache is
+     always 1 version, no augmentation.
+
+   **Cross-cat schema** ([`c1_c2.yaml`](sdx/configs/cross_tasks/c1_c2.yaml)):
+   - `train_datasets` / `test_datasets` (plural lists); `dataset: cross_tasks`.
+   - `data_io_script`, `prepare_data_fn`, `label_key`, `loss`, `task_type`.
+   - One **`setting_<N>` block per train dataset** (idx-aligned with
+     `train_datasets`), each carrying `num_aug_ver`, `split_by_boundary`,
+     `snr_low`, `snr_high`, `speed` for that dataset's caches.
+   - One **`test_setting_<N>` block per test dataset** (idx-aligned with
+     `test_datasets`), each carrying `split_by_boundary`. Test caches are
+     always 1 version, no augmentation.
+
+   The cross / cross-cat warmers read these blocks directly — they no longer
+   fall back to `tasks/T<n>.yaml`. If you want to mirror a single task's
+   augmentation defaults (`num_aug_ver`, `snr_*`, `speed`), copy them into
+   the cross yaml when authoring it.
+4. **Register the task** in `sdx/configs/registry.yaml`:
    - Pair tasks → append the stem to `cross_pairs:`.
    - Category tasks → append the stem to `cross_categories:`.
    Unregistered yamls are ignored by `cross run` / `cross-cat run` /
@@ -325,44 +555,22 @@ different list.
    `(B,)` tensor of **relative** lengths in `[0, 1]` (fraction of the padded
    batch length), matching the SpeechBrain convention. See `model/wavlm.py`
    for the minimal pattern.
-2. Add an encoder yaml at `ahb/configs/encoders/<name>.yaml` with
+2. Add an encoder yaml at `sdx/configs/encoders/<name>.yaml` with
    `sample_rate`, `feature_dim`, `num_layers`, `layer_dim`, `max_length`,
    `min_length` and an `encoder: !new:…` construction.
-3. Register the encoder in `ahb/configs/registry.yaml` under `encoders:`.
+3. Register the encoder in `sdx/configs/registry.yaml` under `encoders:`.
    The key is the `--encoder` value and shows up in experiment folder names.
 
 For the full encoder / probe / pool contracts and additional examples, see
 [`model/README.md`](model/README.md).
 
-## Reading results
+## Cross-validation tasks
 
-Each completed `(task, encoder)` job writes:
-
-- `exps/single_task/<task>/<encoder>-AvgTProbe-run1/test_results.txt` — flat
-  `key: value` pairs (AUROC, F1, accuracy, AUROC_CI_low/high, MAE, …).
-  Cross-validation tasks (see below) write `test_results.yaml` with per-fold detail.
-- `events.out.tfevents.*` — TensorBoard scalar logs.
-- `best_hparams.yaml` — winning hyperparameters from the Ray Tune search.
-
-Aggregate everything into per-metric CSVs (and pretty-print the same
-matrices to stdout):
-
-```bash
-uv run python -m ahb single summary
-ls exps/single_task/_summary_run1/   # AUC.csv, F1.csv, MAE.csv, completion.csv, …
-```
-
-`run` invokes the matching mode's `summary` automatically as its third
-phase, so a single `ahb single run` ends with the metric tables for the
-pairs it just trained printed to stdout.
-
-### Cross-validation tasks
-
-Tasks whose yaml sets `num_fold:` (in `ahb/configs/tasks/<stem>.yaml`) are
-routed through per-fold CV training automatically — `ahb single train` and
-`ahb single run` both dispatch based on that field
-(`ahb/orchestrator.py:is_cv`). Results are aggregated (mean ± std across
-folds) into `test_results.yaml`. 
+Tasks whose yaml sets `num_fold:` (in `sdx/configs/tasks/<stem>.yaml`) are
+routed through per-fold CV training automatically — `sdx single train` and
+`sdx single run` both dispatch based on that field
+([sdx/orchestrator.py](sdx/orchestrator.py) `is_cv`). Results are
+aggregated (mean ± std across folds) into `test_results.yaml`.
 
 Currently CV-routed (5-fold each):
 
@@ -372,7 +580,7 @@ Currently CV-routed (5-fold each):
 | `ravdess`  | `T3` (ravdess_emoC), `T4` (ravdess_emoBC)                                                        |
 | `torgo`    | `T10` (torgo_dysC), `T11` (torgo_sevR)                                                           |
 | `uaspeech` | `T12` (uaspeech_dysC)                                                                            |
-| `mvdr`     | `T13` (mvdr_parkC), `T14` (mvdr_updrs5R), `T15` (mvdr_updrs18R), `T16` (mvdr_hyR)                |
+| `mdvr`     | `T13` (mdvr_parkC), `T14` (mdvr_updrs5R), `T15` (mdvr_updrs18R), `T16` (mdvr_hyR)                |
 | `ksof`     | `T17` (ksof_intC), `T18` (ksof_stutL)                                                            |
 
 To add or remove a task from this set, toggle `num_fold` in its task yaml —
@@ -403,7 +611,36 @@ ENCODER=wavlm,ast DATASET=torgo,ravdess JOBS=4 sbatch run_all_slurm.sh
 ```
 
 Per-cluster job specs live in `slurm/` (e.g. `slurm/trillium.slurm`).
+## Repository layout
 
-## TODO: 
+```
+.
+├── sdx/                    Harness — CLI, orchestrators, prep, dataio, brain
+│   ├── cli.py              python -m sdx …
+│   ├── orchestrator*.py    Task discovery, completion checks, run scheduling
+│   ├── train*.py           Probe training (single / cross / per-fold CV)
+│   ├── warm*.py            Encoder cache warmers
+│   ├── run*.py             Top-level run loops per mode
+│   ├── prep/               Per-dataset manifest builders
+│   ├── dataio/             HDF5 cache + speechbrain pipeline glue
+│   └── configs/            YAML hierarchy (tasks/, encoders/, probes/, registry.yaml)
+├── model/                  Encoder + probe + pooling implementations
+├── metadata_script/        One create_<dataset>_metadata.py per dataset
+├── scripts/                Per-dataset download scripts (open-access corpora)
+├── slurm/                  SLURM job templates
+├── third_party/OPERA/      Vendored OPERA encoder loader
+├── data/                   Audio + per-dataset CSVs (gitignored, large)
+├── exps/                   All experiment results, grouped by mode
+│   ├── single_task/        single-mode results (one folder per task per encoder)
+│   ├── cross/              cross-mode results
+│   ├── cross_cat/          cross-category-mode results
+│   ├── data_eff/           data-eff results, one subdir per level
+│   └── slurm_logs/         SLURM stdout/stderr (top-level; spans modes)
+├── embeddings_avg_final/   Pre-computed encoder caches (HDF5, gitignored)
+├── logs/                   Per-run training logs
+├── run_all_slurm.sh        SLURM submission template
+└── invalidate_caches.sh    Edit-and-run cache invalidator
+```
+<!-- ## TODO: 
   1. Drop the level/single_avg/single cache tag + class-level prune of probe/pool unreachables (cache → v3, drop output_hidden_state outside model wrappers
-  2. Paralel cache gen
+  2. Paralel cache gen -->

@@ -3,10 +3,10 @@
 # Runs each per-dataset downloader in sequence; safe to re-run (downloaders
 # skip already-fetched archives and extracted trees).
 #
-# Covers: ravdess (Zenodo), mvdr / MDVR-KCL (Zenodo), coswara (GitHub clone +
+# Covers: ravdess (Zenodo), mdvr / MDVR-KCL (Zenodo), coswara (GitHub clone +
 # upstream extract_data.py — heavy, tens of GB once extracted).
 #
-# License-gated datasets (aphasia, avfad, c9s, dbank, edaic, iemocap, ksof,
+# License-gated datasets (aphasia, avfad, c19sounds, dementiabank, edaic, iemocap, ksof,
 # nemours, torgo, uaspeech) need a DTA / EULA / email request — see the
 # Datasets table in the top-level README.
 #
@@ -27,8 +27,8 @@ done
 echo "==> ravdess"
 bash "$HERE/download_ravdess.sh"
 
-echo "==> mvdr (MDVR-KCL)"
-bash "$HERE/download_mvdr.sh"
+echo "==> mdvr (MDVR-KCL)"
+bash "$HERE/download_mdvr.sh"
 
 if [[ "$SKIP_COSWARA" == "1" ]]; then
   echo "==> coswara: skipped (--skip-coswara)"

@@ -99,7 +99,7 @@ decorator==5.2.1
 editdistance==0.8.1
     # via funasr
 efficientnet-pytorch==0.7.1
-    # via audio-health-benchmark
+    # via speechdx
 einops==0.8.2
     # via qwen-tts
 executing==2.2.1
@@ -129,7 +129,7 @@ fsspec==2026.3.0
     #   ray
     #   torch
 funasr==1.3.1
-    # via audio-health-benchmark
+    # via speechdx
 gradio==6.14.0
     # via qwen-tts
 gradio-client==2.5.0
@@ -145,7 +145,7 @@ h11==0.16.0
     #   httpcore
     #   uvicorn
 h5py==3.16.0
-    # via audio-health-benchmark
+    # via speechdx
 hf-gradio==0.4.1
     # via gradio
 hf-xet==1.4.3 ; platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
@@ -160,7 +160,7 @@ httpx==0.28.1
 huggingface-hub==0.36.2
     # via
     #   accelerate
-    #   audio-health-benchmark
+    #   speechdx
     #   gradio
     #   gradio-client
     #   speechbrain
@@ -171,7 +171,7 @@ hydra-core==1.3.2
     # via funasr
 hyperpyyaml==1.2.3
     # via
-    #   audio-health-benchmark
+    #   speechdx
     #   speechbrain
 idna==3.13
     # via
@@ -180,7 +180,7 @@ idna==3.13
     #   requests
     #   yarl
 ipykernel==7.2.0
-    # via audio-health-benchmark
+    # via speechdx
 ipython==9.10.1 ; python_full_version < '3.12'
     # via ipykernel
 ipython==9.12.0 ; python_full_version >= '3.12'
@@ -225,7 +225,7 @@ lazy-loader==0.5
     # via librosa
 librosa==0.11.0
     # via
-    #   audio-health-benchmark
+    #   speechdx
     #   funasr
     #   qwen-tts
     #   torchlibrosa
@@ -248,7 +248,7 @@ markupsafe==3.0.3
     #   mako
 matplotlib==3.10.9
     # via
-    #   audio-health-benchmark
+    #   speechdx
     #   seaborn
 matplotlib-inline==0.2.1
     # via
@@ -280,7 +280,7 @@ numba==0.65.1
 numpy==2.4.4
     # via
     #   accelerate
-    #   audio-health-benchmark
+    #   speechdx
     #   contourpy
     #   gradio
     #   h5py
@@ -350,7 +350,7 @@ omegaconf==2.3.0
 onnxruntime==1.25.1
     # via qwen-tts
 optuna==4.8.0
-    # via audio-health-benchmark
+    # via speechdx
 orjson==3.11.8
     # via gradio
 oss2==2.19.1
@@ -379,7 +379,7 @@ packaging==26.1
     #   transformers
 pandas==3.0.2
     # via
-    #   audio-health-benchmark
+    #   speechdx
     #   gradio
     #   ray
     #   seaborn
@@ -449,7 +449,7 @@ python-dateutil==2.9.0.post0
 python-multipart==0.0.27
     # via gradio
 pytorch-lightning==2.6.1
-    # via audio-health-benchmark
+    # via speechdx
 pytorch-wpe==0.0.1
     # via funasr
 pytz==2026.2
@@ -457,7 +457,7 @@ pytz==2026.2
 pyyaml==6.0.3
     # via
     #   accelerate
-    #   audio-health-benchmark
+    #   speechdx
     #   funasr
     #   gradio
     #   huggingface-hub
@@ -473,9 +473,9 @@ pyzmq==27.1.0
     #   ipykernel
     #   jupyter-client
 qwen-tts==0.1.1
-    # via audio-health-benchmark
+    # via speechdx
 ray==2.55.1
-    # via audio-health-benchmark
+    # via speechdx
 referencing==0.37.0
     # via
     #   jsonschema
@@ -511,13 +511,13 @@ safetensors==0.7.0
     #   transformers
 scikit-learn==1.8.0
     # via
-    #   audio-health-benchmark
+    #   speechdx
     #   librosa
     #   pynndescent
     #   umap-learn
 scipy==1.17.1
     # via
-    #   audio-health-benchmark
+    #   speechdx
     #   funasr
     #   librosa
     #   pynndescent
@@ -525,7 +525,7 @@ scipy==1.17.1
     #   speechbrain
     #   umap-learn
 seaborn==0.13.2
-    # via audio-health-benchmark
+    # via speechdx
 semantic-version==2.10.0
     # via gradio
 sentencepiece==0.2.1
@@ -544,7 +544,7 @@ six==1.17.0
     #   python-dateutil
 soundfile==0.13.1
     # via
-    #   audio-health-benchmark
+    #   speechdx
     #   funasr
     #   librosa
     #   qwen-tts
@@ -554,7 +554,7 @@ sox==1.5.0
 soxr==1.1.0
     # via librosa
 speechbrain @ git+https://github.com/speechbrain/speechbrain.git@da704dd9fd710df5c6c93ea2d31a028837d93d85
-    # via audio-health-benchmark
+    # via speechdx
 sqlalchemy==2.0.49
     # via
     #   alembic
@@ -584,7 +584,7 @@ tensorboardx==2.6.5
 threadpoolctl==3.6.0
     # via scikit-learn
 timm==1.0.26
-    # via audio-health-benchmark
+    # via speechdx
 tokenizers==0.22.2
     # via transformers
 tomlkit==0.14.0
@@ -592,7 +592,7 @@ tomlkit==0.14.0
 torch==2.11.0
     # via
     #   accelerate
-    #   audio-health-benchmark
+    #   speechdx
     #   efficientnet-pytorch
     #   pytorch-lightning
     #   speechbrain
@@ -603,16 +603,16 @@ torch-complex==0.4.4
     # via funasr
 torchaudio==2.11.0
     # via
-    #   audio-health-benchmark
+    #   speechdx
     #   qwen-tts
     #   speechbrain
 torchlibrosa==0.1.0
-    # via audio-health-benchmark
+    # via speechdx
 torchmetrics==1.9.0
     # via pytorch-lightning
 torchvision==0.26.0
     # via
-    #   audio-health-benchmark
+    #   speechdx
     #   timm
 tornado==6.5.5
     # via
@@ -620,7 +620,7 @@ tornado==6.5.5
     #   jupyter-client
 tqdm==4.67.3
     # via
-    #   audio-health-benchmark
+    #   speechdx
     #   funasr
     #   huggingface-hub
     #   modelscope
@@ -638,7 +638,7 @@ traitlets==5.14.3
     #   matplotlib-inline
 transformers==4.57.3
     # via
-    #   audio-health-benchmark
+    #   speechdx
     #   qwen-tts
 triton==3.6.0 ; sys_platform == 'linux'
     # via torch

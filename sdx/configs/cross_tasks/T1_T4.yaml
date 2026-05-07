@@ -1,0 +1,32 @@
+task: T1_T4
+task_type: B
+
+dataset: edaic_ravdess
+train_dataset: edaic
+test_dataset: ravdess
+
+data_io_script: training.dataio.prep_edaic_ravdess
+prepare_data_fn: prepare_edaic_ravdess_depC_emoBC
+
+label_key: label_encoded
+skip_prep: False
+
+num_labels: 1
+
+pos_weight: !new:torch.Tensor
+  data: [3.2]
+
+loss: !new:torch.nn.BCEWithLogitsLoss
+  pos_weight: !ref <pos_weight>
+
+train_split_by_boundary: true
+test_split_by_boundary: false
+
+num_aug_ver: 3
+snr_low: 0
+snr_high: 15
+speed: !new:builtins.list
+  - !new:builtins.range
+    - 90 #start
+    - 110 #stop
+    - 1 #step

@@ -1,0 +1,28 @@
+task: T13_T10
+task_type: B
+
+dataset: mdvr_torgo
+train_dataset: mdvr
+test_dataset: torgo
+
+data_io_script: training.dataio.prep_mdvr_torgo
+prepare_data_fn: prepare_mdvr_torgo_parkC_dysC
+
+label_key: label_encoded
+skip_prep: False
+
+num_labels: 1
+
+loss: !new:torch.nn.BCEWithLogitsLoss
+
+train_split_by_boundary: false
+test_split_by_boundary: false
+
+num_aug_ver: 5
+snr_low: 0
+snr_high: 15
+speed: !new:builtins.list
+  - !new:builtins.range
+    - 90 #start
+    - 110 #stop
+    - 1 #step

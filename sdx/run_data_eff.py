@@ -1,0 +1,351 @@
+"""``sdx run-data-eff`` — data-efficiency orchestrator.
+
+Salvaged from ``run_all_data_eff.py:cmd_run`` (lines 374-571). Same
+shared-cache reader scheduling as ``sdx/run.py`` but operates on
+(task, encoder, level) triples: each level gets its own subsampled
+manifest under ``./exps/data_eff/<level>/`` and shares the encoder
+cache with the full benchmark.
+
+Subprocess chain per job:
+- writer: ``sdx warm`` (the regular cache, shared across levels) →
+          ``sdx train --level-dir <level>`` (writes to exps/data_eff/...)
+- reader: just ``sdx train --level-dir <level>``
+- cache_only: just ``sdx warm``
+- test_only: ``sdx train --level-dir <level> --overrides "test_only: true"``
+
+CV tasks (mdvr_*) use ``sdx train-cv`` instead of ``sdx train``.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import subprocess
+import threading
+import time
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+from pathlib import Path
+
+from sdx.log import _emit, _now, _slug, _JobDashboard
+from sdx.orchestrator import task_ids, task_num_ver, task_weight
+from sdx.orchestrator_data_eff import (
+    LEVELS,
+    LOGS_ROOT,
+    discover_tasks,
+    encoders_default,
+    ensure_manifest_data_eff,
+    get_output_folder,
+    get_task_info,
+    is_complete,
+    is_cv,
+)
+from sdx.prep.dispatch import datasets_for_task
+from sdx.prep.raw import MissingDatasetError, dataset_available
+
+
+def _has_trained_model(output_folder: Path, task_stem: str) -> bool:
+    """True if a prior training run left a best-config artifact we can re-evaluate."""
+    if is_cv(task_stem):
+        return any(output_folder.glob("best_hparams_fold_*.yaml"))
+    return (output_folder / "best_hparams.yaml").exists()
+
+
+def _run_subprocess(cmd: list[str], log_path: Path, label: str) -> bool:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    with log_path.open("a", buffering=1) as f:
+        f.write(f"\n{'='*60}\n")
+        f.write(f"  Command: {' '.join(cmd)}\n")
+        f.write(f"  Started: {datetime.now().isoformat(timespec='seconds')}\n")
+        f.write(f"{'='*60}\n")
+        f.flush()
+        try:
+            subprocess.run(cmd, check=True, stdout=f,
+                           stderr=subprocess.STDOUT, env=env)
+            f.write(f"\n--- {label} subprocess OK ---\n")
+            return True
+        except subprocess.CalledProcessError as e:
+            f.write(f"\n--- {label} subprocess FAILED (exit {e.returncode}) ---\n")
+            return False
+
+
+def _execute_job_de(task_stem: str, model_name: str, level_dir: str,
+                    role: str, *, device: str | None,
+                    test_only: bool, cache_only: bool,
+                    tag: str, log_path: Path,
+                    overwrite: bool = False,
+                    overrides: str = "") -> tuple[str, bool, float]:
+    label = f"{task_stem} × {model_name} @ {level_dir}"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("w") as f:
+        f.write(f"{'='*60}\n  Running: {label}\n")
+        f.write(f"  Role: {role}, test_only={test_only}, cache_only={cache_only}, tag={tag}\n")
+        f.write(f"  level_dir: {level_dir}\n")
+        f.write(f"  Started: {datetime.now().isoformat(timespec='seconds')}\n")
+        f.write(f"{'='*60}\n")
+
+    # ``sdx single train`` auto-routes to per-fold CV via the task yaml.
+    # Warm caches are level-agnostic, so we use single warm; train takes
+    # --level-dir to reroute output paths into exps/data_eff/<level>/.
+    train_extras = ["--leaf", "--tag", tag]
+    if overwrite:
+        train_extras.append("--overwrite")
+    user_ov = ["--overrides", overrides] if overrides else []
+    base = ["python", "-m", "sdx", "single"]
+    target = ["-t", task_stem, "-e", model_name]
+    level_arg = ["--level-dir", level_dir]
+    start = time.time()
+    success = True
+
+    if cache_only:
+        cmd = [*base, "warm", *target]
+        if device:
+            cmd.append(f"--device={device}")
+        success = _run_subprocess(cmd, log_path, "warm")
+    elif test_only:
+        merged = (overrides + "\n" if overrides else "") + "test_only: true"
+        cmd = [*base, "train", *target, *level_arg, *train_extras,
+               "--overrides", merged]
+        success = _run_subprocess(cmd, log_path, "test")
+    elif role == "writer":
+        warm_cmd = [*base, "warm", *target]
+        if device:
+            warm_cmd.append(f"--device={device}")
+        if not _run_subprocess(warm_cmd, log_path, "warm"):
+            success = False
+        if success:
+            train_cmd = [*base, "train", *target, *level_arg, *train_extras, *user_ov]
+            success = _run_subprocess(train_cmd, log_path, "train")
+    else:  # reader
+        cmd = [*base, "train", *target, *level_arg, *train_extras, *user_ov]
+        success = _run_subprocess(cmd, log_path, "train")
+
+    elapsed = time.time() - start
+    with log_path.open("a") as f:
+        marker = "✓ OK" if success else "✗ FAILED"
+        f.write(f"\n{'='*60}\n  {marker}: {label} in {elapsed/60:.1f} min\n")
+        f.write(f"  Finished: {datetime.now().isoformat(timespec='seconds')}\n")
+        f.write(f"{'='*60}\n")
+    return label, success, elapsed
+
+
+def cmd_run_data_eff(args: argparse.Namespace, *,
+                     logs_root: Path | None = None) -> None:
+    """Run all (task × encoder × level) combos with shared-cache reader scheduling."""
+    logs_root = logs_root or LOGS_ROOT
+    tasks = discover_tasks(args.dataset, args.task)
+    skipped = 0
+    test_only = getattr(args, "test_only", False)
+    cache_only = getattr(args, "cache_only", False)
+    no_writer = getattr(args, "no_writer", False)
+    overwrite = getattr(args, "overwrite", False)
+    dry_run = getattr(args, "dry_run", False)
+    tag = getattr(args, "tag", "run1")
+    overrides = getattr(args, "overrides", "") or ""
+
+    all_encoders = encoders_default()
+    if args.encoder:
+        encoders = {e: all_encoders[e] for e in args.encoder if e in all_encoders}
+    else:
+        encoders = all_encoders
+
+    # --level filters down to a subset of LEVELS.
+    if getattr(args, "level", None):
+        active_levels = [(d, v) for d, v in LEVELS if d in set(args.level)]
+    else:
+        active_levels = list(LEVELS)
+
+    # Pre-flight: drop tasks whose datasets aren't staged.
+    unavailable_datasets: set[str] = set()
+    available_tasks: list[str] = []
+    for task_stem in tasks:
+        missing = [ds for ds in datasets_for_task(task_stem)
+                   if not dataset_available(ds)]
+        if missing:
+            unavailable_datasets.update(missing)
+            _emit(f"[{_now()}] SKIP (no data)         : {task_stem} (missing: {', '.join(missing)})")
+            skipped += 1
+            continue
+        available_tasks.append(task_stem)
+    if unavailable_datasets:
+        from sdx.registry import datasets as registry_datasets
+        info = registry_datasets()
+        print()
+        for ds in sorted(unavailable_datasets):
+            meta = info.get(ds, {})
+            contact = meta.get("contact") or "(see README dataset table)"
+            print(f"  ⚠ {ds!r}: not staged. Contact: {contact}")
+
+    # Pending = (task_stem, model_name, level_dir).
+    pending: list[tuple[str, str, str]] = []
+    completed_by_ds_enc: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for level_dir, _ in active_levels:
+        for task_stem in available_tasks:
+            dataset, _ = get_task_info(task_stem)
+            for model_name in encoders:
+                folder = get_output_folder(task_stem, model_name, level_dir, tag)
+                if cache_only:
+                    pass
+                elif test_only:
+                    if not _has_trained_model(folder, task_stem):
+                        _emit(f"[{_now()}] SKIP (no trained model): {task_stem} × {model_name} @ {level_dir}")
+                        skipped += 1
+                        continue
+                elif not overwrite and is_complete(folder, task_stem):
+                    _emit(f"[{_now()}] SKIP (done)            : {task_stem} × {model_name} @ {level_dir}")
+                    skipped += 1
+                    completed_by_ds_enc[(dataset, model_name)].append(task_stem)
+                    continue
+                pending.append((task_stem, model_name, level_dir))
+
+    if dry_run:
+        print(f"\n[dry-run] would queue {len(pending)} (task × encoder × level); skipped {skipped}.")
+        for ts, mn, lv in pending:
+            print(f"  {ts} × {mn} @ {lv}")
+        return
+
+    # Subsample manifests up-front for every (task, level) we'll touch — keeps
+    # dispatch hot-path free of subsampling latency.
+    needed_subsamples = {(ts, lv) for ts, _, lv in pending}
+    failed_tasks: set[str] = set()
+    for (ts, lv) in sorted(needed_subsamples):
+        try:
+            ensure_manifest_data_eff(ts, lv)
+        except MissingDatasetError as e:
+            print(f"⚠ {ts}@{lv}: dataset unavailable — {e}", flush=True)
+            failed_tasks.add(ts)
+        except Exception as e:
+            print(f"⚠ subsample for {ts}@{lv} failed: {e}", flush=True)
+            failed_tasks.add(ts)
+    if failed_tasks:
+        before = len(pending)
+        pending = [(ts, mn, lv) for ts, mn, lv in pending if ts not in failed_tasks]
+        skipped += before - len(pending)
+
+    # The encoder cache is SHARED across levels — same train_cache_dir for every
+    # (task, encoder) regardless of level. So writer/reader is keyed on the
+    # source task's id set, not the per-level subsample.
+    written: dict[tuple[str, str], set[tuple[str, int]]] = defaultdict(set)
+    for (ds, enc), tlist in completed_by_ds_enc.items():
+        for ts in tlist:
+            try:
+                ids = task_ids(ts)
+                nv = task_num_ver(ts)
+                written[(ds, enc)] |= {(uid, v) for uid in ids for v in range(nv)}
+            except Exception:
+                pass
+
+    total_jobs = len(pending)
+    pending.sort(key=lambda j: -task_weight(j[0]))
+
+    max_workers = max(1, args.max_workers)
+    header_title = ("Train start" if getattr(args, "command", None) == "train"
+                    else "Run start  ")
+    mode = (
+        "cache-only" if cache_only
+        else "test-only" if test_only
+        else ("train-only" if no_writer and getattr(args, "command", None) == "train"
+              else ("train+test (no-writer)" if no_writer else "train+test"))
+    )
+    dashboard = _JobDashboard(
+        total_jobs=total_jobs,
+        logs_root=logs_root,
+        header_lines=(
+            f"[{_now()}] {header_title}: {total_jobs} pending, {skipped} skipped",
+            f"           workers : up to {max_workers} concurrent",
+            f"           mode    : {mode}  (data-eff)",
+            f"           tag     : {tag}",
+            f"           levels  : {[d for d, _ in active_levels]}",
+        ),
+    )
+
+    # Warm owns the correctness lock at the cache boundary. These per-key
+    # locks are just a same-process scheduler hint so one run invocation
+    # doesn't launch duplicate warmers for the same shared cache.
+    ds_enc_locks: dict[tuple[str, str], threading.Lock] = {}
+    for ts, mn, _ in pending:
+        ds = get_task_info(ts)[0]
+        ds_enc_locks.setdefault((ds, mn), threading.Lock())
+    written_lock = threading.Lock()
+
+    def _execute(job, idx, role):
+        task_stem, model_name, level_dir = job
+        label = f"{task_stem} × {model_name} @ {level_dir}"
+        log_path = (dashboard.run_log_dir / level_dir
+                    / f"{_slug(task_stem)}__{_slug(model_name)}.log")
+
+        dashboard.start_job(idx, role, label, log_path)
+        result = _execute_job_de(
+            task_stem, model_name, level_dir, role,
+            device=args.device, test_only=test_only, cache_only=cache_only,
+            tag=tag, log_path=log_path, overwrite=overwrite,
+            overrides=overrides,
+        )
+        _, ok, elapsed = result
+        dashboard.finish_job(idx, label, ok=ok, elapsed=elapsed, log_path=log_path)
+        return result
+
+    def dispatch(job, idx):
+        task_stem, model_name, level_dir = job
+        dataset, _ = get_task_info(task_stem)
+        key = (dataset, model_name)
+        label = f"{task_stem} × {model_name} @ {level_dir}"
+
+        if test_only:
+            return _execute(job, idx, "test")
+        if no_writer:
+            return _execute(job, idx, "reader")
+
+        try:
+            ids = task_ids(task_stem)
+            nv = task_num_ver(task_stem)
+            needed = {(uid, v) for uid in ids for v in range(nv)}
+        except Exception:
+            needed = None
+
+        is_reader = False
+        if needed is not None:
+            with written_lock:
+                is_reader = needed.issubset(written[key])
+
+        if is_reader:
+            if cache_only:
+                _emit(f"[{_now()}] SKIP (cache covered)   : {label}")
+                return label, True, 0.0
+            return _execute(job, idx, "reader")
+
+        ds_lock = ds_enc_locks[key]
+        ds_lock.acquire()
+        released = False
+        try:
+            if needed is not None:
+                with written_lock:
+                    satisfied = needed.issubset(written[key])
+            else:
+                satisfied = False
+            if satisfied:
+                ds_lock.release()
+                released = True
+                if cache_only:
+                    _emit(f"[{_now()}] SKIP (cache covered)   : {label}")
+                    return label, True, 0.0
+                return _execute(job, idx, "reader")
+            result = _execute(job, idx, "writer")
+            _, success, _ = result
+            if success and needed is not None:
+                with written_lock:
+                    written[key] |= needed
+            return result
+        finally:
+            if not released:
+                ds_lock.release()
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(dispatch, job, i): job for i, job in enumerate(pending)}
+        for future in as_completed(futures):
+            future.result()
+
+    done_label = "cache warmed" if cache_only else "completed"
+    dashboard.print_summary(done_label=done_label, skipped=skipped)

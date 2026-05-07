@@ -1,8 +1,8 @@
 # Ray reads this like .gitignore to filter files uploaded as working_dir.
 # Strategy: exclude everything at the project root, then re-include only the
 # directories Ray workers actually need to import.
-# - ahb/: the new harness package (Ray trials launched by ahb/train.py).
+# - sdx/: the new harness package (Ray trials launched by sdx/train.py).
 # - model/: imported by the encoder yamls (!new: model.X.Y).
 /*
-!/ahb/
+!/sdx/
 !/model/

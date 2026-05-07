@@ -1,0 +1,28 @@
+task: T25_T27
+task_type: B
+
+dataset: coswara_avfad
+train_dataset: coswara
+test_dataset: avfad
+
+data_io_script: training.dataio.prep_coswara_avfad
+prepare_data_fn: prepare_coswara_avfad_covidC_pathC
+
+label_key: label_encoded
+skip_prep: False
+
+num_labels: 1
+
+loss: !new:torch.nn.BCEWithLogitsLoss
+
+train_split_by_boundary: false
+test_split_by_boundary: false
+
+num_aug_ver: 3
+snr_low: 0
+snr_high: 15
+speed: !new:builtins.list
+  - !new:builtins.range
+    - 90 #start
+    - 110 #stop
+    - 1 #step

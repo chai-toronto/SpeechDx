@@ -1,0 +1,32 @@
+task: T4
+task_type: B
+
+dataset: ravdess
+
+# ----------------------------------
+# DYNAMIC SCRIPT CONFIGURATION (Generic)
+# ----------------------------------
+data_io_script: training.dataio.prep_ravdess
+prepare_data_fn: prepare_emoBC
+
+label_key: label_encoded
+# Stratify on the original 8-emotion int (richer balance) before binary collapse.
+raw_label_key: label
+
+skip_prep: False
+
+num_fold: 5
+
+num_labels: 1
+
+loss: !new:torch.nn.BCEWithLogitsLoss
+
+# Augmentation
+num_aug_ver: 3
+snr_low: 0
+snr_high: 15
+speed: !new:builtins.list
+  - !new:builtins.range
+    - 90 #start
+    - 110 #stop
+    - 1 #step
