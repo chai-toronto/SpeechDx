@@ -17,10 +17,10 @@ macro-AUROC / MAE with bootstrap confidence intervals.
 - [Examples](#examples)
 - [Encoders](#encoders)
 - [Datasets](#datasets)
-- [Adding a task](#adding-a-task)
+- [Adding a task](#adding-a-task) — [Cross-validation tasks](#cross-validation-tasks)
 - [Adding a cross task](#adding-a-cross-task)
 - [Adding an encoder](#adding-an-encoder)
-- [Cross-validation tasks](#cross-validation-tasks)
+- [Notes](#notes)
 - [Concurrency](#concurrency)
 - [Multi-host / SLURM](#multi-host--slurm)
 - [Repository layout](#repository-layout)
@@ -547,6 +547,28 @@ for the full ID-to-(dataset, label) mapping.
 For per-dataset staging conventions and the full CSV schema, see
 [`metadata_script/README.md`](metadata_script/README.md).
 
+### Cross-validation tasks
+
+Tasks whose yaml sets `num_fold:` (in `sdx/configs/tasks/<stem>.yaml`) are
+routed through per-fold CV training automatically — `sdx single train` and
+`sdx single run` both dispatch based on that field
+([sdx/orchestrator.py](sdx/orchestrator.py) `is_cv`). Results are
+aggregated (mean ± std across folds) into `test_results.yaml`.
+
+Currently CV-routed (5-fold each):
+
+| Dataset    | Task IDs (paper name)                                                                            |
+|------------|--------------------------------------------------------------------------------------------------|
+| `iemocap`  | `T5` (iemocap_emoC), `T6` (iemocap_emoBC)                                                        |
+| `ravdess`  | `T3` (ravdess_emoC), `T4` (ravdess_emoBC)                                                        |
+| `torgo`    | `T10` (torgo_dysC), `T11` (torgo_sevR)                                                           |
+| `uaspeech` | `T12` (uaspeech_dysC)                                                                            |
+| `mdvr`     | `T13` (mdvr_parkC), `T14` (mdvr_updrs5R), `T15` (mdvr_updrs18R), `T16` (mdvr_hyR)                |
+| `ksof`     | `T17` (ksof_intC), `T18` (ksof_stutL)                                                            |
+
+To add or remove a task from this set, toggle `num_fold` in its task yaml —
+no orchestrator code changes required.
+
 ## Adding a cross task
 
 A cross task trains on one dataset and evaluates on another (`cross`) or on
@@ -614,29 +636,7 @@ knob themselves (no fall-through to single-task yamls).
 For the full encoder / probe / pool contracts and additional examples, see
 [`model/README.md`](model/README.md).
 
-## Cross-validation tasks
-
-Tasks whose yaml sets `num_fold:` (in `sdx/configs/tasks/<stem>.yaml`) are
-routed through per-fold CV training automatically — `sdx single train` and
-`sdx single run` both dispatch based on that field
-([sdx/orchestrator.py](sdx/orchestrator.py) `is_cv`). Results are
-aggregated (mean ± std across folds) into `test_results.yaml`.
-
-Currently CV-routed (5-fold each):
-
-| Dataset    | Task IDs (paper name)                                                                            |
-|------------|--------------------------------------------------------------------------------------------------|
-| `iemocap`  | `T5` (iemocap_emoC), `T6` (iemocap_emoBC)                                                        |
-| `ravdess`  | `T3` (ravdess_emoC), `T4` (ravdess_emoBC)                                                        |
-| `torgo`    | `T10` (torgo_dysC), `T11` (torgo_sevR)                                                           |
-| `uaspeech` | `T12` (uaspeech_dysC)                                                                            |
-| `mdvr`     | `T13` (mdvr_parkC), `T14` (mdvr_updrs5R), `T15` (mdvr_updrs18R), `T16` (mdvr_hyR)                |
-| `ksof`     | `T17` (ksof_intC), `T18` (ksof_stutL)                                                            |
-
-To add or remove a task from this set, toggle `num_fold` in its task yaml —
-no orchestrator code changes required.
-
-### Notes
+## Notes
 
 **Auto-resume:** if `train` finds partial Ray Tune state on disk
 (`storage/`, `best_hparams.yaml`) and no completed `test_results`, it
