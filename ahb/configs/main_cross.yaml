@@ -28,7 +28,7 @@ encoder_params: !include:encoders/emotion2vec.yaml
 num_layers: !ref <encoder_params[num_layers]>
 num_labels: !ref <data_params[num_labels]>
 
-probe_params: !include:probes/AvgTProbe.yaml # Change encover params accordingly
+probe_params: !include:probes/Probe.yaml # Change encover params accordingly
   feature_dim: !ref <encoder_params[feature_dim]>
   num_labels: !ref <num_labels>
   num_layers: !ref <num_layers>

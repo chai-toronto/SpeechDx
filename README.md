@@ -1,6 +1,8 @@
 
 # Audio Health Benchmark
 
+📊 [**Leaderboard**](./leaderboard.csv)
+
 A reproducible benchmark for self-supervised audio encoders on health-related
 tasks (depression, dementia, dysarthria, COVID-19, emotion, …). Each task
 trains a lightweight probe on top of a frozen encoder and reports AUROC /
@@ -129,11 +131,6 @@ Aggregate `test_results.{txt,yaml}` into per-metric CSVs at
 - `data-eff summary` only: `--level`.
 
 ### Notes
-
-**Probe is fixed.** Folder tag is always `AvgTProbe`; the actual probe
-loaded is always `probes/Probe.yaml` (`LinearProbe`). To use a different
-probe, edit `probe_params: !include:probes/<name>.yaml` in
-`ahb/configs/main*.yaml`.
 
 **Auto-resume:** if `train` finds partial Ray Tune state on disk
 (`storage/`, `best_hparams.yaml`) and no completed `test_results`, it
