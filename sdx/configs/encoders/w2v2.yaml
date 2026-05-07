@@ -1,5 +1,4 @@
-# Wav2Vec2
-# Source: https://arxiv.org/abs/2006.11477
+
 
 sample_rate: 16000
 feature_dim: 1024

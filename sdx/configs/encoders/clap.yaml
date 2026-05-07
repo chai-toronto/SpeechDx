@@ -1,12 +1,3 @@
-# CLAP (Contrastive Language-Audio Pretraining) - larger_clap_general variant
-# Source: https://github.com/LAION-AI/CLAP
-# 
-# Audio: 48kHz, max 10s (via random crop for this model)
-# Note: enable_fusion=False for this model, so long audio is randomly cropped
-# For fusion support (4 mel views), use laion/clap-htsat-fused (feature_dim=768)
-#
-# Audio backbone: hidden_size=1024, depths=[2,2,12,2]
-
 sample_rate: 48000
 feature_dim: 1024  # audio backbone hidden_size
 num_layers: 4  # hierarchical Swin stages

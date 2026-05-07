@@ -1,6 +1,3 @@
-# AST (Audio Spectrogram Transformer)
-# Source: https://arxiv.org/abs/2104.01778
-# Trained on 10-second AudioSet clips; internally pads/truncates to 10s
 
 sample_rate: 16000
 feature_dim: 768

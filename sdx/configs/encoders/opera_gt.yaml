@@ -1,5 +1,3 @@
-# OPERA-GT (OPEn Respiratory Acoustic - MAE ViT Small)
-# 8.18 seconds → 256×64 spectrogram → 384-dim output
 
 sample_rate: 16000
 feature_dim: 384

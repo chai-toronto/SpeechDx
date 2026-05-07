@@ -1,5 +1,4 @@
-# WavJEPA
-# Source: https://arxiv.org/abs/2311.12990
+
 
 sample_rate: 16000
 feature_dim: 768

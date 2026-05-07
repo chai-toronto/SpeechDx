@@ -1,6 +1,3 @@
-# AudioMAE (Audio Masked Autoencoder)
-# Source: https://arxiv.org/abs/2207.06405
-# Internally clips to 10 seconds; uses mel-spectrogram preprocessing
 
 sample_rate: 16000
 feature_dim: 768

@@ -1,16 +1,3 @@
-# emotion2vec+ (Speech Emotion Recognition Foundation Model)
-# Source: https://arxiv.org/abs/2312.15185
-# GitHub: https://github.com/ddlBoJack/emotion2vec
-#
-# Requires FunASR: pip install funasr
-#
-# Available models:
-# - iic/emotion2vec_base:        ~90M params, 768 dim (representation model)
-# - iic/emotion2vec_plus_seed:   fine-tuned on academic emotion data
-# - iic/emotion2vec_plus_base:   ~90M params, fine-tuned on pseudo-labeled data
-# - iic/emotion2vec_plus_large:  ~300M params, fine-tuned on 40k hours emotion data
-#
-# Output: 768-dim embeddings at 50Hz (20ms stride)
 
 sample_rate: 16000
 feature_dim: 1024  # 768 for base/plus_base/plus_seed, 1024 for plus_large
