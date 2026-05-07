@@ -21,8 +21,6 @@ macro-AUROC / MAE with bootstrap confidence intervals.
 - [Adding a cross task](#adding-a-cross-task)
 - [Adding an encoder](#adding-an-encoder)
 - [Notes](#notes)
-- [Concurrency](#concurrency)
-- [Multi-host / SLURM](#multi-host--slurm)
 - [Repository layout](#repository-layout)
 
 ## Install
