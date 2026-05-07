@@ -1,12 +1,29 @@
 
 # SpeechDx
 
-📊 [**Leaderboard**](./leaderboard.csv)
+[**Leaderboard**](./leaderboard.csv)
 
 A reproducible benchmark for self-supervised audio encoders on health-related
 tasks (depression, dementia, dysarthria, COVID-19, emotion, …). Each task
 trains a lightweight probe on top of a frozen encoder and reports AUROC /
 macro-AUROC / MAE with bootstrap confidence intervals.
+
+## Contents
+
+- [Install](#install)
+- [Reproducing the full benchmark](#reproducing-the-full-benchmark)
+- [Modes](#modes)
+- [Commands](#commands) — [`prep`](#prep), [`warm`](#warm), [`train`](#train), [`run`](#run--warm--train--summary), [`status`](#status), [`summary`](#summary)
+- [Examples](#examples)
+- [Encoders](#encoders)
+- [Datasets](#datasets)
+- [Adding a task](#adding-a-task)
+- [Adding a cross task](#adding-a-cross-task)
+- [Adding an encoder](#adding-an-encoder)
+- [Cross-validation tasks](#cross-validation-tasks)
+- [Concurrency](#concurrency)
+- [Multi-host / SLURM](#multi-host--slurm)
+- [Repository layout](#repository-layout)
 
 ## Install
 
@@ -152,47 +169,12 @@ Aggregate `test_results.{txt,yaml}` into per-metric CSVs at
 - `--out-dir` (default `<mode-root>/_summary_<tag>`), `--tag`.
 - `data-eff summary` only: `--level`.
 
-### Notes
-
-**Probe is fixed.** Folder tag is always `AvgTProbe`; the actual probe
-loaded is always `probes/Probe.yaml` (`LinearProbe`). To use a different
-probe, edit `probe_params: !include:probes/<name>.yaml` in
-`sdx/configs/main*.yaml`.
-
-**Auto-resume:** if `train` finds partial Ray Tune state on disk
-(`storage/`, `best_hparams.yaml`) and no completed `test_results`, it
-auto-resumes rather than wiping. Pass `--overwrite` to force a fresh
-start.
-
-**Cache sharing.** Training reads from the per-`(dataset, encoder)` HDF5
-cache and will fail on miss. The on-disk layout is
-`<slurm_tmpdir>/<dataset>/<encoder>/{train,val}/single_avg/cache.hdf5`,
-shared across all modes that touch that `(dataset, encoder)` pair.
-
-Each mode's warmer is self-contained — it reads its own task yaml +
-mode-specific `main*.yaml` only:
-- `single warm` reads `tasks/<stem>.yaml` + `main.yaml`. Writes train
-  (`num_aug_ver` augmented versions) and val (1 unaugmented).
-- `cross warm` reads `cross_tasks/<stem>.yaml` + `main_cross.yaml`. Per
-  cross pair, writes 3 caches: `<train_dataset>/{train,val}` (using
-  `num_aug_ver` and `train_split_by_boundary`) and `<test_dataset>/val`
-  (1 version, `test_split_by_boundary`). Test side is never augmented.
-- `cross-cat warm` reads `cross_tasks/<stem>.yaml` +
-  `main_cross_category.yaml`. Per train dataset (`setting_<N>`) writes
-  `<dataset>/{train,val}`; per test dataset (`test_setting_<N>`) writes
-  `<dataset>/val`.
-
-Caches append-extend: if a previous mode wrote 3 versions and a later
-mode wants 5, only the missing 2 versions get computed. `all run`'s
-`single → cross → cross-cat → data-eff` ordering takes advantage of
-this — later phases skip whatever earlier phases populated.
-
 ## Examples
 
 Each block below shows a typical (mode, command) combination, the call,
 and a representative slice of its output.
 
-### Single task × single encoder (smoke test)
+### Single task × single encoder
 
 Stage one dataset, warm one cache, train one probe — fastest way to
 sanity-check a fresh checkout.
@@ -654,6 +636,35 @@ Currently CV-routed (5-fold each):
 To add or remove a task from this set, toggle `num_fold` in its task yaml —
 no orchestrator code changes required.
 
+### Notes
+
+**Auto-resume:** if `train` finds partial Ray Tune state on disk
+(`storage/`, `best_hparams.yaml`) and no completed `test_results`, it
+auto-resumes rather than wiping. Pass `--overwrite` to force a fresh
+start.
+
+**Cache sharing.** Training reads from the per-`(dataset, encoder)` HDF5
+cache and will fail on miss. The on-disk layout is
+`<slurm_tmpdir>/<dataset>/<encoder>/{train,val}/single_avg/cache.hdf5`,
+shared across all modes that touch that `(dataset, encoder)` pair.
+
+Each mode's warmer is self-contained — it reads its own task yaml +
+mode-specific `main*.yaml` only:
+- `single warm` reads `tasks/<stem>.yaml` + `main.yaml`. Writes train
+  (`num_aug_ver` augmented versions) and val (1 unaugmented).
+- `cross warm` reads `cross_tasks/<stem>.yaml` + `main_cross.yaml`. Per
+  cross pair, writes 3 caches: `<train_dataset>/{train,val}` (using
+  `num_aug_ver` and `train_split_by_boundary`) and `<test_dataset>/val`
+  (1 version, `test_split_by_boundary`). Test side is never augmented.
+- `cross-cat warm` reads `cross_tasks/<stem>.yaml` +
+  `main_cross_category.yaml`. Per train dataset (`setting_<N>`) writes
+  `<dataset>/{train,val}`; per test dataset (`test_setting_<N>`) writes
+  `<dataset>/val`.
+
+Caches append-extend: if a previous mode wrote 3 versions and a later
+mode wants 5, only the missing 2 versions get computed. `all run`'s
+`single → cross → cross-cat → data-eff` ordering takes advantage of
+this — later phases skip whatever earlier phases populated.
 
 ## Concurrency
 
