@@ -429,37 +429,22 @@ on first use. Sizes / layer counts / sample rates live in the per-encoder yaml
 under [`sdx/configs/encoders/`](sdx/configs/encoders/) — that's the source of
 truth, not the table below.
 
-| Name (`--encoder`) | Source                                          | Hub        | Notes                                              |
-|--------------------|-------------------------------------------------|------------|----------------------------------------------------|
-| `wavlm`            | `microsoft/wavlm-large`                         | HF         | 1024-dim, 24 layers                                |
-| `w2v2`             | `facebook/wav2vec2-large-960h-lv60-self`        | HF         | 1024-dim, 24 layers                                |
-| `hubert`           | `facebook/hubert-large-ls960-ft`                | HF         | 1024-dim, 24 layers                                |
-| `whisper`          | `openai/whisper-large-v3`                       | HF         | 30 s audio, 1280-dim, 32 layers                    |
-| `ast`              | `MIT/ast-finetuned-audioset-10-10-0.4593`       | HF         | 10 s audio, 768-dim                                |
-| `audiomae`         | `hance-ai/audiomae`                             | HF         | 10 s audio, 768-dim                                |
-| `clap`             | `laion/larger_clap_general`                     | HF         | 48 kHz, 10 s, 1024-dim                             |
-| `mms`              | `facebook/mms-1b`                               | HF         | 1280-dim, 48 layers                                |
-| `wavjepa`          | `labhamlet/wavjepa-nat-base`                    | HF         | 768-dim, 12 layers                                 |
-| `qwen3voice`       | `Qwen/Qwen3-TTS-Tokenizer-12Hz`                 | HF         | 24 kHz, 512-dim                                    |
-| `emotion2vec`      | `emotion2vec/emotion2vec_plus_large`            | HF + FunASR| Loaded via FunASR; HF mirror of `iic/...` on ModelScope |
-| `opera_gt`         | `evelyn0414/OPERA` → `encoder-operaGT.ckpt`     | HF (ckpt)  | Vendored loader at `third_party/OPERA/`            |
+| Name (`--encoder`) | Source                                          | HEAD commit (as of 2026-05-03)             | Last commit |
+|--------------------|-------------------------------------------------|--------------------------------------------|-------------|
+| `wavlm`            | `microsoft/wavlm-large`                         | `c1423ed94bb01d80a3f5ce5bc39f6026a0f4828c` | 2022-02-02  |
+| `w2v2`             | `facebook/wav2vec2-large-960h-lv60-self`        | `54074b1c16f4de6a5ad59affb4caa8f2ea03a119` | 2022-05-23  |
+| `hubert`           | `facebook/hubert-large-ls960-ft`                | `ece5fabbf034c1073acae96d5401b25be96709d8` | 2022-05-24  |
+| `whisper`          | `openai/whisper-large-v3`                       | `06f233fe06e710322aca913c1bc4249a0d71fce1` | 2024-08-12  |
+| `ast`              | `MIT/ast-finetuned-audioset-10-10-0.4593`       | `f826b80d28226b62986cc218e5cec390b1096902` | 2023-09-06  |
+| `audiomae`         | `hance-ai/audiomae`                             | `c1379969532da421855d2f225f40c9c7b4959188` | 2024-08-16  |
+| `clap`             | `laion/larger_clap_general`                     | `ada0c23a36c4e8582805bb38fec3905903f18b41` | 2023-10-31  |
+| `mms`              | `facebook/mms-1b`                               | `0d2f7adb9903d98894d70ae11f7fbdfc8cb71a69` | 2023-06-05  |
+| `wavjepa`          | `labhamlet/wavjepa-nat-base`                    | `15d95ff67fa98117b17e83a1653bbca97877ff6f` | 2025-11-06  |
+| `qwen3voice`       | `Qwen/Qwen3-TTS-Tokenizer-12Hz`                 | `7dd38ad4e9bad454aae9cd937d0cd577604fe229` | 2026-01-29  |
+| `emotion2vec`      | `emotion2vec/emotion2vec_plus_large`            | `6c303ba987b86b93193de93e34bb2b077a6bedc4` | 2024-06-24  |
+| `opera_gt`         | `evelyn0414/OPERA` → `encoder-operaGT.ckpt`     | `d8de4322870b596f0a6ff6ea907b9a6996cd243a` | 2024-11-15  |
 
-### Model revision
-
-| Encoder       | Repo                                              | HEAD commit (as of 2026-05-03)             | Last commit |
-|---------------|---------------------------------------------------|--------------------------------------------|-------------|
-| `wavlm`       | `microsoft/wavlm-large`                           | `c1423ed94bb01d80a3f5ce5bc39f6026a0f4828c` | 2022-02-02  |
-| `w2v2`        | `facebook/wav2vec2-large-960h-lv60-self`          | `54074b1c16f4de6a5ad59affb4caa8f2ea03a119` | 2022-05-23  |
-| `hubert`      | `facebook/hubert-large-ls960-ft`                  | `ece5fabbf034c1073acae96d5401b25be96709d8` | 2022-05-24  |
-| `whisper`     | `openai/whisper-large-v3`                         | `06f233fe06e710322aca913c1bc4249a0d71fce1` | 2024-08-12  |
-| `ast`         | `MIT/ast-finetuned-audioset-10-10-0.4593`         | `f826b80d28226b62986cc218e5cec390b1096902` | 2023-09-06  |
-| `audiomae`    | `hance-ai/audiomae`                               | `c1379969532da421855d2f225f40c9c7b4959188` | 2024-08-16  |
-| `clap`        | `laion/larger_clap_general`                       | `ada0c23a36c4e8582805bb38fec3905903f18b41` | 2023-10-31  |
-| `mms`         | `facebook/mms-1b`                                 | `0d2f7adb9903d98894d70ae11f7fbdfc8cb71a69` | 2023-06-05  |
-| `wavjepa`     | `labhamlet/wavjepa-nat-base`                      | `15d95ff67fa98117b17e83a1653bbca97877ff6f` | 2025-11-06  |
-| `qwen3voice`  | `Qwen/Qwen3-TTS-Tokenizer-12Hz`                   | `7dd38ad4e9bad454aae9cd937d0cd577604fe229` | 2026-01-29  |
-| `emotion2vec` | `emotion2vec/emotion2vec_plus_large` (HF)         | `6c303ba987b86b93193de93e34bb2b077a6bedc4` | 2024-06-24  |
-| `opera_gt`    | `evelyn0414/OPERA`                                | `d8de4322870b596f0a6ff6ea907b9a6996cd243a` | 2024-11-15  |
+For hub source, dimensions, layer counts, and per-encoder loading notes, see [models.md](models.md).
 
 ## Datasets
 
@@ -679,17 +664,7 @@ populated) run unblocked and short-circuit the encoder load via a stub.
 CLAP requires `--warm-workers 1` because of 48 kHz memory pressure
 (already the default).
 
-## Multi-host / SLURM
 
-`run_all_slurm.sh` is the submission template; it sets `HF_HOME`, the Ray
-temp dir, and forwards `ENCODER`, `DATASET`, `TASK`, `JOBS`, `TEST_ONLY` env
-vars to the orchestrator:
-
-```bash
-ENCODER=wavlm,ast DATASET=torgo,ravdess JOBS=4 sbatch run_all_slurm.sh
-```
-
-Per-cluster job specs live in `slurm/` (e.g. `slurm/trillium.slurm`).
 ## Repository layout
 
 ```
@@ -717,8 +692,6 @@ Per-cluster job specs live in `slurm/` (e.g. `slurm/trillium.slurm`).
 │   └── slurm_logs/         SLURM stdout/stderr (top-level; spans modes)
 ├── embeddings_avg_final/   Pre-computed encoder caches (HDF5, gitignored)
 ├── logs/                   Per-run training logs
-├── run_all_slurm.sh        SLURM submission template
-└── invalidate_caches.sh    Edit-and-run cache invalidator
 ```
 <!-- ## TODO: 
   1. Drop the level/single_avg/single cache tag + class-level prune of probe/pool unreachables (cache → v3, drop output_hidden_state outside model wrappers
