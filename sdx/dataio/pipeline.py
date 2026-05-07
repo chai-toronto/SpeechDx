@@ -7,6 +7,18 @@ functions so warm and read code paths can share them without dragging the
 encoder into the read path.
 
 This module imports nothing from ``model.*``.
+
+Pipeline-key registry
+---------------------
+The names below are the single source of truth for keys speechbrain
+manages on a data row — either auto-injected (``ID``) or produced by one
+of the ``make_*`` factories (``SIGNAL`` / ``RAW_DURATION`` / ``DURATION`` /
+``SIGNALS`` / ``LABEL_ENCODED``). Static manifest rows must NOT carry any
+of these keys, since speechbrain's ``compute_outputs`` reads
+``data[key]`` *before* dynamic-provider outputs and a stray static value
+(e.g. ``duration: NaN`` from a pandas concat) silently shadows the
+provider. Callers strip these via ``PIPELINE_KEYS`` (see
+``sdx.warm_cross_cat._per_dataset_subset``).
 """
 
 from __future__ import annotations
@@ -21,9 +33,25 @@ import torch
 from speechbrain.augment.time_domain import AddNoise, AddReverb, SpeedPerturb
 
 
+# Speechbrain reserves ``id`` for the outer dict key.
+ID = "id"
+# Provided by make_audio_pipeline / make_augment / make_passthrough_duration.
+SIGNAL = "signal"
+RAW_DURATION = "raw_duration"
+DURATION = "duration"
+# Provided by make_split_signal.
+SIGNALS = "signals"
+# Provided by make_label_pipeline.
+LABEL_ENCODED = "label_encoded"
+
+PIPELINE_KEYS: frozenset[str] = frozenset({
+    ID, SIGNAL, RAW_DURATION, DURATION, SIGNALS, LABEL_ENCODED,
+})
+
+
 def make_audio_pipeline(sample_rate: int):
     @sb.utils.data_pipeline.takes("path")
-    @sb.utils.data_pipeline.provides("signal", "raw_duration")
+    @sb.utils.data_pipeline.provides(SIGNAL, RAW_DURATION)
     def audio_pipeline(file_path):
         data, sr_og = sf.read(file_path, dtype="float32")
         if data.ndim > 1:
@@ -61,8 +89,8 @@ def build_augmenters(noise_folder: str, rir_folder: str, sample_rate: int,
 
 
 def make_augment(noisifier, reverb, perturbator):
-    @sb.utils.data_pipeline.takes("signal")
-    @sb.utils.data_pipeline.provides("signal", "duration")
+    @sb.utils.data_pipeline.takes(SIGNAL)
+    @sb.utils.data_pipeline.provides(SIGNAL, DURATION)
     def augment(signal):
         signal = signal.unsqueeze(0)
         signal = perturbator(signal)
@@ -75,8 +103,8 @@ def make_augment(noisifier, reverb, perturbator):
 
 
 def make_passthrough_duration():
-    @sb.utils.data_pipeline.takes("signal")
-    @sb.utils.data_pipeline.provides("signal", "duration")
+    @sb.utils.data_pipeline.takes(SIGNAL)
+    @sb.utils.data_pipeline.provides(SIGNAL, DURATION)
     def passthrough_duration(signal):
         return signal, signal.shape[0]
 
@@ -85,7 +113,7 @@ def make_passthrough_duration():
 
 def make_label_pipeline():
     @sb.utils.data_pipeline.takes("label")
-    @sb.utils.data_pipeline.provides("label_encoded")
+    @sb.utils.data_pipeline.provides(LABEL_ENCODED)
     def label_pipeline(label):
         if isinstance(label, list):
             label_encoded = torch.tensor(label, dtype=torch.float)
@@ -97,8 +125,8 @@ def make_label_pipeline():
 
 
 def make_process_signal(min_samples: int):
-    @sb.utils.data_pipeline.takes("signal", "duration")
-    @sb.utils.data_pipeline.provides("signal", "duration")
+    @sb.utils.data_pipeline.takes(SIGNAL, DURATION)
+    @sb.utils.data_pipeline.provides(SIGNAL, DURATION)
     def process_signal(signal, duration):
         if duration < min_samples:
             pad_total = min_samples - duration
@@ -155,10 +183,8 @@ def make_split_signal(max_samples: int, min_samples: int, sample_rate: int,
     the signal and chunks at ``max_samples`` length.
     """
     if split_by_boundary:
-        takes = ["signal", "boundaries", "raw_duration", "duration"]
-
-        @sb.utils.data_pipeline.takes(*takes)
-        @sb.utils.data_pipeline.provides("signals")
+        @sb.utils.data_pipeline.takes(SIGNAL, "boundaries", RAW_DURATION, DURATION)
+        @sb.utils.data_pipeline.provides(SIGNALS)
         def split_signal(signal, boundaries, raw_duration, duration):
             # Cross tasks set split_by_boundary=true at the task level for the
             # boundary-bearing source dataset; the partner dataset's manifest
@@ -173,8 +199,8 @@ def make_split_signal(max_samples: int, min_samples: int, sample_rate: int,
             return signals
 
     else:
-        @sb.utils.data_pipeline.takes("signal")
-        @sb.utils.data_pipeline.provides("signals")
+        @sb.utils.data_pipeline.takes(SIGNAL)
+        @sb.utils.data_pipeline.provides(SIGNALS)
         def split_signal(signal):
             return _chunk_signal(signal, max_samples, min_samples)
 

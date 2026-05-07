@@ -28,6 +28,8 @@ from pathlib import Path
 import numpy as np
 import yaml
 
+from sdx.dataio.pipeline import LABEL_ENCODED
+
 
 def _log(prefix, msg):
     """Progress line. Skipped when prefix is empty (silent mode)."""
@@ -76,8 +78,8 @@ def _label_field(records, task_type):
     if not records:
         return "label"
     sample = next(iter(records.values()))
-    if "label_encoded" in sample:
-        return "label_encoded"
+    if LABEL_ENCODED in sample:
+        return LABEL_ENCODED
     return "label"
 
 

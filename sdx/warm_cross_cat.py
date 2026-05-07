@@ -34,6 +34,10 @@ import torch
 from sdx.config import compose_config
 from sdx.dataio.cache import CachedHDF5DynamicItem
 from sdx.dataio.pipeline import (
+    ID,
+    LABEL_ENCODED,
+    PIPELINE_KEYS,
+    SIGNALS,
     build_augmenters,
     make_audio_pipeline,
     make_augment,
@@ -48,31 +52,33 @@ from sdx.warm import _cache_mode
 WARM_CROSSCAT_LOGS_ROOT = Path("logs/warm_cross_cat")
 
 
-def _split_id(uid: str) -> tuple[str, str]:
-    """``edaic_t1::A123`` -> ``("edaic", "A123")``. Matches the convention
-    in ``sdx/dataio/read.py:_make_category_cache_reader._split_id``.
-    """
-    prefix, bare = uid.split("::", 1)
-    dataset = prefix.split("_", 1)[0]
-    return dataset, bare
-
-
 def _per_dataset_subset(manifest_dict: dict, dataset: str) -> tuple[dict, list[str]]:
     """Filter category manifest rows to one contributing dataset and re-key
-    by bare cache_uid. Returns (subset_dict, list_of_bare_ids)."""
+    by bare cache_uid. Returns (subset_dict, list_of_bare_ids).
+
+    Manifest uids look like ``<source_dataset>_<source_task>::<cache_uid>``.
+    We match by ``startswith(dataset + "_")`` so dataset names that themselves
+    contain underscores (e.g. ``synthetic_edaic``) are handled correctly.
+
+    Strips keys that conflict with the warm pipeline's dynamic outputs.
+    Pandas concat across heterogeneous source CSVs leaves NaN values in
+    columns owned by only some datasets (e.g. ``duration`` from iemocap),
+    and speechbrain's ``compute_outputs`` reads static dict values in
+    preference to dynamic-provider outputs — so a stray static
+    ``duration: NaN`` shadows ``make_augment`` and trips
+    ``_split_by_boundaries``. The set of conflicting keys lives in
+    ``sdx.dataio.pipeline.PIPELINE_KEYS``.
+    """
     out: dict = {}
+    pre = dataset + "_"
     for uid, row in manifest_dict.items():
-        try:
-            ds, bare = _split_id(uid)
-        except ValueError:
+        prefix, sep, bare = uid.partition("::")
+        if not sep or not prefix.startswith(pre):
             continue
-        if ds != dataset:
-            continue
-        # Cache writer keys on ``id``; rewrite the row's id to the bare
-        # cache_uid so HDF5 keys match the category reader's expectation.
-        row = dict(row)
-        row["id"] = bare
-        out[bare] = row
+        # Re-key by bare cache_uid so the HDF5 cache keys match the category
+        # reader's expectation. Speechbrain auto-injects ``id`` from the outer
+        # dict key, so don't put ``id`` inside the row value.
+        out[bare] = {k: v for k, v in row.items() if k not in PIPELINE_KEYS}
     return out, list(out.keys())
 
 
@@ -87,7 +93,7 @@ def _is_fully_cached(cache_dir: Path, num_versions: int, ids: list[str]) -> bool
         return False
     reader = CachedHDF5DynamicItem(
         cache_dir, file_mode="r", num_version=num_versions,
-        takes=["id"], func=lambda *_: None, provides=["_"],
+        takes=[ID], func=lambda *_: None, provides=["_"],
     )
     try:
         return reader.is_fully_cached(ids)
@@ -124,7 +130,7 @@ def _build_items(*, sample_rate: int, max_samples: int, min_samples: int,
 def _make_cache_writer(cache_dir: Path, num_versions: int,
                        speech_encoder, output_vars: list[str], cache_pool: str):
     @CachedHDF5DynamicItem.cache(cache_dir, file_mode="a", num_version=num_versions)
-    @sb.utils.data_pipeline.takes("id", "signals")
+    @sb.utils.data_pipeline.takes(ID, SIGNALS)
     @sb.utils.data_pipeline.provides(*output_vars)
     def cache_emb(id, raw_signals):
         device = next(speech_encoder.parameters()).device
@@ -268,7 +274,7 @@ def run_warm_cross_cat(task: str, encoder_name: str, *,
     noise_folder = hparams["noise_folder"]
     rir_folder = hparams["rir_folder"]
 
-    keys_base = ["id", "path", "Participant_ID", "label_encoded"]
+    keys_base = [ID, "path", "Participant_ID", LABEL_ENCODED]
 
     try:
         for job in train_jobs:

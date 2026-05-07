@@ -11,6 +11,8 @@ from torchmetrics import MetricCollection
 from torchmetrics.classification import Precision, Recall, F1Score, AUROC, Accuracy
 from torchmetrics.regression import MeanAbsoluteError, MeanSquaredError, PearsonCorrCoef, R2Score
 
+from sdx.dataio.pipeline import LABEL_ENCODED
+
 
 def _maybe_subject_ids(pids):
     """Return pids as ndarray, or None if subject-level matches sample-level.
@@ -422,7 +424,7 @@ class DiagnosticsBrain(sb.Brain):
         """
 
         # Dynamically retrieve the label using the 'label_key' from hparams
-        label_key = getattr(self.hparams, "label_key", "label_encoded")
+        label_key = getattr(self.hparams, "label_key", LABEL_ENCODED)
         lab = getattr(batch, label_key)
         # SpeechBrain wraps variable-length labels (e.g. multi-label lists)
         # in PaddedData; unwrap to the underlying tensor before moving device.

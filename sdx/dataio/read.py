@@ -26,6 +26,7 @@ import torch
 from speechbrain.utils.data_pipeline import DynamicItem
 
 from sdx.dataio.cache import CachedHDF5DynamicItem
+from sdx.dataio.pipeline import ID, LABEL_ENCODED
 
 
 def _cache_mode_for(hparams: dict[str, Any]) -> str:
@@ -49,7 +50,7 @@ def _output_vars(hparams: dict[str, Any]) -> list[str]:
 
 def _label_pipeline_dynitem():
     @sb.utils.data_pipeline.takes("label")
-    @sb.utils.data_pipeline.provides("label_encoded")
+    @sb.utils.data_pipeline.provides(LABEL_ENCODED)
     def label_pipeline(label):
         if isinstance(label, list):
             label_encoded = torch.tensor(label, dtype=torch.float)
@@ -63,7 +64,7 @@ def _label_pipeline_dynitem():
 def _make_cache_reader(cache_dir: Path, num_versions: int, output_vars: list[str]):
     """Build a read-only DynamicItem that loads embeddings from HDF5."""
     @CachedHDF5DynamicItem.cache(cache_dir, file_mode="r", num_version=num_versions)
-    @sb.utils.data_pipeline.takes("id")
+    @sb.utils.data_pipeline.takes(ID)
     @sb.utils.data_pipeline.provides(*output_vars)
     def read_cache(id):
         # The decorator caches via _is_cached → _load. This body only runs
@@ -109,7 +110,7 @@ def build_read_datasets_standard(data_dict: dict[str, dict],
 
     label = _label_pipeline_dynitem()
 
-    output_keys = ["id", "path", "Participant_ID", "label_encoded"] + output_vars
+    output_keys = [ID, "path", "Participant_ID", LABEL_ENCODED] + output_vars
 
     try:
         # Pre-flight: missing entries fail loudly here, not mid-fit.
@@ -177,7 +178,7 @@ def build_read_datasets_cv(train_fold: dict, val_fold: dict,
     val_reader = _make_cache_reader(val_cache_dir, 1, output_vars)
 
     label = _label_pipeline_dynitem()
-    output_keys = ["id", "path", "Participant_ID", "label_encoded"] + output_vars
+    output_keys = [ID, "path", "Participant_ID", LABEL_ENCODED] + output_vars
 
     try:
         _preflight(train_reader, list(train_fold.keys()),
@@ -225,7 +226,7 @@ def build_read_datasets_cross(data_dict: dict[str, dict],
     test_reader = _make_cache_reader(test_cache_dir, 1, output_vars)
 
     label = _label_pipeline_dynitem()
-    output_keys = ["id", "path", "Participant_ID", "label_encoded"] + output_vars
+    output_keys = [ID, "path", "Participant_ID", LABEL_ENCODED] + output_vars
 
     try:
         _preflight(train_reader, list(data_dict["train"].keys()),
@@ -261,7 +262,8 @@ def build_read_datasets_cross(data_dict: dict[str, dict],
 
 def _make_category_cache_reader(cache_root: Path, encoder_name: str,
                                  split: str, cache_mode: str,
-                                 num_versions: int, output_vars: list[str]) -> DynamicItem:
+                                 num_versions: int, output_vars: list[str],
+                                 datasets: list[str] | None = None) -> DynamicItem:
     """Per-id dispatching reader for category-cross caches.
 
     Category manifest ids are ``<dataset>_<task>::<n>`` and each contributing
@@ -270,12 +272,18 @@ def _make_category_cache_reader(cache_root: Path, encoder_name: str,
     keyed by the bare ``<n>``. This reader opens one h5py.File per dataset
     on first lookup and dispatches by id prefix.
 
+    ``datasets`` lists the contributing dataset names (so prefixes that
+    contain underscores, e.g. ``synthetic_edaic``, can be matched without
+    ambiguity); longest match wins.
+
     Returned ``DynamicItem`` has extra ``close()`` and ``uncached_ids()``
     methods so it can be used interchangeably with ``CachedHDF5DynamicItem``
     by ``build_read_datasets_category`` and the existing ``_preflight``
     helper.
     """
     handles: dict[str, h5py.File] = {}
+    # Longest-first so 'synthetic_edaic' wins over a shorter overlapping name.
+    ds_sorted = sorted(datasets or [], key=len, reverse=True)
 
     def _cache_path(dataset: str) -> Path:
         return (cache_root / dataset / encoder_name / split / cache_mode
@@ -301,10 +309,12 @@ def _make_category_cache_reader(cache_root: Path, encoder_name: str,
             raise RuntimeError(
                 f"Category id {uid!r} missing '::' separator"
             ) from None
-        # Contributing dataset names ('edaic', 'iemocap', ...) don't contain
-        # underscores, so the dataset is the prefix up to the first '_'.
-        dataset = prefix.split("_", 1)[0]
-        return dataset, bare
+        for ds in ds_sorted:
+            if prefix == ds or prefix.startswith(ds + "_"):
+                return ds, bare
+        # Fallback for legacy callers that didn't pass ``datasets``: assume
+        # the dataset name has no underscores.
+        return prefix.split("_", 1)[0], bare
 
     def read_cache(id):
         dataset, bare = _split_id(id)
@@ -321,7 +331,7 @@ def _make_category_cache_reader(cache_root: Path, encoder_name: str,
         return torch.from_numpy(f[key][:])
 
     item = DynamicItem(
-        takes=["id"],
+        takes=[ID],
         func=read_cache,
         provides=list(output_vars),
     )
@@ -370,19 +380,29 @@ def build_read_datasets_category(data_dict: dict[str, dict],
     cache_mode = _cache_mode_for(hparams)
     num_versions = int(hparams["data_params"].get("num_aug_ver", 1))
     output_vars = _output_vars(hparams)
+    data_params = hparams.get("data_params", {})
+    cat_datasets = list(
+        dict.fromkeys(
+            list(data_params.get("train_datasets") or [])
+            + list(data_params.get("test_datasets") or [])
+        )
+    )
 
     train_reader = _make_category_cache_reader(
         cache_root, encoder_name, "train", cache_mode, num_versions, output_vars,
+        datasets=cat_datasets,
     )
     val_reader = _make_category_cache_reader(
         cache_root, encoder_name, "val", cache_mode, 1, output_vars,
+        datasets=cat_datasets,
     )
     test_reader = _make_category_cache_reader(
         cache_root, encoder_name, "val", cache_mode, 1, output_vars,
+        datasets=cat_datasets,
     )
 
     label = _label_pipeline_dynitem()
-    output_keys = ["id", "path", "Participant_ID", "label_encoded"] + output_vars
+    output_keys = [ID, "path", "Participant_ID", LABEL_ENCODED] + output_vars
 
     try:
         _preflight(train_reader, list(data_dict["train"].keys()),

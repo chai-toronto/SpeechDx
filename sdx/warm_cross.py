@@ -32,6 +32,9 @@ import torch
 from sdx.config import compose_config
 from sdx.dataio.cache import CachedHDF5DynamicItem
 from sdx.dataio.pipeline import (
+    ID,
+    LABEL_ENCODED,
+    SIGNALS,
     build_augmenters,
     make_audio_pipeline,
     make_augment,
@@ -61,7 +64,7 @@ def _is_fully_cached(cache_dir: Path, num_versions: int, ids: list[str]) -> bool
         return False
     reader = CachedHDF5DynamicItem(
         cache_dir, file_mode="r", num_version=num_versions,
-        takes=["id"], func=lambda *_: None, provides=["_"],
+        takes=[ID], func=lambda *_: None, provides=["_"],
     )
     try:
         return reader.is_fully_cached(ids)
@@ -99,7 +102,7 @@ def _build_items(*, sample_rate: int, max_samples: int, min_samples: int,
 def _make_cache_writer(cache_dir: Path, num_versions: int,
                        speech_encoder, output_vars: list[str], cache_pool: str):
     @CachedHDF5DynamicItem.cache(cache_dir, file_mode="a", num_version=num_versions)
-    @sb.utils.data_pipeline.takes("id", "signals")
+    @sb.utils.data_pipeline.takes(ID, SIGNALS)
     @sb.utils.data_pipeline.provides(*output_vars)
     def cache_emb(id, raw_signals):
         device = next(speech_encoder.parameters()).device
@@ -247,7 +250,7 @@ def _warm_uncached(task: str, encoder_name: str, *,
         augmented=False, split_by_boundary=test_sbb,
     ) + [test_writer]
 
-    keys_base = ["id", "path", "Participant_ID", "label_encoded"]
+    keys_base = [ID, "path", "Participant_ID", LABEL_ENCODED]
     train_ds = sb.dataio.dataset.DynamicItemDataset(
         data=data_dict["all_train"], dynamic_items=train_items,
         output_keys=keys_base + output_vars,
