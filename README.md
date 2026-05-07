@@ -26,33 +26,21 @@ pip install -r requirements.txt
 
 ## Reproducing the full benchmark
 
-End-to-end, single command, all four modes:
+End-to-end, single command, all four [modes](#modes):
 
 ```bash
 # Stage every dataset the registry knows about (open ones auto-download;
-# restricted ones print a warning + skip — drop their archive at
-# data/<name>/raw/ and re-run to include them):
+# restricted ones print a warning + skip
 uv run python -m sdx all prep
 
 # Run every (task, encoder) pair across single → cross → cross-cat → data-eff.
-# Idempotent: skips pairs whose results already exist. -j is train workers.
+# Skips pairs whose results already exist. -j is train workers.
 uv run python -m sdx all run -j 4
 ```
 
 `all run` chains `warm → train → summary` for each of the four modes in
-order, so caches populated by `single` are reused by `cross`, `cross-cat`,
-and `data-eff`. It survives partial failures by default (pass
+order. It survives partial failures by default (pass
 `--stop-on-failure` to abort on the first one).
-
-> **Missing data is a soft skip.** Every paper task and cross task is
-> live in `sdx/configs/registry.yaml`, but at run time tasks whose
-> dataset isn't on disk (and whose `scripts/download_<name>.sh` either
-> doesn't exist or fails) are dropped from the queue with a warning
-> showing the registry's contact info — the rest of the run keeps going.
-> So `sdx all run` on a fresh clone trains on whatever is staged
-> (out of the box that's `ravdess` / `coswara` / `mdvr` / `torgo`), and
-> simply re-running after you obtain a new corpus extends the run to it.
-> See [Datasets](#datasets) for staging conventions.
 
 ### Where the results land
 
@@ -95,8 +83,8 @@ argument is a command rather than a mode, mode defaults to `single` — so
 |-------------|------------------------------------------------------------------------------------------------------------------------|
 | `single`    | Full benchmark — every paper task × every encoder, single dataset per task. Default mode.                              |
 | `cross`     | Zero-shot cross-task — train on dataset A, evaluate on dataset B.                                                      |
-| `cross-cat` | Multi-source cross-category variant (reuses single-mode caches under the hood).                                        |
-| `data-eff`  | Same tasks at 4 reduced training-set sizes (6.25 %, 12.5 %, 25 %, 50 %); reuses single-mode prep / warm.                |
+| `cross-cat` | Multi-source cross-category variant.                                                                                   |
+| `data-eff`  | Same tasks at 4 reduced training-set sizes (6.25 %, 12.5 %, 25 %, 50 %).                                               |
 | `all`       | Chain the command across single → cross → cross-cat → data-eff. Adds `--skip-mode` and `--stop-on-failure` (continues past failures by default). `all train` runs each mode's train phase in parallel via the orchestrator (caches must be warm); `all summary` drops `--out-dir` (collides across modes). |
 
 **Filters** (every command): `-t/--task`, `-e/--encoder`, `-d/--dataset`.
@@ -108,23 +96,26 @@ Repeatable; empty = "every match in scope".
 pairs. It takes the **union** of those phases' flags so you can drive the
 whole pipeline from one call.
 
+All commands skip pairs whose output already
+exists, so reruns only do the missing work. Pass `--overwrite` to force
+a redo.
+
 ### `prep`
 Download raw data (if open-access) or fail with the contact info from
 `registry.yaml`; run the metadata script if the processed CSV is missing;
-build manifests. Idempotent.
+build manifests.
 - `--overwrite` — rebuild manifests even if they already exist.
 
 ### `warm`
 Extract embeddings into the per-`(dataset, encoder)` HDF5 cache for every
-matching pair. Idempotent.
+matching pair.
 - `--device` — torch device override (e.g. `cuda:0`).
 - `--workers` — concurrent warm workers (default `1`).
 - `--overwrite` — wipe `cache.hdf5` and re-extract.
 
 ### `train`
 Ray-Tune HP search on top of warmed caches. Auto-routes to per-fold CV
-when the task yaml sets `num_fold`. Skips pairs whose results already
-exist.
+when the task yaml sets `num_fold`.
 - `--tag` — experiment tag (default `run1`); names the output folder.
 - `--overrides` — extra YAML string forwarded to `load_hyperpyyaml`.
 - `--workers` / `-j` — concurrent train workers (default `3`).
@@ -138,15 +129,13 @@ exist.
   (repeatable; default: every level in `registry.yaml`).
 
 ### `run` — `warm` + `train` + `summary`
-Strict phases: warm everything → train everything → summarize. Skips
-already-complete pairs. Takes every flag from the underlying phases plus
-orchestration flags.
+Strict phases: warm everything → train everything → summarize. Takes
+every flag from the underlying phases plus orchestration flags.
 - Filters; `--tag`; `--device`.
 - Forwarded to train: `--overrides`, `--overwrite`.
 - Forwarded to summary: `--out-dir`.
 - Concurrency: `--warm-workers` (default `1`), `--train-workers` / `-j`
-  (default `3`). Independent pools — warm dominates GPU, train dominates
-  CPU.
+  (default `3`). Independent pools — see [Concurrency](#concurrency).
 - `--dry-run` — print the plan and exit without doing work.
 - `--overwrite` redo prompts unless `-y`/`--yes`.
 - `data-eff run` / `all run` add `--level`.
@@ -216,23 +205,37 @@ Final stdout (the `summary` phase):
 
 ```
 === AUC.csv ===
-task             | wavlm
------------------+-------
-T19 (c19sounds_t1) | 0.6553
+task                | wavlm
+--------------------+-------
+T19 (c19sounds_T19) | 0.6810
+
+=== AUC_CI.csv ===
+task                | wavlm
+--------------------+-----------------
+T19 (c19sounds_T19) | (0.6533, 0.7116)
+
+=== F1.csv ===
+task                | wavlm
+--------------------+-------
+T19 (c19sounds_T19) | 0.6528
+
+=== Acc.csv ===
+task                | wavlm
+--------------------+-------
+T19 (c19sounds_T19) | 0.6237
 
 Parsed 1 result files, 0 missing
-Wrote 2 CSV(s) to exps/single_task/_summary_run1/
+Wrote 5 CSV(s) to exps/single_task/_summary_run1/
 ```
 
-Result file [exps/single_task/T19/wavlm-AvgTProbe-run1/test_results.txt](exps/single_task/T19/wavlm-AvgTProbe-run1/test_results.txt):
+The same numbers land in [exps/single_task/T19/wavlm-AvgTProbe-run1/test_results.txt](exps/single_task/T19/wavlm-AvgTProbe-run1/test_results.txt):
 
 ```
-AUROC: 0.6553
-F1: 0.6234
-accuracy: 0.6087
-AUROC_CI_low: 0.5269
-AUROC_CI_high: 0.8324
-loss: 0.6690
+AUROC: 0.6810
+AUROC_CI_low: 0.6533
+AUROC_CI_high: 0.7116
+F1: 0.6528
+accuracy: 0.6237
 ```
 
 ### Full single benchmark (all paper tasks × all 12 encoders)
@@ -241,28 +244,61 @@ loss: 0.6690
 uv run python -m sdx single run -j 4
 ```
 
-Final stdout (truncated — full matrix has 12 encoder columns and one
-row per paper task). The same numbers are written to per-metric CSVs
-under `exps/single_task/_summary_run1/`:
+The summary phase prints the same per-metric tables as the above test —
+just wider (one column per encoder, one row per task). With every paper
+task and encoder available the trailing line reads:
 
 ```
-=== AUC.csv ===
-task              | ast    | audiomae | … | wavlm  | whisper
-------------------+--------+----------+---+--------+--------
-T3 (ravdess_emoC) | 0.7421 | 0.7588   | … | 0.8104 | 0.7693
-T4 (ravdess_emoBC)| 0.8132 | 0.8044   | … | 0.8627 | 0.8210
-T10 (torgo_dysC)  | 0.8910 | 0.8745   | … | 0.9012 | 0.8830
-…
+Parsed 324 result files, 0 missing
+Wrote 10 CSV(s) to exps/single_task/_summary_run1/
+```
 
+(9 metric CSVs — `AUC.csv`, `AUC_CI.csv`, `F1.csv`, `Acc.csv`,
+`MAE.csv`, `MAE_CI.csv`, `MSE.csv`, `PearsonR.csv`, `R2.csv` — plus
+`completion.csv`. Classification metrics only get rows for B/C/M tasks;
+regression metrics only get rows for R tasks.)
+
+### Regression task (verbatim regression-side output)
+
+A B-task only fills `AUC.csv` / `AUC_CI.csv` / `F1.csv` / `Acc.csv`. An
+R-task fills `MAE.csv` / `MAE_CI.csv` / `MSE.csv` / `PearsonR.csv` /
+`R2.csv` instead. Real run, two encoders against `T8` (DementiaBank
+MMSE regression):
+
+```bash
+uv run python -m sdx single run -t T8 -e wavlm whisper -j 4
+```
+
+Final stdout:
+
+```
 === MAE.csv ===
-task              | ast    | … | wavlm  | whisper
-------------------+--------+---+--------+--------
-T11 (torgo_sevR)  | 1.2304 | … | 1.0917 | 1.1822
-T14 (mdvr_updrs5R)| 8.5632 | … | 7.9412 | 8.1108
-…
+task                 | wavlm  | whisper
+---------------------+--------+--------
+T8 (dementiabank_T8) | 8.5847 | 9.9750
 
-Parsed 144 result files, 0 missing
-Wrote 11 CSV(s) to exps/single_task/_summary_run1/
+=== MAE_CI.csv ===
+task                 | wavlm            | whisper
+---------------------+------------------+-------------------
+T8 (dementiabank_T8) | (7.2261, 9.8711) | (8.6044, 11.3337)
+
+=== MSE.csv ===
+task                 | wavlm   | whisper
+---------------------+---------+---------
+T8 (dementiabank_T8) | 93.1460 | 120.2364
+
+=== PearsonR.csv ===
+task                 | wavlm   | whisper
+---------------------+---------+---------
+T8 (dementiabank_T8) | -0.2148 | -0.2244
+
+=== R2.csv ===
+task                 | wavlm   | whisper
+---------------------+---------+---------
+T8 (dementiabank_T8) | -2.3907 | -3.3769
+
+Parsed 2 result files, 0 missing
+Wrote 6 CSV(s) to exps/single_task/_summary_run1/
 ```
 
 ### Cross-task (zero-shot transfer)
@@ -274,14 +310,29 @@ for pairs and `c<train>_c<test>` for category groups.
 uv run python -m sdx cross run -t T13_T10 -e wavlm hubert
 ```
 
-Final stdout — rows use the descriptive `<train>_<test>` stem from the
-cross-task yaml:
+Final stdout — `T13` (mdvr_parkC) trains the probe, `T10` (torgo_dysC)
+evaluates it:
 
 ```
 === AUC.csv ===
-task                 | hubert | wavlm
----------------------+--------+-------
-mdvr_torgo_parkC_dysC| 0.6418 | 0.7102
+task                         | wavlm  | hubert
+-----------------------------+--------+-------
+T13_T10 (mdvr_torgo_T13_T10) | 0.4828 | 0.5642
+
+=== AUC_CI.csv ===
+task                         | wavlm            | hubert
+-----------------------------+------------------+-----------------
+T13_T10 (mdvr_torgo_T13_T10) | (0.3732, 0.5720) | (0.4878, 0.6269)
+
+=== F1.csv ===
+task                         | wavlm  | hubert
+-----------------------------+--------+-------
+T13_T10 (mdvr_torgo_T13_T10) | 0.0225 | 0.0559
+
+=== Acc.csv ===
+task                         | wavlm  | hubert
+-----------------------------+--------+-------
+T13_T10 (mdvr_torgo_T13_T10) | 0.6589 | 0.6594
 
 Parsed 2 result files, 0 missing
 Wrote 5 CSV(s) to exps/cross/_summary_run1/
@@ -299,9 +350,24 @@ stems:
 
 ```
 === AUC.csv ===
-task              | wavlm
-------------------+-------
-c2_c3 (category_c2_c3) | 0.7209
+task                   | wavlm
+-----------------------+-------
+c2_c3 (category_c2_c3) | 0.7288
+
+=== AUC_CI.csv ===
+task                   | wavlm
+-----------------------+-----------------
+c2_c3 (category_c2_c3) | (0.7228, 0.7347)
+
+=== F1.csv ===
+task                   | wavlm
+-----------------------+-------
+c2_c3 (category_c2_c3) | 0.6845
+
+=== Acc.csv ===
+task                   | wavlm
+-----------------------+-------
+c2_c3 (category_c2_c3) | 0.5419
 
 Parsed 1 result files, 0 missing
 Wrote 5 CSV(s) to exps/cross_cat/_summary_run1/
@@ -310,24 +376,27 @@ Wrote 5 CSV(s) to exps/cross_cat/_summary_run1/
 ### Data-efficiency sweep
 
 Re-runs `train` four times per pair at 6.25 / 12.5 / 25 / 50 % of
-training data; reuses the single-mode `prep` and `warm` caches.
+training data.
 
 ```bash
 uv run python -m sdx data-eff run -t T19 -e wavlm --level 06p25 50
 ```
 
-`data-eff summary` prints one parsed/missing line per level rather than
-the metric tables (the per-level + combined matrices land on disk):
+Unlike the other modes, `data-eff summary` does not print the metric
+tables — only one parsed/missing line per active level, then the
+totals (per-level matrices land on disk):
 
 ```
   level 06p25: parsed 1, missing 0
-  level 50:    parsed 1, missing 0
+  level 50: parsed 1, missing 0
 
 Parsed 2 result files, 0 missing
-Wrote 12 CSV(s) under exps/data_eff/_summary_run1/
+Wrote 15 CSV(s) under exps/data_eff/_summary_run1/
 ```
 
-The combined progression CSV (e.g.
+(5 CSVs per level — `AUC.csv`, `AUC_CI.csv`, `F1.csv`, `Acc.csv`,
+`completion.csv` — × 2 levels = 10, plus 5 combined progression CSVs at
+the root.) The combined progression CSV (e.g.
 `exps/data_eff/_summary_run1/AUC.csv`) has columns
 `(encoder × level)` so you can read accuracy vs. training-set size off
 a single row.
@@ -335,18 +404,16 @@ a single row.
 ### Status grid
 
 ```bash
-uv run python -m sdx single status
+uv run python -m sdx single status -t T19 -e wavlm whisper
 ```
 
 ```
-task              | ast | audiomae | clap | emotion2vec | hubert | … | whisper
-------------------+-----+----------+------+-------------+--------+---+--------
-T3 (ravdess_emoC) | ☑   | ☑        | ☑    | ☐           | ☑      | … | ☑
-T10 (torgo_dysC)  | ☑   | ☑        | ☑    | ☑           | ☑      | … | ☑
-…
+task                | wavlm | whisper
+--------------------+-------+--------
+T19 (c19sounds_T19) | ☑     | ☑
 
 Legend: ☑ complete, ☐ incomplete
-Summary (single): 132/144 complete, 12 remaining
+Summary (single): 2/2 complete, 0 remaining
 ```
 
 ### Re-evaluate without retraining
@@ -358,13 +425,18 @@ Loads the saved best trial, runs the test loop, overwrites
 uv run python -m sdx single train --test-only -t T19 -e wavlm
 ```
 
-Stdout is the SpeechBrain test loop followed by the new metrics being
-written:
+```
+sdx.train - Test stats: AUROC: 6.81e-01 - F1: 6.53e-01 - accuracy: 6.24e-01
+```
+
+[exps/single_task/T19/wavlm-AvgTProbe-run1/test_results.txt](exps/single_task/T19/wavlm-AvgTProbe-run1/test_results.txt)
 
 ```
-[…brain test loop…]
-Test stats: AUROC: 6.55e-01, F1: 6.23e-01, accuracy: 6.09e-01, loss: 6.69e-01
-Wrote exps/single_task/T19/wavlm-AvgTProbe-run1/test_results.txt
+AUROC: 0.6810
+AUROC_CI_low: 0.6533
+AUROC_CI_high: 0.7116
+F1: 0.6528
+accuracy: 0.6237
 ```
 
 ## Encoders
@@ -471,11 +543,9 @@ binary COVID classification on the COVID-19 Sounds dataset. Paper tasks are
 identified by ID (T1…T27) — see `paper_tasks` in `sdx/configs/registry.yaml`
 for the full ID-to-(dataset, label) mapping.
 
-1. **Stage the dataset.** Audio under `data/<dataset>/processed/audio/`,
-   metadata CSV at `data/<dataset>/processed/<dataset>.csv`. Required CSV
-   columns: `uid, Participant_ID, split, label, path` (`path` is relative to
-   `processed/audio/`). See [`metadata_script/`](metadata_script/) for
-   per-dataset builders.
+1. **Stage the dataset.** See the [Datasets](#datasets) section for the
+   on-disk paths and CSV schema; per-dataset builders live in
+   [`metadata_script/`](metadata_script/).
 2. **Write a `prepare_*` function** under `sdx/prep/<dataset>.py`. It builds
    train/valid/test manifests from the metadata CSV. `sdx/prep/c19sounds.py` and
    `sdx/prep/torgo.py` are the templates.
@@ -503,10 +573,8 @@ configs live under `sdx/configs/cross_tasks/`, registration goes into a
 different list, and the cross / cross-cat yamls now own every warm-time
 knob themselves (no fall-through to single-task yamls).
 
-1. **Stage every dataset.** Same contract as single — audio under
-   `data/<dataset>/processed/audio/`, CSV at
-   `data/<dataset>/processed/<dataset>.csv` for each dataset the cross task
-   touches.
+1. **Stage every dataset** the cross task touches (see [Datasets](#datasets)
+   for the staging contract).
 2. **Write a `prepare_*` function** under `sdx/prep/cross_<train>_<test>.py`
    (or extend `sdx/prep/category.py` for cross-cat). It builds the manifests
    by joining the per-dataset CSVs. `sdx/prep/cross_aphasia_dementiabank.py`
