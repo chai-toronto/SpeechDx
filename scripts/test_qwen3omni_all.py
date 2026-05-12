@@ -564,14 +564,20 @@ class QwenOmniVLLM:
         )
 
     def generate_batch(self, batch_messages: list, max_tokens: int) -> list:
-        """Return one string per input message, or None for ones that the
-        processor / vLLM couldn't handle (so bad audio doesn't kill a chunk)."""
+        """Return one string per input message, or None for ones the processor
+        / vLLM couldn't handle.
+
+        Some audio inputs trigger Qwen3OmniMoeProcessor failures *inside*
+        ``vllm.generate`` (not at our per-message prep) and the exception
+        takes down the entire batch. To recover, on a batch failure we
+        binary-split the items and recurse — bad items are isolated in O(log
+        N) retries and only those end up as None.
+        """
         from qwen_omni_utils import process_mm_info
         from vllm import SamplingParams
 
         sp = SamplingParams(temperature=1e-2, top_p=0.1, top_k=1, max_tokens=max_tokens)
-        items = []
-        kept = []
+        items, kept = [], []
         for j, messages in enumerate(batch_messages):
             try:
                 text = self.processor.apply_chat_template(
@@ -589,16 +595,31 @@ class QwenOmniVLLM:
                       f"{type(e).__name__}: {str(e)[:200]}", flush=True)
 
         out = [None] * len(batch_messages)
+        if items:
+            self._generate_recursive(items, kept, sp, out)
+        return out
+
+    def _generate_recursive(self, items: list, kept: list, sp, out: list) -> None:
+        """Try generating `items` as a single batch; on failure, binary-split
+        until the bad item(s) are isolated. Results land in `out` at indices
+        from `kept`."""
         if not items:
-            return out
+            return
         try:
             outputs = self.model.generate(items, sampling_params=sp)
             for k, j in enumerate(kept):
                 out[j] = outputs[k].outputs[0].text
+            return
         except Exception as e:
-            print(f"  [warn] vLLM.generate failed on chunk: "
-                  f"{type(e).__name__}: {str(e)[:200]}", flush=True)
-        return out
+            if len(items) == 1:
+                print(f"  [warn] vLLM.generate bad on msg {kept[0]}: "
+                      f"{type(e).__name__}: {str(e)[:200]}", flush=True)
+                return
+            print(f"  [warn] vLLM.generate failed on {len(items)}-item batch "
+                  f"({type(e).__name__}); binary-splitting", flush=True)
+            mid = len(items) // 2
+            self._generate_recursive(items[:mid], kept[:mid], sp, out)
+            self._generate_recursive(items[mid:], kept[mid:], sp, out)
 
 
 def build_messages(audio_path: str, prompt: str) -> list:
