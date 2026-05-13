@@ -636,13 +636,53 @@ def build_messages(audio_path: str, prompt: str) -> list:
 # Metrics
 # ============================================================
 
+def _dns_fill(task: str, df: pd.DataFrame) -> pd.DataFrame:
+    """Impute unparsed predictions as maximally-wrong values (DNS rule).
+
+    binary      : pred = 1 - true
+    multiclass  : pred = (true + 1) mod n_classes
+    regression  : |pred - true| = MAD  (each DNS row contributes MAD to MAE;
+                  with report-card scoring 1 - MAE/(2*MAD), all-DNS -> 0.5)
+    multilabel  : pred_vec = 1 - true_vec elementwise
+    """
+    cfg = TASKS[task]
+    metric = cfg["metric"]
+    df = df.copy()
+    if metric == "binary":
+        mask = df["pred"].isna() & df["true"].notna()
+        df.loc[mask, "pred"] = 1 - df.loc[mask, "true"].astype(int)
+    elif metric == "multiclass":
+        n_classes = len(cfg["classes"])
+        mask = df["pred"].isna() & df["true"].notna()
+        df.loc[mask, "pred"] = (df.loc[mask, "true"].astype(int) + 1) % n_classes
+    elif metric == "regression":
+        true_vals = pd.to_numeric(df["true"], errors="coerce").dropna()
+        mad = float((true_vals - true_vals.mean()).abs().mean()) if len(true_vals) else 0.0
+        mask = df["pred"].isna() & df["true"].notna()
+        df.loc[mask, "pred"] = df.loc[mask, "true"].astype(float) + mad
+    elif metric == "multilabel":
+        mask = df["pred_vec"].isna() & df["true_vec"].notna()
+        for i in df.index[mask]:
+            tv = df.at[i, "true_vec"]
+            if isinstance(tv, list):
+                df.at[i, "pred_vec"] = [1 - int(x) for x in tv]
+    return df
+
+
 def compute_metrics(task: str, df: pd.DataFrame) -> dict:
     cfg = TASKS[task]
     metric = cfg["metric"]
     out = {"n_total": int(len(df))}
-    sub = df.dropna(subset=["pred"]) if metric != "multilabel" else df.dropna(subset=["pred_vec"])
-    out["n_parsed"] = int(len(sub))
-    out["n_unparsed"] = int(len(df) - len(sub))
+    pred_col = "pred_vec" if metric == "multilabel" else "pred"
+    true_col = "true_vec" if metric == "multilabel" else "true"
+    out["n_parsed"] = int(df[pred_col].notna().sum())
+    out["n_unparsed"] = int(len(df) - out["n_parsed"])
+    out["n_dns_imputed"] = out["n_unparsed"]
+
+    # DNS rule: unparsed predictions are imputed as maximally-wrong values
+    # (see _dns_fill). Rows with missing ground truth are still dropped.
+    filled = _dns_fill(task, df)
+    sub = filled.dropna(subset=[pred_col, true_col])
     if len(sub) < 2:
         return out
 
@@ -663,10 +703,22 @@ def compute_metrics(task: str, df: pd.DataFrame) -> dict:
     elif metric == "multiclass":
         y_true = sub["true"].astype(int).to_numpy()
         y_pred = sub["pred"].astype(int).to_numpy()
+        n_classes = len(cfg["classes"])
+        from sklearn.preprocessing import label_binarize
+        labels = list(range(n_classes))
+        y_true_bin = label_binarize(y_true, classes=labels)
+        y_pred_bin = label_binarize(y_pred, classes=labels)
+        # macro-AUC on hard one-hot predictions, skipping degenerate classes
+        aucs = []
+        for j in range(y_true_bin.shape[1]):
+            if len(np.unique(y_true_bin[:, j])) < 2:
+                continue
+            aucs.append(roc_auc_score(y_true_bin[:, j], y_pred_bin[:, j]))
         out.update(dict(
             accuracy=float(accuracy_score(y_true, y_pred)),
             f1_macro=float(f1_score(y_true, y_pred, average="macro", zero_division=0)),
             f1_weighted=float(f1_score(y_true, y_pred, average="weighted", zero_division=0)),
+            auc_hard=float(np.mean(aucs)) if aucs else None,
         ))
     elif metric == "regression":
         y_true = sub["true"].astype(float).to_numpy()
@@ -680,10 +732,17 @@ def compute_metrics(task: str, df: pd.DataFrame) -> dict:
         from sklearn.metrics import f1_score as ml_f1
         y_true = np.array(sub["true_vec"].tolist())
         y_pred = np.array(sub["pred_vec"].tolist())
+        # per-class binary AUC averaged, skipping degenerate (all-0 or all-1) classes
+        aucs = []
+        for j in range(y_true.shape[1]):
+            if len(np.unique(y_true[:, j])) < 2:
+                continue
+            aucs.append(roc_auc_score(y_true[:, j], y_pred[:, j]))
         out.update(dict(
             f1_micro=float(ml_f1(y_true, y_pred, average="micro", zero_division=0)),
             f1_macro=float(ml_f1(y_true, y_pred, average="macro", zero_division=0)),
             f1_samples=float(ml_f1(y_true, y_pred, average="samples", zero_division=0)),
+            auc_hard=float(np.mean(aucs)) if aucs else None,
         ))
     return out
 

@@ -22,6 +22,8 @@ def prepare_data(
         random_seed,
         dataset,
         task,
+        raw_label_key=None,
+        num_fold=None,
 ):
     """
     This function is dataset-specific.
@@ -42,6 +44,11 @@ def prepare_data(
 
     if "boundaries" in df.columns:
         df["boundaries"] = df["boundaries"].apply(json.loads)
+
+    # If the task yaml specifies a raw_label_key distinct from "label", use
+    # that column as the training target.
+    if raw_label_key and raw_label_key != "label" and raw_label_key in df.columns:
+        df["label"] = df[raw_label_key]
 
     df_test = df[df['split'] == 2]
     df_train = df[df['split'] == 0]

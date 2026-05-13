@@ -176,7 +176,7 @@ def build_task_leaderboard(scores: pd.DataFrame) -> pd.DataFrame:
 
 def build_category_summary(scores: pd.DataFrame) -> pd.DataFrame:
     enc_avg = scores.mean(axis=0).round(4)
-    enc_rank = enc_avg.rank(method="min", ascending=False).astype(int)
+    enc_rank = enc_avg.rank(method="min", ascending=False).astype("Int64")
     summary = pd.DataFrame({"overall_score": enc_avg, "overall_rank": enc_rank})
 
     cats_by_task = pd.Series({t: task_category(t) for t in scores.index})
@@ -186,13 +186,13 @@ def build_category_summary(scores: pd.DataFrame) -> pd.DataFrame:
         if len(cat_tasks) == 0:
             continue
         cat_score = scores.loc[cat_tasks].mean(axis=0, skipna=True).round(4)
-        cat_rank = cat_score.rank(method="min", ascending=False).astype(int)
+        cat_rank = cat_score.rank(method="min", ascending=False).astype("Int64")
         summary[f"{cat}_score"] = cat_score.reindex(summary.index)
         summary[f"{cat}_rank"]  = cat_rank.reindex(summary.index)
         cat_score_cols.append(f"{cat}_score")
 
     eqcat_score = summary[cat_score_cols].mean(axis=1, skipna=True).round(4)
-    eqcat_rank = eqcat_score.rank(method="min", ascending=False).astype(int)
+    eqcat_rank = eqcat_score.rank(method="min", ascending=False).astype("Int64")
     summary.insert(2, "eqcat_score", eqcat_score)
     summary.insert(2, "eqcat_rank", eqcat_rank)
     return summary.sort_values("overall_rank")
