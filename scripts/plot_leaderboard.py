@@ -21,6 +21,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CSV = ROOT / "leaderboard.csv"
+BY_CAT_CSV = ROOT / "leaderboard_by_category.csv"
 PDF_OUT = ROOT / "leaderboard_charts.pdf"
 
 META_COLS = {"task", "category", "task_type", "avg", "std"}
@@ -204,6 +205,66 @@ def draw_task_row(fig, gs_row, row: pd.Series, model_cols: list[str], palette: d
         )
 
 
+AGGREGATE_PANELS = [
+    ("Overall (mean of all tasks)", "overall_score"),
+    ("Affective",   "Affective_score"),
+    ("Cognitive",   "Cognitive_score"),
+    ("Motor",       "Motor_score"),
+    ("Respiratory", "Respiratory_score"),
+]
+
+
+def _draw_ranking_axes(ax, encoders: list[str], scores: list[float],
+                       palette: dict, title: str):
+    y_pos = np.arange(len(encoders))[::-1]
+    vals = [s * 1000.0 for s in scores]
+    bar_colors = [palette.get(m, (0.5, 0.5, 0.5, 1.0)) for m in encoders]
+    ax.barh(y_pos, vals, color=bar_colors, edgecolor="black", linewidth=0.4)
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels([MODEL_LABELS.get(m, m) for m in encoders], fontsize=7)
+    for tick, m in zip(ax.get_yticklabels(), encoders):
+        tick.set_color(palette.get(m, (0, 0, 0, 1)))
+        tick.set_fontweight("bold")
+    ax.tick_params(axis="x", labelsize=6)
+    ax.set_xlabel("score × 1000", fontsize=7)
+    ax.set_title(title, fontsize=9, loc="left", pad=3)
+    if vals:
+        xmax = max(vals)
+        ax.set_xlim(0, xmax * 1.12 if xmax > 0 else 1.0)
+        for y, v in zip(y_pos, vals):
+            ax.text(v + 0.01 * xmax, y, f"{v:.0f}",
+                    va="center", fontsize=6)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.grid(axis="x", linestyle=":", alpha=0.4)
+
+
+def draw_aggregate_page(pdf, palette: dict):
+    df = pd.read_csv(BY_CAT_CSV)
+    df = df.rename(columns={df.columns[0]: "encoder"})
+    fig = plt.figure(figsize=(8.5, 11))
+    outer = gridspec.GridSpec(
+        3, 2, figure=fig,
+        hspace=0.55, wspace=0.35,
+        left=0.10, right=0.97, top=0.92, bottom=0.05,
+        height_ratios=[1.2, 1, 1],
+    )
+    slots = [outer[0, :], outer[1, 0], outer[1, 1], outer[2, 0], outer[2, 1]]
+    for (title, col), slot in zip(AGGREGATE_PANELS, slots):
+        sub = df[["encoder", col]].dropna().copy()
+        sub[col] = pd.to_numeric(sub[col], errors="coerce")
+        sub = sub.dropna().sort_values(col, ascending=False)
+        ax = fig.add_subplot(slot)
+        _draw_ranking_axes(
+            ax, sub["encoder"].tolist(), sub[col].tolist(), palette, title,
+        )
+    fig.suptitle(
+        "Audio Health Benchmark — overall and per-category rankings",
+        fontsize=11, y=0.965,
+    )
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
 def _load_task_layout() -> pd.DataFrame:
     """Load leaderboard.csv (encoder-rows, task-cols) and transpose into the
     task-rows layout this script was written against. The meta rows
@@ -230,6 +291,7 @@ def main():
     n_pages = (len(df) + tasks_per_page - 1) // tasks_per_page
 
     with PdfPages(PDF_OUT) as pdf:
+        draw_aggregate_page(pdf, palette)
         for page in range(n_pages):
             fig = plt.figure(figsize=(8.5, 11))
             outer = gridspec.GridSpec(
