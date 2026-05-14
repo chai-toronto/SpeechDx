@@ -360,7 +360,7 @@ TASKS = {
     "T15": _t(
         source={"manifest": "exps/single_task/T15/manifest", "split": "valid"},
         label_col="updrs_iii18", parser="integer", metric="regression",
-        range=(0, 50),
+        range=(0, 4),
     ),
     "T16": _t(
         source={"manifest": "exps/single_task/T16/manifest", "split": "valid"},
