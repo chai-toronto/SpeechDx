@@ -62,8 +62,7 @@ LP_CONFIGS: dict[str, dict[str, Any]] = {
             "scripted statement while portraying a target emotion."
         ),
         "description": (
-            "Identify the emotion based on vocal cues (pitch, energy, "
-            "tempo, prosody, voice quality)."
+            "Identify the portrayed emotion."
         ),
         "answer_map": {
             "neutral": "A", "calm": "B", "happy": "C", "sad": "D",
@@ -92,7 +91,7 @@ LP_CONFIGS: dict[str, dict[str, Any]] = {
             "conversation recording."
         ),
         "description": (
-            "Identify the speaker's emotional state from voice and prosody."
+            "Identify the speaker's emotional state."
         ),
         "answer_map": {"neutral": "A", "angry": "B", "sad": "C", "happy": "D"},
     },
@@ -113,12 +112,11 @@ LP_CONFIGS: dict[str, dict[str, Any]] = {
         "kind": "binary",
         "context": (
             "You are a clinical screening assistant. The audio is from a "
-            "participant describing the Cookie Theft picture as part of a "
+            "participant describing the picture of a lion lying with a cub in the dessert while eating as part of a "
             "cognitive assessment."
         ),
         "description": (
-            "Based on speech patterns -- word-finding difficulty, fluency, "
-            "coherence, informativeness of content, semantic paraphasias -- "
+            "Based on speech "
             "decide whether this participant most likely has dementia "
             "(probable Alzheimer's disease)."
         ),
@@ -130,7 +128,7 @@ LP_CONFIGS: dict[str, dict[str, Any]] = {
         "kind": "regression",
         "prompt": (
             "You are a clinical screening assistant. The audio is a "
-            "Cookie Theft picture description. Estimate the participant's "
+            "picture description of a lion lying with a cub in the dessert while eating. Estimate the participant's "
             "MMSE (Mini-Mental State Examination) total score, an integer "
             "0-30 where higher values indicate better cognition. Severity "
             "bands: 0-9 severe, 10-18 moderate, 19-23 mild, 24-30 normal.\n\n"
@@ -148,9 +146,8 @@ LP_CONFIGS: dict[str, dict[str, Any]] = {
             "description, narrative, or naming)."
         ),
         "description": (
-            "Based on word-finding, fluency, grammatical structure, "
-            "articulation, and paraphasic errors, decide whether this "
-            "participant has aphasia."
+            "Decide whether this "
+            "participant is likely to have aphasia."
         ),
         "answer_map": {"no": "A", "yes": "B"},
     },
@@ -163,8 +160,7 @@ LP_CONFIGS: dict[str, dict[str, Any]] = {
             "or sentences in English."
         ),
         "description": (
-            "Based on articulation precision, voice quality, prosody, and "
-            "intelligibility, decide whether this speaker has dysarthria."
+            "Decide whether this speaker has dysarthria."
         ),
         "answer_map": {"no": "A", "yes": "B"},
     },
@@ -192,8 +188,7 @@ LP_CONFIGS: dict[str, dict[str, Any]] = {
             "healthy speaker or a speaker with cerebral-palsy dysarthria."
         ),
         "description": (
-            "Based on articulation, voice quality, prosody, and "
-            "intelligibility, decide whether this speaker has dysarthria."
+            "Decide whether this speaker has dysarthria."
         ),
         "answer_map": {"no": "A", "yes": "B"},
     },
@@ -207,9 +202,7 @@ LP_CONFIGS: dict[str, dict[str, Any]] = {
             "read speech)."
         ),
         "description": (
-            "Based on voice -- tremor, breathiness, monoloudness, "
-            "monopitch, dysprosody, imprecise articulation -- decide "
-            "whether this speaker has Parkinson's disease."
+            "Decide whether this speaker has Parkinson's disease."
         ),
         "answer_map": {"no": "A", "yes": "B"},
     },
@@ -232,18 +225,21 @@ LP_CONFIGS: dict[str, dict[str, Any]] = {
         ),
     },
 
-    # ---------- T15: UPDRS-III motor (regression) ----------
+    # ---------- T15: UPDRS-III item 18 (speech, examiner-rated) ----------
     "T15": {
         "kind": "regression",
         "prompt": (
             "You are a clinical screening assistant for Parkinson's "
-            "disease. From the voice tasks alone, estimate the UPDRS-III "
-            "motor score (an integer roughly 0-50, higher = more severe "
-            "motor impairment). Use vocal cues -- speech, facial-"
-            "expression-related prosody, tremor -- to infer overall "
-            "severity.\n\n"
+            "disease. The audio is from a participant performing voice "
+            "tasks. Estimate the UPDRS-III item 18 (speech, as scored on "
+            "the motor examination):\n"
+            "  0 = normal\n"
+            "  1 = slight loss of expression, diction, and/or volume\n"
+            "  2 = monotone, slurred but understandable\n"
+            "  3 = marked impairment, hard to understand\n"
+            "  4 = unintelligible\n\n"
             "Reply on the final line in exactly this format:\n"
-            "ANSWER: <integer 0-50>"
+            "ANSWER: <integer 0-4>"
         ),
     },
 

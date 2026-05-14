@@ -187,7 +187,8 @@ def _make_cache_writer(cache_dir: Path, num_versions: int,
     @sb.utils.data_pipeline.takes(ID, SIGNALS)
     @sb.utils.data_pipeline.provides(*output_vars)
     def cache_emb(id, raw_signals):
-        device = next(speech_encoder.parameters()).device
+        _p = next(speech_encoder.parameters(), None) or next(speech_encoder.buffers(), None)
+        device = _p.device if _p is not None else torch.device("cpu")
         with torch.no_grad():
             embs = []
             for chunk in raw_signals:
@@ -291,8 +292,7 @@ def run_warm(task: str, encoder: str, *,
     cache to whatever aug count the cross task needs. The append-mode
     HDF5 writer extends the cache; existing aug versions are untouched.
     """
-    # Phase 1 — pre-flight using the stub encoder so a warm cache check
-    # never pays the real encoder's load cost.
+    # Pre-flight config (stub encoder — no GPU/download cost).
     hparams_stub = compose_config(task, encoder, probe=probe, mode="read")
     train_cache_dir, val_cache_dir = _cache_dirs(hparams_stub)
     train_cache_dir.mkdir(parents=True, exist_ok=True)
@@ -303,18 +303,18 @@ def run_warm(task: str, encoder: str, *,
     data_dict = _load_manifests(hparams_stub)
     all_ids = list(data_dict["all"].keys())
 
-    if not overwrite and _is_fully_warm(train_cache_dir, val_cache_dir, num_versions, all_ids):
-        print(f"Cache fully warm for {task} × {encoder}, nothing to do.")
-        return
-
+    # Acquire the per-(dataset, encoder) lock BEFORE any HDF5 access so the
+    # preflight read and the write are serialized together. Previously the
+    # preflight ran outside the lock, causing h5py corruption when concurrent
+    # workers warmed tasks sharing the same dataset (e.g. T5/T6 both iemocap).
     lock_path = _lock_path(hparams_stub)
     print(f"Acquiring warm writer lock: {lock_path}")
     with FileLock(str(lock_path)):
-        if overwrite:
-            _wipe_cache_dirs(train_cache_dir, val_cache_dir)
-        if _is_fully_warm(train_cache_dir, val_cache_dir, num_versions, all_ids):
+        if not overwrite and _is_fully_warm(train_cache_dir, val_cache_dir, num_versions, all_ids):
             print(f"Cache fully warm for {task} × {encoder}, nothing to do.")
             return
+        if overwrite:
+            _wipe_cache_dirs(train_cache_dir, val_cache_dir)
         _warm_uncached(
             task, encoder,
             probe=probe, device=device,

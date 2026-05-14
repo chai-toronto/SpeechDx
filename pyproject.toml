@@ -42,6 +42,7 @@ dependencies = [
     "qwen-tts>=0.1",
     # Notebook kernel for ad-hoc analysis
     "ipykernel>=7.0",
+    "dmel>=1.0",
     "qwen-omni-utils>=0.0.9",
     "google-genai>=2.1.0",
 ]

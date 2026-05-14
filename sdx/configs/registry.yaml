@@ -5,6 +5,7 @@
 # model_name -> encoder yaml filename. The model_name is what appears in
 # experiment folder names and is what --encoder flags accept.
 encoders:
+  dmel:         dmel.yaml
   qwen3voice:   qwen3_voice.yaml
   wavlm:        wavlm.yaml
   ast:          ast.yaml

@@ -8,13 +8,67 @@ for capturing one job's stdout/stderr into a log file.
 from __future__ import annotations
 
 import contextlib
+import io
 import re
+import sys
 import threading
 import time
 import traceback
 from collections.abc import Callable, Iterable
 from datetime import datetime
 from pathlib import Path
+
+
+# ---------------------------------------------------------------------------
+# Thread-local stdout so concurrent _run_logged_job workers each write to
+# their own log file without stomping on each other's sys.stdout redirect.
+# ---------------------------------------------------------------------------
+_tls = threading.local()
+
+
+class _ThreadLocalStdout(io.TextIOBase):
+    """Proxy that routes each thread's writes to its own per-job log file."""
+
+    def write(self, s: str) -> int:
+        f = getattr(_tls, "out", sys.__stdout__)
+        try:
+            return f.write(s)
+        except ValueError:
+            return sys.__stdout__.write(s)
+
+    def flush(self) -> None:
+        f = getattr(_tls, "out", sys.__stdout__)
+        try:
+            f.flush()
+        except ValueError:
+            pass
+
+    @property
+    def encoding(self):
+        return getattr(getattr(_tls, "out", sys.__stdout__), "encoding", "utf-8")
+
+
+_tl_stdout = _ThreadLocalStdout()
+
+
+@contextlib.contextmanager
+def _redirect_tls(f):
+    """Set this thread's log-file target; install proxy on first call."""
+    prev = getattr(_tls, "out", None)
+    _tls.out = f
+    old_stdout = sys.stdout
+    old_stderr = sys.stderr
+    sys.stdout = _tl_stdout
+    sys.stderr = _tl_stdout
+    try:
+        yield
+    finally:
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
+        if prev is None:
+            del _tls.out
+        else:
+            _tls.out = prev
 
 # Fixed-width role label so concurrent rows align.
 ROLE_W = 7
@@ -101,11 +155,11 @@ def _run_logged_job(label: str, log_path: Path, fn: Callable[[], None], *,
         f.write(f"{'='*60}\n")
         f.flush()
         try:
-            with contextlib.redirect_stdout(f), contextlib.redirect_stderr(f):
+            with _redirect_tls(f):
                 fn()
         except Exception:
             success = False
-            with contextlib.redirect_stdout(f), contextlib.redirect_stderr(f):
+            with _redirect_tls(f):
                 traceback.print_exc()
     elapsed = time.time() - start
     with log_path.open("a", buffering=1) as f:

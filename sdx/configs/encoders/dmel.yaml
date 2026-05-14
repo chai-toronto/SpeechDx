@@ -1,0 +1,18 @@
+
+sample_rate: 16000
+feature_dim: 80     # n_filterbank
+num_layers: 1
+layer_dim: 1
+max_length: 10e5    # no strict upper bound; upstream clipping handles OOM
+min_length: 1
+
+encoder: !new:model.dmel.DMEL
+  sample_rate: !ref <sample_rate>
+  n_filterbank: 80
+  n_bits: 4
+  n_fft: 1024
+  frame_size_ms: 50.0
+  frame_stride_ms: 12.5
+  quantize_min_value: -7.0
+  quantize_max_value: 2.0
+  use_discrete: True
