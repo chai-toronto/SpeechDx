@@ -60,10 +60,17 @@ import soundfile as sf
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_qwen3omni_all import (  # noqa: E402
-    TASKS, PROMPTS, load_samples, normalize_true,
-    parse_yes_no, parse_label, parse_integer, parse_multilabel,
+    TASKS, load_samples, normalize_true,
+    parse_integer,
     compute_metrics, cv_aggregate,
 )
+# PROMPTS / parse_yes_no / parse_label / parse_multilabel were removed
+# from test_qwen3omni_all (LP migration). Sites that referenced them in
+# this file -- submit_dataset (PROMPTS[task]), _parse_response_text
+# (parse_yes_no / parse_label / parse_multilabel), fetch_dataset
+# (PROMPTS[task]) -- will NameError if reached. They aren't reached
+# because main() exits early via the LP-pending guard. The migration
+# checklist in the module docstring covers what to swap them with.
 
 # Repair stale registry paths
 TASKS["T7"]["source"] = {"manifest": "exps/single_task/dbank_adC/manifest", "split": "test"}
