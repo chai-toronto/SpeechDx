@@ -50,23 +50,42 @@ class _ThreadLocalStdout(io.TextIOBase):
 
 _tl_stdout = _ThreadLocalStdout()
 
+# Process-wide refcount for the sys.stdout/sys.stderr install. Concurrent
+# _run_logged_job workers must not save/restore the globals independently: if
+# thread A installs then thread B saves "_tl_stdout" as its baseline, A's
+# restore puts the real fd back while B is still writing -> output leaks to
+# the terminal; B's restore then reinstalls the proxy permanently.
+_install_lock = threading.Lock()
+_install_refs = 0
+_saved_stdout: object = None
+_saved_stderr: object = None
+
 
 @contextlib.contextmanager
 def _redirect_tls(f):
-    """Set this thread's log-file target; install proxy on first call."""
+    """Set this thread's log-file target; install proxy on first concurrent caller."""
+    global _install_refs, _saved_stdout, _saved_stderr
     prev = getattr(_tls, "out", None)
     _tls.out = f
-    old_stdout = sys.stdout
-    old_stderr = sys.stderr
-    sys.stdout = _tl_stdout
-    sys.stderr = _tl_stdout
+    with _install_lock:
+        if _install_refs == 0:
+            _saved_stdout = sys.stdout
+            _saved_stderr = sys.stderr
+            sys.stdout = _tl_stdout
+            sys.stderr = _tl_stdout
+        _install_refs += 1
     try:
         yield
     finally:
-        sys.stdout = old_stdout
-        sys.stderr = old_stderr
+        with _install_lock:
+            _install_refs -= 1
+            if _install_refs == 0:
+                sys.stdout = _saved_stdout
+                sys.stderr = _saved_stderr
+                _saved_stdout = None
+                _saved_stderr = None
         if prev is None:
-            del _tls.out
+            _tls.__dict__.pop("out", None)
         else:
             _tls.out = prev
 

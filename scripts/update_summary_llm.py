@@ -7,11 +7,11 @@ corresponding column of:
   exps/_summary_run2_all_mvdr3/single_task/AUC.csv
   exps/_summary_run2_all_mvdr3/single_task/MAE.csv
 
-Headline metric per task type:
+Headline metric per task type (LP soft-probability AUC):
 
-  binary       AUC  := auc_hard                   MAE := (n/a)
-  multiclass   AUC  := auc_hard (macro OvR)       MAE := (n/a)
-  multilabel   AUC  := auc_hard (per-class)       MAE := (n/a)
+  binary       AUC  := auc                        MAE := (n/a)
+  multiclass   AUC  := auc (macro OvR)            MAE := (n/a)
+  multilabel   AUC  := auc (per-class)            MAE := (n/a)
   regression   AUC  := (n/a)                      MAE := mae
 
 For CV tasks the *_mean from fold_aggregate is used when present, else the
@@ -68,10 +68,6 @@ MODEL_COL = {
 sys.path.insert(0, str(REPO / "scripts"))
 from test_qwen3omni_all import TASKS  # noqa: E402
 
-# Same registry fixes as gemini_batch.py
-TASKS["T7"]["source"] = {"manifest": "exps/single_task/dbank_adC/manifest", "split": "test"}
-TASKS["T8"]["source"] = {"manifest": "exps/single_task/dbank_mmseR/manifest", "split": "test"}
-
 
 def _pick(metrics: dict, key: str):
     """Prefer fold_aggregate <key>_mean; fall back to overall <key>."""
@@ -91,9 +87,8 @@ def headline_value(task: str, metrics: dict, summary_kind: str):
     cfg = TASKS[task]
     m = cfg["metric"]
     if summary_kind == "AUC":
-        if m == "binary":      return _pick(metrics, "auc_hard")
-        if m == "multiclass":  return _pick(metrics, "auc_hard")
-        if m == "multilabel":  return _pick(metrics, "auc_hard")
+        if m in ("binary", "multiclass", "multilabel"):
+            return _pick(metrics, "auc")
         return None
     if summary_kind == "MAE":
         if m == "regression":  return _pick(metrics, "mae")

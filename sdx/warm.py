@@ -187,7 +187,9 @@ def _make_cache_writer(cache_dir: Path, num_versions: int,
     @sb.utils.data_pipeline.takes(ID, SIGNALS)
     @sb.utils.data_pipeline.provides(*output_vars)
     def cache_emb(id, raw_signals):
-        _p = next(speech_encoder.parameters(), None) or next(speech_encoder.buffers(), None)
+        _p = next(speech_encoder.parameters(), None)
+        if _p is None:
+            _p = next(speech_encoder.buffers(), None)
         device = _p.device if _p is not None else torch.device("cpu")
         with torch.no_grad():
             embs = []
