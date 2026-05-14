@@ -1,5 +1,25 @@
 """Gemini Batch API runner for SpeechDx benchmark.
 
+NOT RUNNABLE — pending LP integration.
+    The main eval flow has moved to letter-choice + logprobs (lp_configs +
+    lp_parser). This script still uses the legacy free-text PROMPTS and the
+    yes_no/label/multilabel text parsers, so a fresh batch run would
+    produce results that aren't comparable with run_gemini_eval.py output
+    (no pred_prob / pred_prob_vec / logprobs_json columns; AUC stays on
+    the degenerate hard-pred path).
+
+    To re-enable: replace the PROMPTS[task] sites at lines ~342, ~758
+    with build_prompt(task) from lp_configs (keeping in mind that
+    multilabel returns a list[(label, prompt)] and needs K rows per
+    sample); request response_logprobs in the batch request payload;
+    rewrite _parse_response_text (~line 455) to use parse_choice_response
+    + aggregate_multilabel_probs from lp_parser; extend the per-row save
+    schema to include the new columns. Then remove the guard in main().
+
+    The submit/status/fetch/cleanup orchestration and the watcher
+    (gemini_watch.py) stay correct -- only the per-request prompt
+    construction and the per-result parsing need migration.
+
 Subcommands (operate on one or more datasets):
     submit   upload audio + JSONL request file, create batch job
     status   show batch state(s)
@@ -919,6 +939,18 @@ def cleanup_dataset(client, dataset: str) -> None:
 # ============================================================
 
 def main() -> int:
+    sys.stderr.write(
+        "gemini_batch.py is paused pending LP integration.\n"
+        "  See the module docstring for the migration checklist (PROMPTS ->\n"
+        "  lp_configs.build_prompt; legacy parsers -> lp_parser; add\n"
+        "  response_logprobs to batch requests; extend the save schema\n"
+        "  with pred_prob / pred_prob_vec / logprobs_json). Remove this\n"
+        "  guard once that is done.\n"
+    )
+    return 2
+
+    # Below is the original CLI -- kept intact so the migration only has
+    # to swap call sites, not rebuild the orchestration.
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
