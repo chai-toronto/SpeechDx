@@ -318,12 +318,12 @@ TASKS = {
         classes=["non-negative", "negative"],
     ),
     "T7": _t(
-        source={"manifest": "exps/dbank_adC/manifest", "split": "test"},
+        source={"manifest": "exps/single_task/T7/manifest", "split": "test"},
         label_col="label", parser="yes_no", metric="binary",
         classes=["no", "yes"],
     ),
     "T8": _t(
-        source={"manifest": "exps/dbank_mmseR/manifest", "split": "test"},
+        source={"manifest": "exps/single_task/T8/manifest", "split": "test"},
         label_col="mmse", parser="integer", metric="regression",
         range=(0, 30),
     ),
@@ -379,27 +379,27 @@ TASKS = {
                  "interjection","no_disfl","garbage"],
     ),
     "T19": _t(
-        source={"csv": "metadata/c9s/t1.csv", "split_col": "split", "split_value": 2},
+        source={"manifest": "exps/single_task/T19/manifest", "split": "test"},
         label_col="label", parser="yes_no", metric="binary",
         classes=["no", "yes"],
     ),
     "T20": _t(
-        source={"csv": "metadata/c9s/L_t1.csv", "split_col": "split", "split_value": 2},
+        source={"manifest": "exps/single_task/T20/manifest", "split": "test"},
         label_col="label", parser="yes_no", metric="binary",
         classes=["no", "yes"],
     ),
     "T21": _t(
-        source={"csv": "metadata/c9s/t2.csv", "split_col": "split", "split_value": 2},
+        source={"manifest": "exps/single_task/T21/manifest", "split": "test"},
         label_col="label", parser="yes_no", metric="binary",
         classes=["no", "yes"],
     ),
     "T22": _t(
-        source={"csv": "metadata/c9s/L_t2.csv", "split_col": "split", "split_value": 2},
+        source={"manifest": "exps/single_task/T22/manifest", "split": "test"},
         label_col="label", parser="yes_no", metric="binary",
         classes=["no", "yes"],
     ),
     "T23": _t(
-        source={"csv": "metadata/c9s/sympL.csv", "split_col": "split", "split_value": 2},
+        source={"manifest": "exps/single_task/T23/manifest", "split": "test"},
         label_col="label", parser="multilabel", metric="multilabel",
         classes=["drycough","wetcough","fever","headache","muscleache","dizziness",
                  "sorethroat","shortbreath","tightness","runnyblockednose",

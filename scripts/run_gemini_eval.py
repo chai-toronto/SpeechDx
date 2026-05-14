@@ -44,10 +44,6 @@ from lp_parser import (  # noqa: E402
     probs_to_class_vector, argmax_class, aggregate_multilabel_probs,
 )
 
-# Correct stale registry paths
-TASKS["T7"]["source"] = {"manifest": "exps/single_task/dbank_adC/manifest", "split": "test"}
-TASKS["T8"]["source"] = {"manifest": "exps/single_task/dbank_mmseR/manifest", "split": "test"}
-
 MODEL = "gemini-3.1-pro-preview"
 
 # Task groups: lists of task IDs that share audio. Uploading + (optionally)
