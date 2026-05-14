@@ -42,8 +42,7 @@ REPO = Path(__file__).resolve().parents[1]
 PROMPTS = {
     "T1": (
         "You are a clinical screening assistant. The audio is a participant from "
-        "a depression-screening interview (E-DAIC). Based on vocal and prosodic "
-        "cues (tempo, pitch, energy, fluency, affect), decide whether this "
+        "a depression-screening interview (E-DAIC). Decide whether this "
         "participant most likely meets criteria for clinical depression.\n\n"
         "Reply on the final line in exactly this format:\n"
         "ANSWER: yes  or  ANSWER: no"
@@ -639,22 +638,37 @@ def build_messages(audio_path: str, prompt: str) -> list:
 def _dns_fill(task: str, df: pd.DataFrame) -> pd.DataFrame:
     """Impute unparsed predictions as maximally-wrong values (DNS rule).
 
-    binary      : pred = 1 - true
-    multiclass  : pred = (true + 1) mod n_classes
+    binary      : pred = 1 - true                        ; pred_prob = 1 - true
+    multiclass  : pred = (true + 1) mod n_classes        ; pred_prob_vec = one-hot at the wrong class
     regression  : |pred - true| = MAD  (each DNS row contributes MAD to MAE;
                   with report-card scoring 1 - MAE/(2*MAD), all-DNS -> 0.5)
-    multilabel  : pred_vec = 1 - true_vec elementwise
+    multilabel  : pred_vec = 1 - true_vec elementwise    ; pred_prob_vec = 1.0 - true_vec elementwise
+
+    pred_prob / pred_prob_vec columns are only filled if present in df
+    (i.e., the row came from the LP pipeline). Soft-prob DNS matches the
+    hard-pred DNS so AUC and accuracy/F1 see the same DNS signal.
     """
     cfg = TASKS[task]
     metric = cfg["metric"]
     df = df.copy()
+    has_prob = "pred_prob" in df.columns
+    has_prob_vec = "pred_prob_vec" in df.columns
     if metric == "binary":
         mask = df["pred"].isna() & df["true"].notna()
         df.loc[mask, "pred"] = 1 - df.loc[mask, "true"].astype(int)
+        if has_prob:
+            pmask = df["pred_prob"].isna() & df["true"].notna()
+            df.loc[pmask, "pred_prob"] = 1.0 - df.loc[pmask, "true"].astype(float)
     elif metric == "multiclass":
         n_classes = len(cfg["classes"])
         mask = df["pred"].isna() & df["true"].notna()
         df.loc[mask, "pred"] = (df.loc[mask, "true"].astype(int) + 1) % n_classes
+        if has_prob_vec:
+            for i in df.index[df["pred_prob_vec"].isna() & df["true"].notna()]:
+                wrong = (int(df.at[i, "true"]) + 1) % n_classes
+                vec = [0.0] * n_classes
+                vec[wrong] = 1.0
+                df.at[i, "pred_prob_vec"] = vec
     elif metric == "regression":
         true_vals = pd.to_numeric(df["true"], errors="coerce").dropna()
         mad = float((true_vals - true_vals.mean()).abs().mean()) if len(true_vals) else 0.0
@@ -666,6 +680,12 @@ def _dns_fill(task: str, df: pd.DataFrame) -> pd.DataFrame:
             tv = df.at[i, "true_vec"]
             if isinstance(tv, list):
                 df.at[i, "pred_vec"] = [1 - int(x) for x in tv]
+        if has_prob_vec:
+            pmask = df["pred_prob_vec"].isna() & df["true_vec"].notna()
+            for i in df.index[pmask]:
+                tv = df.at[i, "true_vec"]
+                if isinstance(tv, list):
+                    df.at[i, "pred_prob_vec"] = [1.0 - float(x) for x in tv]
     return df
 
 
@@ -700,6 +720,9 @@ def compute_metrics(task: str, df: pd.DataFrame) -> dict:
                 f1=float(f1_score(y_true, y_pred)),
                 auc_hard=float(roc_auc_score(y_true, y_pred)),
             ))
+            if "pred_prob" in sub.columns and sub["pred_prob"].notna().all():
+                y_score = sub["pred_prob"].astype(float).to_numpy()
+                out["auc"] = float(roc_auc_score(y_true, y_score))
     elif metric == "multiclass":
         y_true = sub["true"].astype(int).to_numpy()
         y_pred = sub["pred"].astype(int).to_numpy()
@@ -709,17 +732,25 @@ def compute_metrics(task: str, df: pd.DataFrame) -> dict:
         y_true_bin = label_binarize(y_true, classes=labels)
         y_pred_bin = label_binarize(y_pred, classes=labels)
         # macro-AUC on hard one-hot predictions, skipping degenerate classes
-        aucs = []
+        aucs_hard = []
         for j in range(y_true_bin.shape[1]):
             if len(np.unique(y_true_bin[:, j])) < 2:
                 continue
-            aucs.append(roc_auc_score(y_true_bin[:, j], y_pred_bin[:, j]))
+            aucs_hard.append(roc_auc_score(y_true_bin[:, j], y_pred_bin[:, j]))
         out.update(dict(
             accuracy=float(accuracy_score(y_true, y_pred)),
             f1_macro=float(f1_score(y_true, y_pred, average="macro", zero_division=0)),
             f1_weighted=float(f1_score(y_true, y_pred, average="weighted", zero_division=0)),
-            auc_hard=float(np.mean(aucs)) if aucs else None,
+            auc_hard=float(np.mean(aucs_hard)) if aucs_hard else None,
         ))
+        if "pred_prob_vec" in sub.columns and sub["pred_prob_vec"].notna().all():
+            y_score = np.array(sub["pred_prob_vec"].tolist())
+            aucs = []
+            for j in range(y_true_bin.shape[1]):
+                if len(np.unique(y_true_bin[:, j])) < 2:
+                    continue
+                aucs.append(roc_auc_score(y_true_bin[:, j], y_score[:, j]))
+            out["auc"] = float(np.mean(aucs)) if aucs else None
     elif metric == "regression":
         y_true = sub["true"].astype(float).to_numpy()
         y_pred = sub["pred"].astype(float).to_numpy()
@@ -733,17 +764,25 @@ def compute_metrics(task: str, df: pd.DataFrame) -> dict:
         y_true = np.array(sub["true_vec"].tolist())
         y_pred = np.array(sub["pred_vec"].tolist())
         # per-class binary AUC averaged, skipping degenerate (all-0 or all-1) classes
-        aucs = []
+        aucs_hard = []
         for j in range(y_true.shape[1]):
             if len(np.unique(y_true[:, j])) < 2:
                 continue
-            aucs.append(roc_auc_score(y_true[:, j], y_pred[:, j]))
+            aucs_hard.append(roc_auc_score(y_true[:, j], y_pred[:, j]))
         out.update(dict(
             f1_micro=float(ml_f1(y_true, y_pred, average="micro", zero_division=0)),
             f1_macro=float(ml_f1(y_true, y_pred, average="macro", zero_division=0)),
             f1_samples=float(ml_f1(y_true, y_pred, average="samples", zero_division=0)),
-            auc_hard=float(np.mean(aucs)) if aucs else None,
+            auc_hard=float(np.mean(aucs_hard)) if aucs_hard else None,
         ))
+        if "pred_prob_vec" in sub.columns and sub["pred_prob_vec"].notna().all():
+            y_score = np.array(sub["pred_prob_vec"].tolist())
+            aucs = []
+            for j in range(y_true.shape[1]):
+                if len(np.unique(y_true[:, j])) < 2:
+                    continue
+                aucs.append(roc_auc_score(y_true[:, j], y_score[:, j]))
+            out["auc"] = float(np.mean(aucs)) if aucs else None
     return out
 
 
