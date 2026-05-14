@@ -29,11 +29,27 @@ try:
 except Exception:
     pass
 
+import math
+import sys
+
 import numpy as np
 import pandas as pd
 import soundfile as sf
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# LP eval helpers (prompts, parser, per-task configs).
+from lp_configs import build_prompt, get_kind, get_answer_map, get_labels  # noqa: E402
+from lp_parser import (  # noqa: E402
+    parse_choice_response, probs_to_class_vector, argmax_class,
+    aggregate_multilabel_probs,
+)
+
+# Top-K logprobs requested per generated token. Must comfortably exceed
+# the largest class set (T3: 8 letters); bump to 30 here since vLLM has
+# no API-side cap and the cost of larger K is just larger payloads.
+LOGPROBS_K = 30
 
 # ============================================================
 # Prompts (one per task)
@@ -562,20 +578,28 @@ class QwenOmniVLLM:
             seed=1234,
         )
 
-    def generate_batch(self, batch_messages: list, max_tokens: int) -> list:
-        """Return one string per input message, or None for ones the processor
-        / vLLM couldn't handle.
+    def generate_batch(self, batch_messages: list, max_tokens: int,
+                       logprobs_k: int | None = None) -> list:
+        """Return one (text, lp_dict) tuple per input message, or
+        (None, None) for ones the processor / vLLM couldn't handle.
+
+        When logprobs_k is set, lp_dict matches the format expected by
+        lp_parser (see _vllm_lp_to_dict). When None, lp_dict is always
+        None (free-text path, e.g. regression).
 
         Some audio inputs trigger Qwen3OmniMoeProcessor failures *inside*
         ``vllm.generate`` (not at our per-message prep) and the exception
         takes down the entire batch. To recover, on a batch failure we
-        binary-split the items and recurse — bad items are isolated in O(log
-        N) retries and only those end up as None.
+        binary-split the items and recurse — bad items are isolated in
+        O(log N) retries and only those end up as None.
         """
         from qwen_omni_utils import process_mm_info
         from vllm import SamplingParams
 
-        sp = SamplingParams(temperature=1e-2, top_p=0.1, top_k=1, max_tokens=max_tokens)
+        sp_kw = dict(temperature=1e-2, top_p=0.1, top_k=1, max_tokens=max_tokens)
+        if logprobs_k is not None:
+            sp_kw["logprobs"] = logprobs_k
+        sp = SamplingParams(**sp_kw)
         items, kept = [], []
         for j, messages in enumerate(batch_messages):
             try:
@@ -593,21 +617,24 @@ class QwenOmniVLLM:
                 print(f"  [warn] processor failed on msg {j}: "
                       f"{type(e).__name__}: {str(e)[:200]}", flush=True)
 
-        out = [None] * len(batch_messages)
+        out = [(None, None)] * len(batch_messages)
         if items:
-            self._generate_recursive(items, kept, sp, out)
+            self._generate_recursive(items, kept, sp, out, logprobs_k is not None)
         return out
 
-    def _generate_recursive(self, items: list, kept: list, sp, out: list) -> None:
+    def _generate_recursive(self, items: list, kept: list, sp, out: list,
+                            with_logprobs: bool) -> None:
         """Try generating `items` as a single batch; on failure, binary-split
         until the bad item(s) are isolated. Results land in `out` at indices
-        from `kept`."""
+        from `kept` as (text, lp_dict) tuples."""
         if not items:
             return
         try:
             outputs = self.model.generate(items, sampling_params=sp)
             for k, j in enumerate(kept):
-                out[j] = outputs[k].outputs[0].text
+                vo = outputs[k].outputs[0]
+                lp = _vllm_lp_to_dict(vo) if with_logprobs else None
+                out[j] = (vo.text, lp)
             return
         except Exception as e:
             if len(items) == 1:
@@ -617,8 +644,37 @@ class QwenOmniVLLM:
             print(f"  [warn] vLLM.generate failed on {len(items)}-item batch "
                   f"({type(e).__name__}); binary-splitting", flush=True)
             mid = len(items) // 2
-            self._generate_recursive(items[:mid], kept[:mid], sp, out)
-            self._generate_recursive(items[mid:], kept[mid:], sp, out)
+            self._generate_recursive(items[:mid], kept[:mid], sp, out, with_logprobs)
+            self._generate_recursive(items[mid:], kept[mid:], sp, out, with_logprobs)
+
+
+def _vllm_lp_to_dict(vllm_output) -> dict | None:
+    """Convert vllm CompletionOutput -> {tokens: [...]} matching lp_parser.
+
+    vllm_output.logprobs is list[dict[token_id, Logprob]] (one dict per
+    generated step). vllm_output.token_ids is the list of chosen ids.
+    Each Logprob has .logprob, .decoded_token, .rank.
+    """
+    if vllm_output.logprobs is None:
+        return None
+    chosen_ids = list(vllm_output.token_ids)
+    tokens = []
+    for step_idx, step_dict in enumerate(vllm_output.logprobs):
+        if step_dict is None or step_idx >= len(chosen_ids):
+            continue
+        cid = chosen_ids[step_idx]
+        chosen = step_dict.get(cid)
+        if chosen is None:
+            continue
+        # Sort by logprob desc; vLLM may already sort but defend against it.
+        ranked = sorted(step_dict.values(), key=lambda l: -l.logprob)
+        top_list = [[v.decoded_token, float(v.logprob)] for v in ranked]
+        tokens.append({
+            "t": chosen.decoded_token,
+            "lp": float(chosen.logprob),
+            "top": top_list,
+        })
+    return {"tokens": tokens}
 
 
 def build_messages(audio_path: str, prompt: str) -> list:
@@ -898,18 +954,66 @@ def _append_rows(preds_path: Path, rows: list[dict]) -> None:
 # Per-task runner
 # ============================================================
 
-def _parse_response(cfg: dict, resp: str):
-    kind = cfg["parser"]
-    if kind == "yes_no":
-        return parse_yes_no(resp), None
-    if kind == "label":
-        return parse_label(resp, cfg["classes"]), None
-    if kind == "integer":
-        lo, hi = cfg.get("range", (-1e9, 1e9))
-        return parse_integer(resp, lo, hi), None
-    if kind == "multilabel":
-        return None, parse_multilabel(resp, cfg["classes"])
-    return None, None
+def _lp_row(task: str, sample, duration, true_val, response, logprobs,
+            pred=None, pred_vec=None, pred_prob=None, pred_prob_vec=None):
+    """Unified row-builder. response may be a string or a {label: text} dict."""
+    cfg = TASKS[task]
+    metric = cfg["metric"]
+    if not isinstance(response, str):
+        response = json.dumps(response, default=str)
+    return {
+        "rowid": sample["_rowid"],
+        "fold": sample.get("_fold"),
+        "duration_sec": duration,
+        "true": true_val if metric != "multilabel" else None,
+        "true_vec": true_val if metric == "multilabel" else None,
+        "pred": pred,
+        "pred_vec": pred_vec,
+        "pred_prob": pred_prob,
+        "pred_prob_vec": pred_prob_vec,
+        "response": response,
+        "logprobs_json": json.dumps(logprobs, default=str) if logprobs is not None else None,
+    }
+
+
+def _parse_lp_choice(task: str, text: str | None, lp: dict | None):
+    """Binary/multiclass: returns (pred_idx, pred_prob_or_vec). Either may
+    be None on parse failure.
+
+    Binary: prob is float P(positive class) where positive = classes[1].
+    Multiclass: prob is list[float] in TASKS["classes"] order.
+    """
+    if text is None:
+        return None, None
+    cfg = TASKS[task]
+    classes = cfg["classes"]
+    text_probs = parse_choice_response(text, lp, get_answer_map(task))
+    if text_probs is None:
+        return None, None
+    pred = argmax_class(text_probs, classes)
+    prob_vec = probs_to_class_vector(text_probs, classes)
+    if cfg["metric"] == "binary":
+        prob_pos = float(prob_vec[1]) if prob_vec else None
+        return pred, prob_pos
+    return pred, prob_vec
+
+
+def _aggregate_multilabel(task: str, sub_parsed: dict[str, dict | None]):
+    """Returns (pred_vec, pred_prob_vec) with per-label Nones for failed
+    subcalls (so _dns_fill can apply max-wrong against the true label)."""
+    label_order = get_labels(task)
+    ordered = {lab: sub_parsed.get(lab) for lab in label_order}
+    agg = aggregate_multilabel_probs(ordered)
+    if agg is None:
+        return None, None
+    prob_vec_raw, _ = agg
+    pred_vec, prob_vec = [], []
+    for p in prob_vec_raw:
+        if isinstance(p, float) and math.isnan(p):
+            pred_vec.append(None); prob_vec.append(None)
+        else:
+            pred_vec.append(1 if p >= 0.5 else 0); prob_vec.append(float(p))
+    return pred_vec, prob_vec
 
 
 def process_task(
@@ -923,7 +1027,8 @@ def process_task(
     stopped early due to time budget / SIGTERM (re-runnable next requeue).
     """
     cfg = TASKS[task]
-    prompt = PROMPTS[task]
+    kind = get_kind(task)
+    prompt_or_subs = build_prompt(task)
     out_dir = Path(args.out_dir).resolve()
     (out_dir / task).mkdir(parents=True, exist_ok=True)
     preds_path = _preds_path(out_dir, task)
@@ -938,8 +1043,15 @@ def process_task(
         print(f"[{task}] already complete ({len(samples)} samples)", flush=True)
         return True
 
-    print(f"[{task}] {len(todo)}/{len(samples)} samples remaining "
-          f"(done={len(done)}) prompt-len={len(prompt)}", flush=True)
+    if kind == "multilabel":
+        K = len(prompt_or_subs)
+        print(f"[{task}] {len(todo)}/{len(samples)} samples (done={len(done)}) "
+              f"kind=multilabel K={K} subcalls/sample", flush=True)
+    else:
+        print(f"[{task}] {len(todo)}/{len(samples)} samples (done={len(done)}) "
+              f"kind={kind} prompt-len={len(prompt_or_subs)}", flush=True)
+
+    logprobs_k = None if kind == "regression" else LOGPROBS_K
 
     tmp_dir = Path(tempfile.mkdtemp(prefix=f"q3o_{task}_"))
     try:
@@ -965,52 +1077,91 @@ def process_task(
 
             valid_idx = [i for i, c in enumerate(chunk_clips) if c is not None]
             if not valid_idx:
-                # Nothing valid in chunk — still record load-failed rows so we don't loop
-                rows = []
-                for i, s in enumerate(chunk):
-                    rows.append({
-                        "rowid": s["_rowid"], "fold": s.get("_fold"),
-                        "duration_sec": chunk_dur[i],
-                        "true": chunk_true[i] if cfg["metric"] != "multilabel" else None,
-                        "pred": None,
-                        "true_vec": chunk_true[i] if cfg["metric"] == "multilabel" else None,
-                        "pred_vec": None,
-                        "response": "<load-failed>",
-                    })
+                rows = [_lp_row(task, s, chunk_dur[i], chunk_true[i],
+                                "<load-failed>", None)
+                        for i, s in enumerate(chunk)]
                 _append_rows(preds_path, rows)
                 continue
 
-            batch_messages = [build_messages(chunk_clips[i], prompt) for i in valid_idx]
+            # ---------- Build the vLLM batch ----------
+            if kind == "multilabel":
+                # Each valid sample becomes K items (one per label subcall).
+                labels_list = [lab for lab, _ in prompt_or_subs]
+                sub_prompt_list = [p for _, p in prompt_or_subs]
+                batch_messages = []
+                batch_map = []  # batch_idx -> (sample_idx_in_chunk, label_idx)
+                for i in valid_idx:
+                    for k_idx, p in enumerate(sub_prompt_list):
+                        batch_messages.append(build_messages(chunk_clips[i], p))
+                        batch_map.append((i, k_idx))
+            else:
+                batch_messages = [build_messages(chunk_clips[i], prompt_or_subs)
+                                  for i in valid_idx]
+
             t0 = time.time()
-            responses = backend.generate_batch(batch_messages, max_tokens=args.max_new_tokens)
+            results = backend.generate_batch(
+                batch_messages, max_tokens=args.max_new_tokens,
+                logprobs_k=logprobs_k,
+            )
             gen_s = time.time() - t0
             print(f"[{task}] chunk {chunk_idx}: {len(batch_messages)} prompts in "
                   f"{gen_s:.1f}s ({gen_s/len(batch_messages):.2f}s/prompt)", flush=True)
 
-            resp_iter = iter(responses)
+            # ---------- Build rows ----------
             rows = []
-            for i, s in enumerate(chunk):
-                if chunk_clips[i] is None:
-                    resp, pred, pred_vec = "<load-failed>", None, None
-                else:
-                    resp = next(resp_iter)
-                    if resp is None:
-                        resp, pred, pred_vec = "<generate-failed>", None, None
-                    else:
-                        pred, pred_vec = _parse_response(cfg, resp)
-                rows.append({
-                    "rowid": s["_rowid"],
-                    "fold": s.get("_fold"),
-                    "duration_sec": chunk_dur[i],
-                    "true": chunk_true[i] if cfg["metric"] != "multilabel" else None,
-                    "pred": pred,
-                    "true_vec": chunk_true[i] if cfg["metric"] == "multilabel" else None,
-                    "pred_vec": pred_vec,
-                    "response": resp,
-                })
+            if kind == "multilabel":
+                # Group results back by sample index.
+                per_sample_parsed: dict[int, dict[str, dict | None]] = {i: {} for i in valid_idx}
+                per_sample_resp: dict[int, dict[str, str | None]] = {i: {} for i in valid_idx}
+                per_sample_lp: dict[int, dict[str, dict | None]] = {i: {} for i in valid_idx}
+                for batch_i, (sample_i, k_idx) in enumerate(batch_map):
+                    text, lp = results[batch_i]
+                    lab = labels_list[k_idx]
+                    per_sample_resp[sample_i][lab] = text
+                    per_sample_lp[sample_i][lab] = lp
+                    per_sample_parsed[sample_i][lab] = (
+                        parse_choice_response(text, lp, {"yes": "A", "no": "B"})
+                        if text is not None else None
+                    )
+                for i, s in enumerate(chunk):
+                    if chunk_clips[i] is None:
+                        rows.append(_lp_row(task, s, chunk_dur[i], chunk_true[i],
+                                            "<load-failed>", None))
+                        continue
+                    pred_vec, prob_vec = _aggregate_multilabel(task, per_sample_parsed[i])
+                    rows.append(_lp_row(
+                        task, s, chunk_dur[i], chunk_true[i],
+                        per_sample_resp[i], per_sample_lp[i],
+                        pred_vec=pred_vec, pred_prob_vec=prob_vec,
+                    ))
+            else:
+                result_iter = iter(results)
+                for i, s in enumerate(chunk):
+                    if chunk_clips[i] is None:
+                        rows.append(_lp_row(task, s, chunk_dur[i], chunk_true[i],
+                                            "<load-failed>", None))
+                        continue
+                    text, lp = next(result_iter)
+                    if text is None:
+                        rows.append(_lp_row(task, s, chunk_dur[i], chunk_true[i],
+                                            "<generate-failed>", None))
+                        continue
+                    if kind == "regression":
+                        lo, hi = cfg.get("range", (-1e9, 1e9))
+                        pred = parse_integer(text, lo, hi)
+                        rows.append(_lp_row(task, s, chunk_dur[i], chunk_true[i],
+                                            text, None, pred=pred))
+                    elif kind == "binary":
+                        pred, prob_pos = _parse_lp_choice(task, text, lp)
+                        rows.append(_lp_row(task, s, chunk_dur[i], chunk_true[i],
+                                            text, lp, pred=pred, pred_prob=prob_pos))
+                    else:  # multiclass
+                        pred, prob_vec = _parse_lp_choice(task, text, lp)
+                        rows.append(_lp_row(task, s, chunk_dur[i], chunk_true[i],
+                                            text, lp, pred=pred, pred_prob_vec=prob_vec))
             _append_rows(preds_path, rows)
 
-            # Free chunk's clip files (they're consumed; predictions saved)
+            # Free chunk's clip files (predictions are saved).
             for i in valid_idx:
                 Path(chunk_clips[i]).unlink(missing_ok=True)
     finally:
@@ -1022,10 +1173,11 @@ def process_task(
     # recomputed offline from the CSV at any time via summarize_qwen3omni.py.
     try:
         df = pd.read_csv(preds_path)
-        for col in ("true_vec", "pred_vec"):
-            df[col] = df[col].apply(
-                lambda x: ast.literal_eval(x) if isinstance(x, str) and x.startswith("[") else x
-            )
+        for col in ("true_vec", "pred_vec", "pred_prob_vec"):
+            if col in df.columns:
+                df[col] = df[col].apply(
+                    lambda x: ast.literal_eval(x) if isinstance(x, str) and x.startswith("[") else x
+                )
         metrics = {"overall": compute_metrics(task, df)}
         if df["fold"].notna().any():
             per_fold = []
