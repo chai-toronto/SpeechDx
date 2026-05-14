@@ -675,17 +675,36 @@ def _dns_fill(task: str, df: pd.DataFrame) -> pd.DataFrame:
         mask = df["pred"].isna() & df["true"].notna()
         df.loc[mask, "pred"] = df.loc[mask, "true"].astype(float) + mad
     elif metric == "multilabel":
-        mask = df["pred_vec"].isna() & df["true_vec"].notna()
-        for i in df.index[mask]:
+        # Hard pred_vec: row-level None -> fill whole vec; partial Nones
+        # inside the list -> per-element max-wrong fill.
+        for i in df.index:
             tv = df.at[i, "true_vec"]
-            if isinstance(tv, list):
+            if not isinstance(tv, list):
+                continue
+            pv = df.at[i, "pred_vec"]
+            if pv is None or (isinstance(pv, float) and pd.isna(pv)):
                 df.at[i, "pred_vec"] = [1 - int(x) for x in tv]
+            elif isinstance(pv, list) and any(v is None for v in pv):
+                df.at[i, "pred_vec"] = [
+                    (1 - int(tv[j])) if v is None else int(v)
+                    for j, v in enumerate(pv)
+                ]
         if has_prob_vec:
-            pmask = df["pred_prob_vec"].isna() & df["true_vec"].notna()
-            for i in df.index[pmask]:
+            for i in df.index:
                 tv = df.at[i, "true_vec"]
-                if isinstance(tv, list):
+                if not isinstance(tv, list):
+                    continue
+                ppv = df.at[i, "pred_prob_vec"]
+                if ppv is None or (isinstance(ppv, float) and pd.isna(ppv)):
                     df.at[i, "pred_prob_vec"] = [1.0 - float(x) for x in tv]
+                elif isinstance(ppv, list) and any(
+                    v is None or (isinstance(v, float) and pd.isna(v)) for v in ppv
+                ):
+                    df.at[i, "pred_prob_vec"] = [
+                        (1.0 - float(tv[j])) if (v is None or (isinstance(v, float) and pd.isna(v)))
+                        else float(v)
+                        for j, v in enumerate(ppv)
+                    ]
     return df
 
 

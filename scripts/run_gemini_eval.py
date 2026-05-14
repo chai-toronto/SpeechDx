@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import math
 import os
 import random
 import re
@@ -29,13 +30,18 @@ from pathlib import Path
 import pandas as pd
 import soundfile as sf
 
-# Reuse registry, loaders, parsers, metrics from the Qwen reference script.
+# Reuse registry, loaders, metrics from the Qwen reference script.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_qwen3omni_all import (  # noqa: E402
-    TASKS, PROMPTS, load_samples, normalize_true,
-    parse_yes_no, parse_label, parse_integer, parse_multilabel,
+    TASKS, load_samples, normalize_true,
+    parse_integer,
     compute_metrics, cv_aggregate,
     _preds_path, _metrics_path, _done_rowids, _append_rows,
+)
+from lp_configs import build_prompt, get_kind, get_answer_map, get_labels  # noqa: E402
+from lp_parser import (  # noqa: E402
+    serialize_logprobs, parse_choice_response,
+    probs_to_class_vector, argmax_class, aggregate_multilabel_probs,
 )
 
 # Correct stale registry paths
@@ -95,18 +101,34 @@ def get_api_key() -> str | None:
         return None
 
 
-def _parse_response(cfg, resp):
-    kind = cfg["parser"]
-    if kind == "yes_no":
-        return parse_yes_no(resp), None
-    if kind == "label":
-        return parse_label(resp, cfg["classes"]), None
-    if kind == "integer":
-        lo, hi = cfg.get("range", (-1e9, 1e9))
-        return parse_integer(resp, lo, hi), None
-    if kind == "multilabel":
-        return None, parse_multilabel(resp, cfg["classes"])
-    return None, None
+# LP scheme: top-K logprobs requested at each generated position.
+# K should comfortably exceed the largest class set (T3 has 8 letters);
+# Gemini caps logprobs at 20 in current API versions.
+LOGPROBS_K = 20
+
+
+def _parse_lp_choice(task: str, resp: str, lp_dict: dict | None):
+    """Parse a binary/multiclass LP response into (pred_idx, pred_prob_or_vec).
+
+    Binary: returns (pred_idx, P(positive_class)) where positive_class is
+            the second entry in TASKS[task]['classes'].
+    Multiclass: returns (pred_idx, [P(class) for class in TASKS classes]).
+    Either component may be None if parsing failed.
+    """
+    cfg = TASKS[task]
+    classes = cfg["classes"]
+    answer_map = get_answer_map(task)
+    text_probs = parse_choice_response(resp, lp_dict, answer_map)
+    if text_probs is None:
+        return None, None
+    pred = argmax_class(text_probs, classes)
+    prob_vec = probs_to_class_vector(text_probs, classes)
+    if cfg["metric"] == "binary":
+        # Positive class is index 1 by convention (classes=["no","yes"] /
+        # ["non-negative","negative"]).
+        prob_pos = float(prob_vec[1]) if prob_vec else None
+        return pred, prob_pos
+    return pred, prob_vec
 
 
 # ============================================================
@@ -165,26 +187,51 @@ class GeminiBackend:
         return self._retry("cache-create",
                            lambda: self.client.caches.create(model=self.model, config=config))
 
-    def generate_with_file(self, file_obj, prompt: str) -> str:
+    def generate_with_file(self, file_obj, prompt: str,
+                           logprobs_k: int | None = None) -> tuple[str, dict | None]:
+        """Returns (response_text, serialized_logprobs_or_None).
+
+        Pass logprobs_k=20 (or so) to request top-K logprobs per token.
+        For regression / free-text paths, leave logprobs_k=None.
+        """
         t = self._types
         contents = [
             t.Part.from_uri(file_uri=file_obj.uri, mime_type=file_obj.mime_type),
             prompt,
         ]
-        config = t.GenerateContentConfig(service_tier=self.service_tier)
-        return self._retry("gen", lambda: (
+        kw = dict(service_tier=self.service_tier)
+        if logprobs_k is not None:
+            kw.update(response_logprobs=True, logprobs=logprobs_k)
+        config = t.GenerateContentConfig(**kw)
+        return self._retry("gen", lambda: self._extract(
             self.client.models.generate_content(
-                model=self.model, contents=contents, config=config).text or ""
+                model=self.model, contents=contents, config=config),
+            with_logprobs=logprobs_k is not None,
         ))
 
-    def generate_with_cache(self, cache_name: str, prompt: str) -> str:
+    def generate_with_cache(self, cache_name: str, prompt: str,
+                            logprobs_k: int | None = None) -> tuple[str, dict | None]:
         t = self._types
-        config = t.GenerateContentConfig(
-            cached_content=cache_name, service_tier=self.service_tier)
-        return self._retry("gen", lambda: (
+        kw = dict(cached_content=cache_name, service_tier=self.service_tier)
+        if logprobs_k is not None:
+            kw.update(response_logprobs=True, logprobs=logprobs_k)
+        config = t.GenerateContentConfig(**kw)
+        return self._retry("gen", lambda: self._extract(
             self.client.models.generate_content(
-                model=self.model, contents=prompt, config=config).text or ""
+                model=self.model, contents=prompt, config=config),
+            with_logprobs=logprobs_k is not None,
         ))
+
+    @staticmethod
+    def _extract(resp, with_logprobs: bool) -> tuple[str, dict | None]:
+        text = resp.text or ""
+        lp = None
+        if with_logprobs:
+            try:
+                lp = serialize_logprobs(resp.candidates[0].logprobs_result)
+            except (AttributeError, IndexError):
+                lp = None
+        return text, lp
 
     def delete_file(self, name: str) -> None:
         try:
@@ -203,19 +250,95 @@ class GeminiBackend:
 # Per-sample worker
 # ============================================================
 
-def _row_for(task: str, sample, duration, resp, pred, pred_vec):
+def _row_for_lp(task: str, sample, duration, response, logprobs,
+                pred=None, pred_vec=None, pred_prob=None, pred_prob_vec=None):
+    """Unified row builder for all task kinds.
+
+    response: string (binary/multiclass/regression) or {label: text} dict (multilabel)
+    logprobs: serialized logprobs dict (binary/multiclass), {label: dict}
+              (multilabel), or None (regression / errored rows)
+    """
     cfg = TASKS[task]
+    metric = cfg["metric"]
     true_val = normalize_true(task, sample.get(cfg["label_col"]))
+    if not isinstance(response, str):
+        response = json.dumps(response, default=str)
     return {
         "rowid": str(sample["_rowid"]),
         "fold": sample.get("_fold"),
         "duration_sec": duration,
-        "true": true_val if cfg["metric"] != "multilabel" else None,
+        "true": true_val if metric != "multilabel" else None,
+        "true_vec": true_val if metric == "multilabel" else None,
         "pred": pred,
-        "true_vec": true_val if cfg["metric"] == "multilabel" else None,
         "pred_vec": pred_vec,
-        "response": resp,
+        "pred_prob": pred_prob,
+        "pred_prob_vec": pred_prob_vec,
+        "response": response,
+        "logprobs_json": json.dumps(logprobs, default=str) if logprobs is not None else None,
     }
+
+
+def _generate(backend: GeminiBackend, file_obj, cache_obj, prompt: str,
+              logprobs_k: int | None) -> tuple[str, dict | None]:
+    """Single generate call, choosing cache vs file path. Returns
+    (text, lp) or ("<generate-failed: ...>", None)."""
+    try:
+        if cache_obj is not None:
+            return backend.generate_with_cache(cache_obj.name, prompt, logprobs_k)
+        return backend.generate_with_file(file_obj, prompt, logprobs_k)
+    except Exception as e:
+        return f"<generate-failed: {type(e).__name__}: {str(e)[:160]}>", None
+
+
+def _process_one_task(backend, file_obj, cache_obj, task, sample, duration):
+    """Returns a row dict for the predictions CSV. Branches on task kind."""
+    cfg = TASKS[task]
+    kind = get_kind(task)
+
+    if kind == "regression":
+        prompt = build_prompt(task)
+        resp, _ = _generate(backend, file_obj, cache_obj, prompt, logprobs_k=None)
+        lo, hi = cfg.get("range", (-1e9, 1e9))
+        pred = parse_integer(resp, lo, hi)
+        return _row_for_lp(task, sample, duration, resp, None, pred=pred)
+
+    if kind in ("binary", "multiclass"):
+        prompt = build_prompt(task)
+        resp, lp = _generate(backend, file_obj, cache_obj, prompt, logprobs_k=LOGPROBS_K)
+        pred, prob_or_vec = _parse_lp_choice(task, resp, lp)
+        if kind == "binary":
+            return _row_for_lp(task, sample, duration, resp, lp,
+                               pred=pred, pred_prob=prob_or_vec)
+        return _row_for_lp(task, sample, duration, resp, lp,
+                           pred=pred, pred_prob_vec=prob_or_vec)
+
+    # multilabel: K independent yes/no subcalls (yes -> A, no -> B)
+    sub_prompts = build_prompt(task)
+    label_order = get_labels(task)
+    responses, lp_payloads, sub_parsed = {}, {}, {}
+    for lab, p in sub_prompts:
+        text, lp = _generate(backend, file_obj, cache_obj, p, logprobs_k=LOGPROBS_K)
+        responses[lab] = text
+        lp_payloads[lab] = lp
+        sub_parsed[lab] = parse_choice_response(text, lp, {"yes": "A", "no": "B"})
+    ordered_subs = {lab: sub_parsed.get(lab) for lab in label_order}
+    agg = aggregate_multilabel_probs(ordered_subs)
+    if agg is None:
+        pred_vec, prob_vec = None, None
+    else:
+        prob_vec_raw, _ = agg
+        # Mark per-label failures as None in *both* vectors so _dns_fill can
+        # apply per-element max-wrong imputation against the true label.
+        prob_vec, pred_vec = [], []
+        for p in prob_vec_raw:
+            if isinstance(p, float) and math.isnan(p):
+                prob_vec.append(None)
+                pred_vec.append(None)
+            else:
+                prob_vec.append(float(p))
+                pred_vec.append(1 if p >= 0.5 else 0)
+    return _row_for_lp(task, sample, duration, responses, lp_payloads,
+                       pred_vec=pred_vec, pred_prob_vec=prob_vec)
 
 
 def process_sample(backend: GeminiBackend, sample: dict, task_ids: list[str],
@@ -227,7 +350,7 @@ def process_sample(backend: GeminiBackend, sample: dict, task_ids: list[str],
     if not Path(path).exists():
         for task in pending_tasks:
             _append_rows(_preds_path(out_dir, task),
-                         [_row_for(task, sample, None, "<load-failed>", None, None)])
+                         [_row_for_lp(task, sample, None, "<load-failed>", None)])
         return
 
     duration = audio_duration_sec(path)
@@ -238,12 +361,18 @@ def process_sample(backend: GeminiBackend, sample: dict, task_ids: list[str],
         msg = f"<upload-failed: {type(e).__name__}: {str(e)[:160]}>"
         for task in pending_tasks:
             _append_rows(_preds_path(out_dir, task),
-                         [_row_for(task, sample, duration, msg, None, None)])
+                         [_row_for_lp(task, sample, duration, msg, None)])
         return
 
     cache_obj = None
     try:
-        if use_cache and len(pending_tasks) >= 2:
+        # Cache pays off when we'll make >= 2 calls against this audio.
+        # That includes any multilabel task in pending_tasks (each is K calls).
+        n_calls_estimate = sum(
+            len(get_labels(t) or []) if get_kind(t) == "multilabel" else 1
+            for t in pending_tasks
+        )
+        if use_cache and n_calls_estimate >= 2:
             try:
                 cache_obj = backend.create_cache(file_obj, ttl_seconds=900)
             except Exception as e:
@@ -252,20 +381,19 @@ def process_sample(backend: GeminiBackend, sample: dict, task_ids: list[str],
                 cache_obj = None
 
         for task in pending_tasks:
-            cfg = TASKS[task]
-            try:
-                if cache_obj is not None:
-                    resp = backend.generate_with_cache(cache_obj.name, PROMPTS[task])
-                else:
-                    resp = backend.generate_with_file(file_obj, PROMPTS[task])
-            except Exception as e:
-                resp = f"<generate-failed: {type(e).__name__}: {str(e)[:160]}>"
-            pred, pred_vec = _parse_response(cfg, resp)
-            _append_rows(_preds_path(out_dir, task),
-                         [_row_for(task, sample, duration, resp, pred, pred_vec)])
-            tail = resp.splitlines()[-1] if resp else ""
-            print(f"  [{rowid}/{task}] pred={pred if pred is not None else pred_vec}  "
-                  f"({tail[:80]})", flush=True)
+            row = _process_one_task(backend, file_obj, cache_obj,
+                                    task, sample, duration)
+            _append_rows(_preds_path(out_dir, task), [row])
+            kind = get_kind(task)
+            if kind == "multilabel":
+                summary = f"prob_vec={row['pred_prob_vec']}"
+            elif kind == "binary":
+                summary = f"pred={row['pred']} prob={row['pred_prob']}"
+            elif kind == "multiclass":
+                summary = f"pred={row['pred']} prob_vec={row['pred_prob_vec']}"
+            else:
+                summary = f"pred={row['pred']}"
+            print(f"  [{rowid}/{task}] {kind} {summary}", flush=True)
     finally:
         if cache_obj is not None:
             backend.delete_cache(cache_obj.name)
@@ -334,10 +462,11 @@ def _compute_and_save_metrics(task: str, preds_path: Path, metrics_path: Path) -
     if not preds_path.exists():
         return
     df = pd.read_csv(preds_path)
-    for col in ("true_vec", "pred_vec"):
-        df[col] = df[col].apply(
-            lambda x: ast.literal_eval(x) if isinstance(x, str) and x.startswith("[") else x
-        )
+    for col in ("true_vec", "pred_vec", "pred_prob_vec"):
+        if col in df.columns:
+            df[col] = df[col].apply(
+                lambda x: ast.literal_eval(x) if isinstance(x, str) and x.startswith("[") else x
+            )
     try:
         metrics = {"overall": compute_metrics(task, df)}
         if df["fold"].notna().any():
