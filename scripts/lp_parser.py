@@ -77,38 +77,59 @@ def _normalize_letter_token(tok: str) -> str | None:
 
 def _find_answer_letter_position(tokens: list[dict]) -> int | None:
     """Locate the index of the chosen-candidate token that is the answer
-    letter. Strategy:
+    letter.
 
-      1. Concatenate all token strings; find the *last* occurrence of
-         "ANSWER" (case-insensitive) -- the prompt asks the model to put
-         it on the final line, so the last hit is the real answer.
-      2. Walk forward from that token through any ':', whitespace,
-         punctuation, or markdown wrappers, and return the first token
-         that normalizes to a single A-Z letter.
+    Two complications:
+      - Thinking models emit `<think>...</think>` prose that repeatedly
+        says "answer"; we must restrict the search to tokens AFTER the
+        last </think>.
+      - Some tokenizers (e.g. Qwen3-Omni) split "ANSWER" into multiple
+        sub-tokens like "ANS" + "WER". Neither has "answer" as a
+        substring per-token, so we match on the joined text instead and
+        map the character index back to a token.
     """
     if not tokens:
         return None
 
-    # Find last token whose string contains "ANSWER" (case-insensitive).
-    answer_idx = None
+    # Step 1: drop everything up to and including the last </think> token.
+    last_close = -1
     for i, tok in enumerate(tokens):
-        s = (tok.get("t") or "")
-        if "answer" in s.lower():
-            answer_idx = i
-    if answer_idx is None:
+        if "</think>" in (tok.get("t") or ""):
+            last_close = i
+    scan_start = last_close + 1 if last_close >= 0 else 0
+    scan = tokens[scan_start:]
+    if not scan:
         return None
 
-    for j in range(answer_idx + 1, len(tokens)):
-        s = tokens[j].get("t") or ""
+    # Step 2: build joined text + per-token start offsets so we can locate
+    # "ANSWER" by string match (handles tokenizer splits).
+    parts = [(t.get("t") or "") for t in scan]
+    starts: list[int] = []
+    cum = 0
+    for s in parts:
+        starts.append(cum)
+        cum += len(s)
+    joined = "".join(parts)
+    pos = joined.lower().rfind("answer")
+    if pos == -1:
+        return None
+    word_end = pos + len("answer")
+
+    # Walk past whatever tokens span the "ANSWER" string.
+    j = 0
+    while j < len(scan) and starts[j] + len(parts[j]) <= word_end:
+        j += 1
+
+    # First real letter token after "ANSWER" (skipping ':', whitespace,
+    # markdown wrappers). Bail on a non-letter alphabetic token.
+    for k in range(j, len(scan)):
+        s = parts[k]
         if not s.strip():
             continue
-        # Skip pure-punctuation tokens like ':' or '**'.
         if not re.search(r"[A-Za-z]", s):
             continue
         if _normalize_letter_token(s) is not None:
-            return j
-        # Hit a non-letter alphabetic token before finding the letter --
-        # bail. (e.g., model wrote "ANSWER: yes" instead of "ANSWER: A".)
+            return scan_start + k
         return None
     return None
 

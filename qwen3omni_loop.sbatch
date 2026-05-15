@@ -9,7 +9,7 @@
 #SBATCH --error=logs/q3o_loop_%j.err
 #SBATCH --mail-user=dat.kieu@mail.utoronto.ca
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --signal=B:USR1@180   # send USR1 3 min before time limit for graceful checkpoint
+#SBATCH --signal=USR1@180     # USR1 to ALL job processes (incl. python) 3 min before time limit
 
 set -euo pipefail
 
@@ -37,9 +37,18 @@ export BLIS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 mkdir -p "$HF_HUB_CACHE" exps/qwen3omni_all logs
 
-# Walltime budget for the python script (3540s = 59 min when --time=1:00:00,
-# leaves margin for cleanup).
-export WALLTIME_S=3540
+# Walltime budget for the python script: auto-derive from THIS job's slurm
+# allocation. Always recompute — inheriting WALLTIME_S across requeues was a
+# bug: a long-budget value (e.g. 5h) would leak into a 1h requeue cycle and
+# the script would never decide to checkpoint before slurm killed it.
+unset WALLTIME_S
+if [[ -n "${SLURM_JOB_END_TIME:-}" ]]; then
+    WALLTIME_S=$(( SLURM_JOB_END_TIME - $(date +%s) - 240 ))
+else
+    WALLTIME_S=3540
+fi
+export WALLTIME_S
+echo "[sbatch] WALLTIME_S=${WALLTIME_S}s (TimeLimit-based)"
 
 nvidia-smi || true
 

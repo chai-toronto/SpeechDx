@@ -97,10 +97,13 @@ def headline_value(task: str, metrics: dict, summary_kind: str):
 
 
 def load_metrics(model_root: Path, task: str) -> dict | None:
-    p = model_root / task / "predictions.metrics.json"
-    if not p.exists():
-        return None
-    return json.loads(p.read_text())
+    # Split layout (metrics/T{N}.json) preferred; fall back to the legacy
+    # per-task subdir (T{N}/predictions.metrics.json) for un-migrated roots.
+    for p in (model_root / "metrics" / f"{task}.json",
+              model_root / task / "predictions.metrics.json"):
+        if p.exists():
+            return json.loads(p.read_text())
+    return None
 
 
 def update_summary(model: str) -> None:

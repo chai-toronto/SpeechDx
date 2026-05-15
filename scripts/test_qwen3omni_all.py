@@ -300,8 +300,11 @@ def parse_integer(text: str, lo: float, hi: float) -> float | None:
 class QwenOmniVLLM:
     def __init__(self, model_path: str, max_model_len: int,
                  gpu_memory_utilization: float, max_num_seqs: int):
-        os.environ.setdefault("VLLM_USE_V1", "0")
-        os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
+        # vLLM 0.20.x: v1 engine is mandatory, but v1's multiprocess IPC has a
+        # multimodal receiver-cache bug that silently fails every audio
+        # request with `AssertionError: Expected a cached item for mm_hash=…`.
+        # Force uniproc to bypass that cache.
+        os.environ.setdefault("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
         os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
 
         import torch
@@ -317,6 +320,9 @@ class QwenOmniVLLM:
             limit_mm_per_prompt={"audio": 1},
             max_num_seqs=max_num_seqs,
             max_model_len=max_model_len,
+            # vLLM 0.20.x defaults max_logprobs=20; SamplingParams(logprobs=K)
+            # is rejected when K exceeds this. Raise the engine cap to match.
+            max_logprobs=LOGPROBS_K,
             seed=1234,
         )
 
@@ -609,11 +615,11 @@ def _should_stop_now(walltime_s: float, safety_s: float) -> bool:
 
 
 def _preds_path(out_dir: Path, task: str) -> Path:
-    return out_dir / task / "predictions.csv"
+    return out_dir / "predictions" / f"{task}.csv"
 
 
 def _metrics_path(out_dir: Path, task: str) -> Path:
-    return out_dir / task / "predictions.metrics.json"
+    return out_dir / "metrics" / f"{task}.json"
 
 
 def _done_rowids(preds_path: Path) -> set:
@@ -714,7 +720,8 @@ def process_task(
     kind = get_kind(task)
     prompt_or_subs = build_prompt(task)
     out_dir = Path(args.out_dir).resolve()
-    (out_dir / task).mkdir(parents=True, exist_ok=True)
+    (out_dir / "predictions").mkdir(parents=True, exist_ok=True)
+    (out_dir / "metrics").mkdir(parents=True, exist_ok=True)
     preds_path = _preds_path(out_dir, task)
 
     samples, _ = load_samples(task)
@@ -843,6 +850,7 @@ def process_task(
                         pred, prob_vec = _parse_lp_choice(task, text, lp)
                         rows.append(_lp_row(task, s, chunk_dur[i], chunk_true[i],
                                             text, lp, pred=pred, pred_prob_vec=prob_vec))
+            _log_chunk_examples(task, rows, chunk_idx)
             _append_rows(preds_path, rows)
 
             # Free chunk's clip files (predictions are saved).
@@ -862,7 +870,8 @@ def process_task(
                 df[col] = df[col].apply(
                     lambda x: ast.literal_eval(x) if isinstance(x, str) and x.startswith("[") else x
                 )
-        metrics = {"overall": compute_metrics(task, df)}
+        overall = compute_metrics(task, df)
+        metrics = {"overall": overall}
         if df["fold"].notna().any():
             per_fold = []
             for fi in sorted(df["fold"].dropna().unique()):
@@ -871,7 +880,21 @@ def process_task(
                 m["fold"] = int(fi)
                 per_fold.append(m)
             metrics["per_fold"] = per_fold
-            metrics["fold_aggregate"] = cv_aggregate(per_fold)
+            fold_agg = cv_aggregate(per_fold)
+            metrics["fold_aggregate"] = fold_agg
+            # Headline auc/mae := cross-fold mean (comparable to the trained-
+            # encoder eval, which reports mean-of-folds). The value pooled
+            # over all rows is kept as <key>_overall.
+            for key in ("auc", "mae"):
+                if key in overall:
+                    overall[f"{key}_overall"] = overall[key]
+                    if f"{key}_mean" in fold_agg:
+                        overall[key] = fold_agg[f"{key}_mean"]
+        else:
+            # Single-split task: no folds, so <key>_overall == <key>.
+            for key in ("auc", "mae"):
+                if key in overall:
+                    overall[f"{key}_overall"] = overall[key]
 
         _metrics_path(out_dir, task).write_text(json.dumps(metrics, indent=2, default=str))
         print(f"[{task}] complete. metrics -> {_metrics_path(out_dir, task)}", flush=True)
@@ -890,6 +913,59 @@ def process_task(
 def _chunks(seq, n):
     for i in range(0, len(seq), n):
         yield seq[i:i+n]
+
+
+def _preview_response(text, max_chars: int = 240) -> str:
+    """Strip <think> blocks and collapse whitespace for log display."""
+    if text is None:
+        return "<none>"
+    if isinstance(text, dict):
+        for v in text.values():
+            if v:
+                return _preview_response(v, max_chars)
+        return "<empty>"
+    cleaned = strip_thinking(str(text))
+    cleaned = " ".join(cleaned.split())
+    if not cleaned:
+        return "<empty-after-think>"
+    return cleaned[:max_chars] + ("…" if len(cleaned) > max_chars else "")
+
+
+def _log_chunk_examples(task: str, rows: list[dict], chunk_idx: int,
+                        n: int = 3) -> None:
+    """Print a few example predictions (true vs pred + response excerpt)
+    so a reader can eyeball whether the model is doing something sensible."""
+    if not rows:
+        return
+    cfg = TASKS[task]
+    metric = cfg["metric"]
+    classes = cfg.get("classes")
+    pred_key = "pred_vec" if metric == "multilabel" else "pred"
+    parsed = [r for r in rows if r.get(pred_key) is not None]
+    pool = parsed if parsed else rows
+    take = pool[:n]
+    print(f"[{task}] chunk {chunk_idx} examples (showing {len(take)}/{len(rows)}, "
+          f"parsed {len(parsed)}/{len(rows)}):", flush=True)
+    for r in take:
+        true = r.get("true_vec") if metric == "multilabel" else r.get("true")
+        pred = r.get("pred_vec")  if metric == "multilabel" else r.get("pred")
+        if metric == "binary":
+            t = classes[int(true)] if true is not None else "?"
+            p = classes[int(pred)] if pred is not None else "DNS"
+            prob = r.get("pred_prob")
+            extra = f" prob={prob:.3f}" if isinstance(prob, (int, float)) else ""
+            line = f"true={t} pred={p}{extra}"
+        elif metric == "multiclass":
+            t = classes[int(true)] if true is not None else "?"
+            p = classes[int(pred)] if pred is not None else "DNS"
+            line = f"true={t} pred={p}"
+        elif metric == "regression":
+            line = f"true={true} pred={pred}"
+        else:  # multilabel
+            line = f"true_vec={true} pred_vec={pred}"
+        preview = _preview_response(r.get("response"))
+        print(f"  rowid={r['rowid']} dur={r.get('duration_sec')}s {line}\n"
+              f"    resp: {preview}", flush=True)
 
 
 def is_task_complete(task: str, out_dir: Path, limit: int | None = None) -> bool:

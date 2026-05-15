@@ -4,7 +4,7 @@
 #SBATCH --gpus-per-node=h100:1
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=128G
-#SBATCH --time=15:00
+#SBATCH --time=1:00:00
 #SBATCH --output=logs/q3o_%x_%j.out
 #SBATCH --error=logs/q3o_%x_%j.err
 #SBATCH --mail-user=dat.kieu@mail.utoronto.ca
@@ -12,7 +12,8 @@
 
 set -euo pipefail
 
-: "${TASK:?TASK env var required (e.g. TASK=T3 sbatch ...)}"
+# Accept either TASK=T3 (single) or TASKS=T1,T2 (multi). At least one required.
+TASKS_ARG="${TASKS:-${TASK:?TASK or TASKS env var required (e.g. TASK=T3 or TASKS=T1,T2 sbatch ...)}}"
 
 module purge --force >/dev/null 2>&1
 module load StdEnv/2023 gcc python/3.12 opencv/4.12.0 cuda/12.6
@@ -24,15 +25,20 @@ export HF_HOME=/scratch/kieu/hf_cache
 export HF_HUB_CACHE=$HF_HOME/hub
 export CUDA_HOME="${EBROOTCUDA:-$CUDA_HOME}"
 export VLLM_USE_DEEP_GEMM=0
-# Avoid HF API rate-limits when many jobs start simultaneously — model already cached.
-export HF_HUB_OFFLINE=1
-export TRANSFORMERS_OFFLINE=1
+# Default ONLINE so transformers' mistral-base check can complete. Set
+# HF_OFFLINE=1 in the calling env when fanning out many jobs in parallel
+# (model is already cached locally, so only the HF API metadata calls
+# need to be suppressed to dodge rate limits).
+if [[ "${HF_OFFLINE:-0}" == "1" ]]; then
+    export HF_HUB_OFFLINE=1
+    export TRANSFORMERS_OFFLINE=1
+fi
 mkdir -p "$HF_HUB_CACHE" exps/qwen3omni_all logs
 
 nvidia-smi || true
 
-python scripts/test_qwen3omni_all.py \
-  --task "$TASK" \
+python -u scripts/test_qwen3omni_all.py \
+  --tasks "$TASKS_ARG" \
   --out-dir exps/qwen3omni_all \
   --max-duration 600 \
   --max-num-seqs 16 \
