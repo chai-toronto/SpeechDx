@@ -12,6 +12,7 @@ encoders:
   audiomae:     audiomae.yaml
   clap:         clap.yaml         # 48 kHz; serialize via -j 1
   emotion2vec:  emotion2vec.yaml
+  gemini_emb:   gemini_emb.yaml   # API encoder; serialize via -j 1, rpm capped at module level
   hubert:       hubert.yaml
   mms:          mms.yaml
   opera_gt:     opera_gt.yaml

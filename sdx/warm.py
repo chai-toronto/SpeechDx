@@ -15,11 +15,15 @@ from __future__ import annotations
 import gc
 import json
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import shutil
+import tempfile
+import time
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, as_completed, wait
 from pathlib import Path
 from typing import Any
 
 from filelock import FileLock
+import h5py
 import speechbrain as sb
 import torch
 
@@ -173,41 +177,242 @@ def _build_warm_dynamic_items(hparams: dict[str, Any], *, augmented: bool) -> li
     return items
 
 
+def _compute_emb_from_signals(raw_signals, speech_encoder, cache_pool: str):
+    """Run the encoder over a per-uid chunk list and produce the cache payload.
+
+    Encodes one chunk at a time and concatenates — the ``batch_size == 1``
+    equivalent of the batched driver. Used by ``_drive_warm_api`` and by the
+    cross-warm writers (via ``_make_cache_writer``).
+    """
+    _p = next(speech_encoder.parameters(), None)
+    if _p is None:
+        _p = next(speech_encoder.buffers(), None)
+    device = _p.device if _p is not None else torch.device("cpu")
+    with torch.no_grad():
+        embs = [speech_encoder(chunk.unsqueeze(0).to(device)) for chunk in raw_signals]
+        if speech_encoder.output_hidden_states:
+            n_layers = len(embs[0])
+            emb = tuple(
+                torch.cat([e[i].squeeze(0) for e in embs], dim=-2).cpu()
+                for i in range(n_layers)
+            )
+        else:
+            emb = torch.cat([e.squeeze(0) for e in embs], dim=-2).cpu()
+            if cache_pool == "mean":
+                emb = emb.mean(dim=-2, keepdim=False)
+    return emb
+
+
 def _make_cache_writer(cache_dir: Path, num_versions: int,
                        speech_encoder, output_vars: list[str],
                        cache_pool: str):
-    """Build the ``cache_emb`` DynamicItem that runs the encoder and writes HDF5.
-
-    Per-uid forward (one chunk at a time) — matches the legacy
-    ``preprocessing.py:246-266`` byte-for-byte. Cross-uid batching is a
-    perf improvement deferred to a follow-up; the structural decoupling
-    is the goal here.
-    """
+    """Build the ``cache_emb`` DynamicItem that runs the encoder and writes HDF5."""
     @CachedHDF5DynamicItem.cache(cache_dir, file_mode="a", num_version=num_versions)
     @sb.utils.data_pipeline.takes(ID, SIGNALS)
     @sb.utils.data_pipeline.provides(*output_vars)
-    def cache_emb(id, raw_signals):
-        _p = next(speech_encoder.parameters(), None)
-        if _p is None:
-            _p = next(speech_encoder.buffers(), None)
-        device = _p.device if _p is not None else torch.device("cpu")
-        with torch.no_grad():
-            embs = []
-            for chunk in raw_signals:
-                embs.append(speech_encoder(chunk.unsqueeze(0).to(device)))
-            if speech_encoder.output_hidden_states:
-                n_layers = len(embs[0])
-                emb = tuple(
-                    torch.cat([e[i].squeeze(0) for e in embs], dim=-2).cpu()
-                    for i in range(n_layers)
-                )
-            else:
-                emb = torch.cat([e.squeeze(0) for e in embs], dim=-2).cpu()
-                if cache_pool == "mean":
-                    emb = emb.mean(dim=-2, keepdim=False)
-        return emb
+    def cache_emb(_id, raw_signals):
+        return _compute_emb_from_signals(raw_signals, speech_encoder, cache_pool)
 
     return cache_emb
+
+
+def _drive_warm_api(warmup, speech_encoder, cache_pool: str,
+                    all_ids: list[str], max_workers: int) -> None:
+    """Parallel-fanout driver for API encoders. Fetches raw signals in the
+    main thread (cheap CPU I/O + augment), runs the encoder forward in a
+    thread pool, and writes HDF5 in the main thread (h5py isn't thread-safe)."""
+    from sdx.dataio.pipeline import SIGNALS
+
+    cap = max(1, max_workers * 2)
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        for i, (ds, writer, kind, version) in enumerate(warmup):
+            uncached = writer.uncached_ids(all_ids, version)
+            if not uncached:
+                print(f"Iteration {i} ({kind} v{version}): already warmed, skipping.")
+                continue
+            print(f"Iteration {i} ({kind} v{version}): warming "
+                  f"{len(uncached)}/{len(all_ids)} via API (workers={max_workers}).")
+
+            # speechbrain's __getitem__ wants a positional index, not a uid.
+            uid_to_idx = {uid: idx for idx, uid in enumerate(ds.data_ids)}
+            in_flight: dict[Future, str] = {}
+            idx = 0
+            done_n = 0
+            t0 = time.time()
+            while idx < len(uncached) or in_flight:
+                while idx < len(uncached) and len(in_flight) < cap:
+                    uid = uncached[idx]
+                    idx += 1
+                    sample = ds[uid_to_idx[uid]]
+                    fut = ex.submit(
+                        _compute_emb_from_signals,
+                        sample[SIGNALS], speech_encoder, cache_pool,
+                    )
+                    in_flight[fut] = uid
+                if not in_flight:
+                    break
+                done, _ = wait(in_flight.keys(), return_when=FIRST_COMPLETED)
+                for fut in done:
+                    uid = in_flight.pop(fut)
+                    try:
+                        writer._cache(fut.result(), uid)
+                    except Exception as e:  # noqa: BLE001
+                        print(f"  [warn] {kind} v{version} uid={uid} failed: "
+                              f"{type(e).__name__}: {str(e)[:160]}")
+                    done_n += 1
+                    if done_n % 50 == 0 or done_n == len(uncached):
+                        rate = (time.time() - t0) / done_n
+                        eta = rate * (len(uncached) - done_n)
+                        print(f"  [{kind} v{version}] {done_n}/{len(uncached)}  "
+                              f"({rate:.2f}s/uid, eta {eta:.0f}s)")
+
+
+def _combine_chunk_embs(per_chunk: list, output_hidden_states: bool,
+                        cache_pool: str):
+    """Concatenate one uid's per-chunk encoder outputs into a cache payload.
+
+    ``per_chunk`` holds the uid's chunk outputs in order; each item is a
+    ``(frames, dim)`` tensor, or — for hidden-state encoders — a tuple of
+    one such tensor per layer. Produces the same payload as
+    ``_compute_emb_from_signals`` so the batched and serial drivers write
+    byte-compatible HDF5.
+    """
+    if output_hidden_states:
+        n_layers = len(per_chunk[0])
+        return tuple(
+            torch.cat([c[i] for c in per_chunk], dim=-2).cpu()
+            for i in range(n_layers)
+        )
+    emb = torch.cat(list(per_chunk), dim=-2).cpu()
+    if cache_pool == "mean":
+        emb = emb.mean(dim=-2, keepdim=False)
+    return emb
+
+
+def _encode_chunk_batch(buffer: list, speech_encoder, tmp: h5py.File,
+                        ohs: bool, device) -> None:
+    """Encode one batch of ``(chunk_key, signal)`` and write each output to tmp.
+
+    A single-chunk batch uses the plain ``forward`` (no padding). A
+    multi-chunk batch is right-zero-padded to a ``(B, T)`` tensor here in
+    the warmer and handed to the encoder with relative ``lengths``; the
+    encoder masks the padded frames, and each ``(B, T', D)`` row is cropped
+    back to its true frame count — exactly via ``encoder.feature_lengths``
+    when the encoder provides it, else proportionally to the relative
+    length (a good approximation for fixed-stride encoders).
+    """
+    sigs = [s for _, s in buffer]
+    with torch.no_grad():
+        if len(sigs) == 1:
+            out = speech_encoder(sigs[0].unsqueeze(0).to(device))
+            crops = [tuple(o[0] for o in out)] if ohs else [out[0]]
+        else:
+            lens = torch.tensor([float(s.shape[-1]) for s in sigs])
+            padded = torch.nn.utils.rnn.pad_sequence(sigs, batch_first=True)
+            out = speech_encoder(padded.to(device), lengths=lens / lens.max())
+            n_frames = (out[0] if ohs else out).shape[1]
+            if hasattr(speech_encoder, "feature_lengths"):
+                feat_len = speech_encoder.feature_lengths(lens).tolist()
+            else:
+                # No exact samples->frames map: crop proportionally by length.
+                feat_len = [min(n_frames, max(1, round(float(L) * n_frames
+                                                       / float(lens.max()))))
+                            for L in lens]
+            if ohs:
+                crops = [tuple(layer[i, :feat_len[i]] for layer in out)
+                         for i in range(len(sigs))]
+            else:
+                crops = [out[i, :feat_len[i]] for i in range(len(sigs))]
+    for (key, _), o in zip(buffer, crops):
+        if ohs:
+            for li, layer in enumerate(o):
+                tmp.create_dataset(f"{key}/L{li}", data=layer.detach().cpu().numpy())
+        else:
+            tmp.create_dataset(key, data=o.detach().cpu().numpy())
+
+
+def _read_chunk(tmp: h5py.File, key: str, ohs: bool):
+    """Read one chunk's per-frame embedding back from the tmp HDF5."""
+    if ohs:
+        grp = tmp[key]
+        return tuple(torch.from_numpy(grp[f"L{li}"][:]) for li in range(len(grp)))
+    return torch.from_numpy(tmp[key][:])
+
+
+def _drive_warm_batched(warmup, speech_encoder, cache_pool: str,
+                        all_ids: list[str], batch_size: int) -> None:
+    """Batched driver — the main warm path for local encoders.
+
+    Two phases per (kind, version):
+
+    1. Stream chunks from the pipeline in uid order (no sorting). As soon
+       as ``batch_size`` chunks have accumulated, run them through the
+       encoder in one ``forward`` call and write each chunk's per-frame
+       embedding to a scratch HDF5, keyed ``uid/c{i}``. Variable-length
+       chunks are passed as a list with relative lengths so the encoder
+       pads + masks them; ``batch_size == 1`` falls back to the plain
+       tensor forward, so non-batched encoders behave exactly as before.
+
+    2. Read the scratch HDF5 back per uid, concatenate the uid's chunks in
+       order and pool (``_combine_chunk_embs``), then write the cache entry.
+
+    The scratch file keeps per-chunk activations off the heap, so memory
+    is bounded by one batch + one uid's chunks regardless of dataset size.
+    """
+    from sdx.dataio.pipeline import SIGNALS
+
+    ohs = speech_encoder.output_hidden_states
+    p = next(speech_encoder.parameters(), None)
+    device = p.device if p is not None else torch.device("cpu")
+
+    for i, (ds, writer, kind, version) in enumerate(warmup):
+        uncached = writer.uncached_ids(all_ids, version)
+        if not uncached:
+            print(f"Iteration {i} ({kind} v{version}): already warmed, skipping.")
+            continue
+        print(f"Iteration {i} ({kind} v{version}): warming "
+              f"{len(uncached)}/{len(all_ids)} uncached uids "
+              f"(batched, batch_size={batch_size}).")
+
+        uid_to_idx = {uid: idx for idx, uid in enumerate(ds.data_ids)}
+        tmp_dir = Path(tempfile.mkdtemp(prefix="warm_chunks_"))
+        tmp_path = tmp_dir / "chunks.hdf5"
+        n_chunks: dict[str, int] = {}
+        t0 = time.time()
+        done_n = 0
+        try:
+            # Phase 1: stream chunks -> batched forward -> per-chunk scratch HDF5.
+            with h5py.File(tmp_path, "w") as tmp:
+                buffer: list[tuple[str, Any]] = []
+                for uid in uncached:
+                    signals = ds[uid_to_idx[uid]][SIGNALS]
+                    n_chunks[uid] = len(signals)
+                    for ci, sig in enumerate(signals):
+                        buffer.append((f"{uid}/c{ci}", sig))
+                        if len(buffer) >= batch_size:
+                            _encode_chunk_batch(buffer, speech_encoder, tmp, ohs, device)
+                            done_n += len(buffer)
+                            buffer = []
+                            rate = (time.time() - t0) / done_n
+                            print(f"  [{kind} v{version}] {done_n} chunks encoded "
+                                  f"({rate:.2f}s/chunk)")
+                if buffer:
+                    _encode_chunk_batch(buffer, speech_encoder, tmp, ohs, device)
+                    done_n += len(buffer)
+
+            # Phase 2: concat each uid's chunks from scratch, pool, write cache.
+            with h5py.File(tmp_path, "r") as tmp:
+                for uid in uncached:
+                    try:
+                        per_chunk = [_read_chunk(tmp, f"{uid}/c{ci}", ohs)
+                                     for ci in range(n_chunks[uid])]
+                        writer._cache(
+                            _combine_chunk_embs(per_chunk, ohs, cache_pool), uid)
+                    except Exception as e:  # noqa: BLE001
+                        print(f"  [warn] {kind} v{version} uid={uid} failed: "
+                              f"{type(e).__name__}: {str(e)[:160]}")
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def _warm_uncached(task: str, encoder: str, *,
@@ -215,7 +420,17 @@ def _warm_uncached(task: str, encoder: str, *,
                    data_dict: dict[str, dict],
                    all_ids: list[str],
                    num_versions: int) -> None:
-    """Load the real encoder and fill whichever cache entries are still missing."""
+    """Load the real encoder and fill whichever cache entries are still missing.
+
+    Builds the writers and datasets once, then dispatches to either the
+    batched driver (local encoders) or the API parallel-fanout driver
+    (``is_api_encoder = True``). The batched driver is the main warm path;
+    ``warm_batch_size`` (encoder yaml, default 1) sets how many chunks go
+    through the encoder per ``forward`` call — 1 reproduces the old
+    per-chunk behaviour, >1 batches.
+    """
+    from sdx.dataio.pipeline import SIGNALS
+
     hparams = compose_config(task, encoder, probe=probe, mode="warm")
     train_cache_dir, val_cache_dir = _cache_dirs(hparams)
     train_cache_dir.mkdir(parents=True, exist_ok=True)
@@ -223,12 +438,19 @@ def _warm_uncached(task: str, encoder: str, *,
 
     speech_encoder = hparams["encoder"]
     speech_encoder.eval()
-    if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-    speech_encoder = speech_encoder.to(torch.device(device))
+    is_api = getattr(speech_encoder, "is_api_encoder", False)
+    warm_batch_size = int(hparams.get("warm_batch_size", 1))
+
+    if not is_api:
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        speech_encoder = speech_encoder.to(torch.device(device))
 
     num_layers = hparams["num_layers"]
     num_outputs = num_layers if speech_encoder.output_hidden_states else 1
+    # output_vars names the writer's `provides`. Both drivers here call
+    # writer._cache directly, so it is only load-bearing when a writer is
+    # used as an inline pipeline DynamicItem (cross-warm) — keep it.
     output_vars = [f"emb_{i}" for i in range(num_outputs)]
     cache_pool = hparams.get("cache_pool", "none")
 
@@ -239,42 +461,34 @@ def _warm_uncached(task: str, encoder: str, *,
         val_cache_dir, 1, speech_encoder, output_vars, cache_pool,
     )
 
-    train_items = _build_warm_dynamic_items(hparams, augmented=True) + [train_writer]
-    val_items = _build_warm_dynamic_items(hparams, augmented=False) + [val_writer]
+    # Both drivers call the encoder + writer themselves, so the datasets
+    # stop at SIGNALS (the writer is not an inline pipeline DynamicItem).
+    output_keys = [ID, "path", "Participant_ID", LABEL_ENCODED, SIGNALS]
+    train_items = _build_warm_dynamic_items(hparams, augmented=True)
+    val_items = _build_warm_dynamic_items(hparams, augmented=False)
 
-    output_keys_base = [ID, "path", "Participant_ID", LABEL_ENCODED]
     train_ds = sb.dataio.dataset.DynamicItemDataset(
-        data=data_dict["all"],
-        dynamic_items=train_items,
-        output_keys=output_keys_base + output_vars,
+        data=data_dict["all"], dynamic_items=train_items, output_keys=output_keys,
     )
     val_ds = sb.dataio.dataset.DynamicItemDataset(
-        data=data_dict["all"],
-        dynamic_items=val_items,
-        output_keys=output_keys_base + output_vars,
+        data=data_dict["all"], dynamic_items=val_items, output_keys=output_keys,
     )
 
-    warmup = [
-        (train_ds, train_writer, "train", v) for v in range(num_versions)
-    ]
+    warmup = [(train_ds, train_writer, "train", v) for v in range(num_versions)]
     warmup.append((val_ds, val_writer, "val", 0))
 
     try:
-        for i, (ds, cache, kind, version) in enumerate(warmup):
-            uncached = cache.uncached_ids(all_ids, version)
-            if not uncached:
-                print(f"Iteration {i} ({kind} v{version}): already warmed, skipping.")
-                continue
-            print(f"Iteration {i} ({kind} v{version}): warming "
-                  f"{len(uncached)}/{len(all_ids)} uncached uids.")
-            subset = sb.dataio.dataset.FilteredSortedDynamicItemDataset(ds, uncached)
-            subset.iterate_once()
+        if is_api:
+            max_workers = int(hparams.get("api_max_workers", 50))
+            _drive_warm_api(warmup, speech_encoder, cache_pool, all_ids, max_workers)
+        else:
+            _drive_warm_batched(warmup, speech_encoder, cache_pool, all_ids, warm_batch_size)
     finally:
         train_writer.close()
         val_writer.close()
         del speech_encoder
         gc.collect()
-        if torch.cuda.is_available():
+        if not is_api and torch.cuda.is_available():
             torch.cuda.empty_cache()
 
 

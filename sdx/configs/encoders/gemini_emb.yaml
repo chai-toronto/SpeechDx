@@ -1,0 +1,18 @@
+sample_rate: 16000
+feature_dim: 3072
+num_layers: 1
+layer_dim: 1
+# Gemini Embeddings 2 caps a single embed_content call at 180s of audio
+# (empirically: total duration across parts, not per-part). The pipeline
+# splitter chunks audio at this boundary; the encoder forward sends one
+# <=180s chunk per API call.
+max_length: 180
+min_length: 1
+
+encoder: !new:model.gemini_embeddings.GeminiEmbeddings
+  model: "gemini-embedding-2"
+  sample_rate: !ref <sample_rate>
+  output_dim: !ref <feature_dim>
+  rpm: 3000
+  freeze_encoder: True
+  output_hidden_states: False

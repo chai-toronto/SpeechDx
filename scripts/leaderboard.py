@@ -18,7 +18,8 @@ import pandas as pd
 
 
 REPO = Path(__file__).resolve().parents[1]
-DEFAULT_INPUT_DIR = REPO / "exps" / "_summary_run2_all_mvdr3" / "single_task"
+# Current per-task AUC/MAE summary (date-stamped; bump when a new summary is cut).
+DEFAULT_INPUT_DIR = REPO / "exps" / "_summary_may14" / "single_task"
 
 DATASET_TO_CATEGORY = {
     "edaic": "Affective", "iemocap": "Affective", "ravdess": "Affective",
