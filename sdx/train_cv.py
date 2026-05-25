@@ -293,7 +293,7 @@ def _evaluate_fold_test_only(*, fold_idx: int, output_folder: Path,
 
 
 def cmd_train_cv(task: str, encoder: str, *,
-                 probe: str = "AvgTProbe", probe_yaml: str = "Probe.yaml",
+                 probe: str = "wavrx", probe_yaml: str = "wavrx.yaml",
                  tag: str = "run1", overrides: str = "",
                  level_dir: str | None = None) -> None:
     """Run per-fold HP optimization for one (task, encoder, probe).

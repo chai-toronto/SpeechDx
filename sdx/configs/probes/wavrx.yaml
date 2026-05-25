@@ -1,0 +1,18 @@
+feature_dim: !PLACEHOLDER
+num_labels: !PLACEHOLDER
+num_layers: !PLACEHOLDER
+layer_dim: !PLACEHOLDER
+
+# WavRx — speech-health probe from Tu & Falk (2024). Takes a tuple of
+# per-layer (B, T, F) tensors from the SSL encoder (output_hidden_states=True),
+# computes a temporal branch + a modulation-dynamics branch, fuses with
+# per-layer learned weights, and projects to num_classes via a small MLP.
+#
+# num_ssl_feat MUST match the encoder's hidden size (wavlm-base=768,
+# wavlm-large=1024) — the original yaml hard-defaulted to 768 which silently
+# mismatched on large. Wire it through feature_dim from main.yaml.
+probe: !new:model.wavrx.WavRx
+  num_ssl_feat: !ref <feature_dim>
+  num_fc_neurons: !ref <feature_dim>
+  num_classes: !ref <num_labels>
+  num_hidden_layers: !ref <num_layers>

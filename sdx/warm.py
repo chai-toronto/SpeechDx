@@ -323,12 +323,82 @@ def _encode_chunk_batch(buffer: list, speech_encoder, tmp: h5py.File,
                          for i in range(len(sigs))]
             else:
                 crops = [out[i, :feat_len[i]] for i in range(len(sigs))]
+    # Scratch HDF5 stores one chunk's per-layer activations between Phase 1
+    # (encode) and Phase 2 (concat + final write). For multi-layer caches
+    # this scratch can blow up to TB-scale on the bigger datasets (24
+    # layers × ~256-frame chunks × ~hundreds of thousands of chunks for
+    # c19sounds), so we drop to fp16 here too. The final cache writer
+    # already stores fp16, so this is a pure size/throughput win with no
+    # math impact downstream.
+    #
+    # numpy lacks a bfloat16 dtype, so we cast through torch (fp16 is a
+    # narrowing of bf16 — exponent range truncates but for downstream use
+    # as a read-only cache the loss is irrelevant).
     for (key, _), o in zip(buffer, crops):
         if ohs:
             for li, layer in enumerate(o):
-                tmp.create_dataset(f"{key}/L{li}", data=layer.detach().cpu().numpy())
+                tmp.create_dataset(
+                    f"{key}/L{li}",
+                    data=layer.detach().to(torch.float16).cpu().numpy(),
+                )
         else:
-            tmp.create_dataset(key, data=o.detach().cpu().numpy())
+            tmp.create_dataset(
+                key, data=o.detach().float().cpu().numpy(),
+            )
+
+
+def _is_cuda_oom(exc: BaseException) -> bool:
+    """Heuristic: a real CUDA OOM vs any other RuntimeError.
+
+    ``torch.cuda.OutOfMemoryError`` only exists in recent PyTorch; pre-2.5 it
+    is a plain ``RuntimeError`` whose message starts with ``CUDA out of
+    memory``. Check both shapes so the retry logic works either way.
+    """
+    if torch.cuda.is_available():
+        oom_cls = getattr(torch.cuda, "OutOfMemoryError", None)
+        if oom_cls is not None and isinstance(exc, oom_cls):
+            return True
+    return isinstance(exc, RuntimeError) and "out of memory" in str(exc).lower()
+
+
+def _encode_chunk_batch_oom_safe(buffer: list, speech_encoder, tmp: h5py.File,
+                                 ohs: bool, device) -> None:
+    """Run ``_encode_chunk_batch`` with an OOM-driven halve-and-retry.
+
+    The gated relative position bias in WavLMAttention (and similar encoders)
+    materializes a ``(B, H, T, T)`` tensor before SDPA can stream the scores
+    — so a batch that happens to bundle several max-length chunks can still
+    OOM even with SDPA enabled. Rather than crash the whole warm cycle, peel
+    the batch in half and retry; the recursion bottoms out at ``len==1``,
+    which is the per-chunk serial path (and if a single chunk OOMs there's
+    nothing left to shrink, so the error propagates).
+    """
+    try:
+        _encode_chunk_batch(buffer, speech_encoder, tmp, ohs, device)
+        return
+    except BaseException as exc:  # noqa: BLE001 — narrowed inside
+        if not _is_cuda_oom(exc) or len(buffer) <= 1:
+            raise
+        # The exception object holds a traceback, which holds frames, which
+        # hold locals — including the giant GPU tensors that just OOM'd.
+        # `empty_cache()` won't reclaim them while those frames are alive.
+        # Drop the traceback, drop the local, gc, *then* empty the cache so
+        # the retry actually starts from a clean allocator state. Without
+        # this the cascade can OOM at B=1 with PyTorch still holding the
+        # B=32 working set in unreachable traceback frames.
+        exc.__traceback__ = None
+        mid = len(buffer) // 2
+        msg = f"  [warn] OOM at batch={len(buffer)} — splitting to {mid}+{len(buffer) - mid} and retrying."
+        del exc
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    print(msg)
+    _encode_chunk_batch_oom_safe(buffer[:mid], speech_encoder, tmp, ohs, device)
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    _encode_chunk_batch_oom_safe(buffer[mid:], speech_encoder, tmp, ohs, device)
 
 
 def _read_chunk(tmp: h5py.File, key: str, ohs: bool):
@@ -375,7 +445,13 @@ def _drive_warm_batched(warmup, speech_encoder, cache_pool: str,
               f"(batched, batch_size={batch_size}).")
 
         uid_to_idx = {uid: idx for idx, uid in enumerate(ds.data_ids)}
-        tmp_dir = Path(tempfile.mkdtemp(prefix="warm_chunks_"))
+        # Scratch HDF5 for Phase 1; under multi_L24 with the bigger datasets
+        # this can grow to hundreds of GB. Honor SLURM_TMPDIR (node-local
+        # NVMe, hundreds of GB) when present so we never spill to a tiny
+        # /tmp tmpfs. tempfile.mkdtemp's default ``dir`` is None which
+        # falls back to TMPDIR / /tmp — fine off-cluster.
+        scratch_root = os.environ.get("SLURM_TMPDIR") or None
+        tmp_dir = Path(tempfile.mkdtemp(prefix="warm_chunks_", dir=scratch_root))
         tmp_path = tmp_dir / "chunks.hdf5"
         n_chunks: dict[str, int] = {}
         t0 = time.time()
@@ -390,14 +466,22 @@ def _drive_warm_batched(warmup, speech_encoder, cache_pool: str,
                     for ci, sig in enumerate(signals):
                         buffer.append((f"{uid}/c{ci}", sig))
                         if len(buffer) >= batch_size:
-                            _encode_chunk_batch(buffer, speech_encoder, tmp, ohs, device)
+                            _encode_chunk_batch_oom_safe(buffer, speech_encoder, tmp, ohs, device)
                             done_n += len(buffer)
                             buffer = []
                             rate = (time.time() - t0) / done_n
                             print(f"  [{kind} v{version}] {done_n} chunks encoded "
                                   f"({rate:.2f}s/chunk)")
+                            # Periodically return cached allocator blocks to
+                            # the OS — long sweeps of variable-size batches
+                            # (post-OOM-shrink) fragment the cache until OOM
+                            # even at small batch. PYTORCH_CUDA_ALLOC_CONF=
+                            # expandable_segments:True is the primary fix;
+                            # this is a belt for the suspenders.
+                            if torch.cuda.is_available() and done_n % 256 == 0:
+                                torch.cuda.empty_cache()
                 if buffer:
-                    _encode_chunk_batch(buffer, speech_encoder, tmp, ohs, device)
+                    _encode_chunk_batch_oom_safe(buffer, speech_encoder, tmp, ohs, device)
                     done_n += len(buffer)
 
             # Phase 2: concat each uid's chunks from scratch, pool, write cache.
@@ -439,7 +523,14 @@ def _warm_uncached(task: str, encoder: str, *,
     speech_encoder = hparams["encoder"]
     speech_encoder.eval()
     is_api = getattr(speech_encoder, "is_api_encoder", False)
-    warm_batch_size = int(hparams.get("warm_batch_size", 1))
+    # warm_batch_size lives in the encoder yaml (so each encoder picks its own
+    # batch sane default). main.yaml does not re-export it at top level, so
+    # consult encoder_params before falling back to 1. Keeping the top-level
+    # check first lets callers override via load_hyperpyyaml overrides=.
+    warm_batch_size = int(
+        hparams.get("warm_batch_size")
+        or hparams.get("encoder_params", {}).get("warm_batch_size", 1)
+    )
 
     if not is_api:
         if device is None:
@@ -493,7 +584,7 @@ def _warm_uncached(task: str, encoder: str, *,
 
 
 def run_warm(task: str, encoder: str, *,
-             probe: str = "AvgTProbe", device: str | None = None,
+             probe: str = "wavrx", device: str | None = None,
              num_aug_ver: int | None = None,
              overwrite: bool = False) -> None:
     """Warm the HDF5 cache for one (task, encoder) pair.
@@ -593,9 +684,23 @@ def cmd_warm_jobs(jobs: list[tuple[str, str, int | None]], *,
         dashboard.finish_job(idx, label, ok=ok, elapsed=elapsed, log_path=log_path)
         return result
 
+    failed: list[str] = []
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {pool.submit(_execute, job, i): job for i, job in enumerate(jobs)}
         for future in as_completed(futures):
-            future.result()
+            label, ok, _ = future.result()
+            if not ok:
+                failed.append(label)
 
     dashboard.print_summary(done_label="cache warmed")
+
+    # Surface per-pair failures as a non-zero process exit — otherwise the
+    # rolling sbatch's "exit 0 → all warm, stop" branch interprets a fully
+    # broken cycle as success. ``_run_logged_job`` already swallowed each
+    # exception for the dashboard, so we have to re-raise here.
+    if failed:
+        sample = failed[0] if len(failed) == 1 else f"{failed[0]} ... +{len(failed)-1} more"
+        raise SystemExit(
+            f"warm: {len(failed)}/{len(jobs)} pair(s) failed ({sample}). "
+            f"See per-pair logs under {dashboard.run_log_dir}/."
+        )

@@ -461,7 +461,12 @@ def assert_no_encoder_imports() -> None:
     """
     import sys
 
-    allowed = {"model", "model.probe", "model.pool", "model.stub_encoder"}
+    # model.wavrx is a probe head (modulation block + per-layer fusion +
+    # MLP), not an encoder — it never instantiates a WavLM upstream. Add
+    # it to the allow-list so the trainer process can load it from the
+    # wavrx.yaml probe include without tripping the encoder-isolation guard.
+    allowed = {"model", "model.probe", "model.pool", "model.stub_encoder",
+               "model.wavrx"}
     forbidden = [
         m for m in sys.modules
         if m.startswith("model.") and m not in allowed

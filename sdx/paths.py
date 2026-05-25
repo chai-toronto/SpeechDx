@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-DEFAULT_PROBE_NAME = "AvgTProbe"
+DEFAULT_PROBE_NAME = "wavrx"
 DEFAULT_EXPERIMENT_TAG = "run1"
 
 

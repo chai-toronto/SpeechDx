@@ -1,4 +1,13 @@
-num_workers: 0 # 22 Change when on HPC, this is for DataLoader
+# Reader-only training reads embeddings from a multi_L<N> HDF5 cache
+# rsynced to $SLURM_TMPDIR by train_wavrx.sbatch. Each sample is a tuple
+# of L per-layer ndarrays — for mdvr's longest uid (~9k frames, 12
+# layers, 768 dim, fp16) that's ~130 MB pre-collation. Once a worker
+# collates B=16 of these into 12 padded tensors and queues them via
+# shared memory, peak in-flight per batch is 5–10 GB; multiplied by
+# (num_workers × prefetch_factor) it OOM-killed the Tune actor even at
+# --mem=320G. Setting num_workers=0 makes I/O synchronous in the main
+# process and bounds the working set to one batch.
+num_workers: 0
 batch_size: 16
 persistent_workers: False
 progressbar: True

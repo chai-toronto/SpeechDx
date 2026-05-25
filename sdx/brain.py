@@ -395,7 +395,11 @@ class DiagnosticsBrain(sb.Brain):
         if self.model.encoder.output_hidden_states:
             num_layers = self.hparams.num_layers
             emb_vars = ["emb_{}".format(i) for i in range(num_layers)]
-            wavs = tuple(getattr(batch, var).data.to(self.device) for var in emb_vars)
+            # Multi-layer caches are stored fp16 on disk to fit ~24× the
+            # single-layer footprint; upcast to fp32 here so the probe
+            # weights (which stay fp32) can matmul without dtype mismatch.
+            wavs = tuple(getattr(batch, var).data.to(self.device).float()
+                         for var in emb_vars)
             lens = getattr(batch, emb_vars[0]).lengths.to(self.device)
         else:
             wavs = getattr(batch, "emb_0").data.to(self.device)
