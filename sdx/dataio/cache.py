@@ -91,13 +91,63 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
         return all(self._is_cached(uid) for uid in ids)
 
     def uncached_ids(self, ids, version):
-        """Subset of ``ids`` whose ``v{version}`` key is missing, in input order."""
+        """Subset of ``ids`` whose ``v{version}`` key is missing or partial.
+
+        "Partial" applies only to the multi-layer write path: a SIGKILL or
+        SIGTERM mid-`_cache()` can leave a uid's group with the create_group
+        call already committed but only some of the L<i> datasets written.
+        Treating that as cached makes warm idempotency lie and forces the
+        downstream reader to silently load a tuple of the wrong length.
+        Here we report the entry as uncached so warm re-encodes it.
+        """
         self._ensure_handle()
-        return [uid for uid in ids if self._version_key(uid, version) not in self.hdf5file]
+        return [uid for uid in ids
+                if not self._uid_version_complete(uid, version)]
 
     def _is_cached(self, uid):
         self._ensure_handle()
-        return all([self._version_key(uid, v) in self.hdf5file for v in range(self.num_version)])
+        return all(self._uid_version_complete(uid, v) for v in range(self.num_version))
+
+    def _uid_version_complete(self, uid, version):
+        """True iff ``<uid>/v<v>`` exists and isn't a partial multi-layer write."""
+        key = self._version_key(uid, version)
+        if key not in self.hdf5file:
+            return False
+        obj = self.hdf5file[key]
+        if isinstance(obj, h5py.Group):
+            # Multi-layer entries are marked with attrs['complete']=True at
+            # the end of _cache(). Legacy entries from before the marker
+            # was added are accepted if they look fully populated.
+            if obj.attrs.get("complete", False):
+                return True
+            # Fall back to a content sniff: pick another group from the file
+            # as a reference for "how many layers should this have" and
+            # require this group's L<i> count to match. Empty file → no
+            # reference → conservatively treat as incomplete (will trigger
+            # a re-encode, which is the safe side of the trade-off).
+            ref_n = self._reference_layer_count()
+            if ref_n is None:
+                return False
+            return len(obj) >= ref_n
+        return True
+
+    def _reference_layer_count(self):
+        """Number of L<i> datasets in any complete sibling group, or None.
+
+        Cached after first compute; the layer count for a given encoder is
+        fixed across the whole cache file.
+        """
+        n = getattr(self, "_ref_n", None)
+        if n is not None:
+            return n
+        for top_uid in self.hdf5file:
+            for v_name in self.hdf5file[top_uid]:
+                inner = self.hdf5file[top_uid][v_name]
+                if isinstance(inner, h5py.Group) and len(inner) > 0:
+                    n = len(inner)
+                    self._ref_n = n
+                    return n
+        return None
 
     def _load(self, uid):
         self._ensure_handle()
@@ -131,6 +181,11 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
                 for li, t in enumerate(result):
                     arr = _to_fp16_ndarray(t)
                     grp.create_dataset(f"L{li}", data=arr)
+                # Marker: only present once every L<i> dataset is written.
+                # _uid_version_complete looks for this so a partial write
+                # (warm killed by TIMEOUT mid-uid) is correctly classified
+                # as "uncached" and re-encoded on the next warm cycle.
+                grp.attrs["complete"] = True
             else:
                 # Single-layer write: keep the existing fp32 on disk so the
                 # multi-GB ``single/`` caches already on disk stay compatible
