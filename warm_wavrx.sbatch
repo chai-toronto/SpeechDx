@@ -80,8 +80,14 @@ if [[ "$CUDA_RC" -ne 0 ]]; then
     RC=1
 else
     set +e
+    # data/ is a static symlink to data.orig/ — the original unpacked dataset
+    # tree on /scratch. No per-job mount (no run_with_data.sh unshare; no
+    # run_with_data_local.sh extract) → no contention on the shared symlink
+    # path, so parallel warm jobs Just Work. The inode-quota concern that
+    # motivated data.sqfs no longer applies (Fir /scratch is uncapped on
+    # inodes per `lfs quota`).
     # shellcheck disable=SC2086  # word-split WARM_FILTER on purpose
-    ./run_with_data_local.sh python -u -m sdx single warm -e wavlm $WARM_FILTER &
+    python -u -m sdx single warm -e wavlm $WARM_FILTER &
     WARM_PID=$!
     while :; do
         wait "$WARM_PID"
