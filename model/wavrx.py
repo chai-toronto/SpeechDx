@@ -9,16 +9,17 @@ import torch.nn.functional as F
 # encoder-isolation guard treats anything under model.* outside the
 # allow-list as an encoder leak.
 from speechbrain.lobes.models.ECAPA_TDNN import AttentiveStatisticsPooling
+from speechbrain.processing.features import STFT
 
 
 #############################################
 class modulation_block(nn.Module):
 
     """
-    The modulation block can be used independently. It takes any 2-D representation with a feature and time dimension, then
+    The modulation block can be used independently. It takes any 2-D representation with a feature and time dimension, then 
     converts it to the frequency domain. The conversion itself is a standard Short-Time Fourier Transform (STFT), as is typically
-    used to convert speech waveform into spectrogram. The intuition is that SSL representations has the time-varying nature, and
-    the modulation block can extract the modulation dynamics of the temporal variations, like respiration and articulation.
+    used to convert speech waveform into spectrogram. The intuition is that SSL representations has the time-varying nature, and 
+    the modulation block can extract the modulation dynamics of the temporal variations, like respiration and articulation. 
     """
 
     def __init__(self,
@@ -30,14 +31,11 @@ class modulation_block(nn.Module):
         """
         Input:
             sr: int
-                sampling rate of the input frame sequence (Hz). For
-                WavLM output, this is 50 (frames per second).
+                sampling rate (in Hz).
             win_len: int
-                STFT window length in **samples** at ``sr``. At sr=50,
-                win_len=256 ≈ 5.12 s — appropriate for slow modulation
-                analysis (respiration ~0.2 Hz, articulation ~3-8 Hz).
+                window length of the STFT (in ms).
             hop_len: int
-                STFT hop length in **samples** at ``sr``.
+                hop length of the STFT (in ms).
             keep_temporal_dim: boolean
                 When set to False, the modulation dynamics are average over time.
 
@@ -46,61 +44,21 @@ class modulation_block(nn.Module):
         >>> x = torch.randn(8,100,768) # {BATCH, TIME, FEATURE}
         >>> mb = modulation_block(50, 256, 64)
         >>> x_mod = mb(x) # {BATCH, MODULATION_FREQUENCY, FEATURE}
-
-        Note
-        ----
-        The earlier version of this module used
-        ``speechbrain.processing.features.STFT`` here, which interprets
-        ``win_length`` / ``hop_length`` as **milliseconds** and keeps
-        ``n_fft=400`` regardless. That turned the paper's
-        ``win_len=256, hop_len=64`` into a 13-sample window with hop 3
-        and 201 freq bins on a 500-sample input — output shape
-        ``(B, 167, 201, 2, F)``, ~36 GiB at B*F=192*768. We now call
-        ``torch.stft`` directly with sample semantics (paper-faithful)
-        and ``n_fft = win_len`` so freq resolution matches the window.
         """
         super(modulation_block, self).__init__()
-        self.sr = sr
-        self.win_len = int(win_len)
-        self.hop_len = int(hop_len)
-        self.n_fft = self.win_len
-        self.register_buffer("window", torch.hamming_window(self.win_len))
+        self.compute_STFT = STFT(sample_rate=sr, win_length=win_len, hop_length=hop_len)
         self.eps = 1e-10
         self.keep_temporal_dim = keep_temporal_dim
 
     def forward(self, x):
         assert x.ndim == 3, "input to the modulation block needs to be 3D (batch, time, feat)"
-        B, T, F_dim = x.shape
-        # torch.stft expects (batch, time) on the last 2 axes. Flatten the
-        # per-feature channels so each (b, f) row of the input is STFT'd
-        # independently — matches the per-feature modulation analysis the
-        # paper intends.
-        x_flat = x.permute(0, 2, 1).reshape(B * F_dim, T)
-        stft = torch.stft(
-            x_flat,
-            n_fft=self.n_fft,
-            hop_length=self.hop_len,
-            win_length=self.win_len,
-            window=self.window.to(x_flat.device, x_flat.dtype),
-            center=True,
-            pad_mode="constant",
-            return_complex=True,
-        )  # complex (B*F, n_fft//2+1, n_frames)
-        # view_as_real splits the trailing complex dim into (..., 2) —
-        # avoids the deprecation on return_complex=False without
-        # changing the rest of the pipeline.
-        stft = torch.view_as_real(stft)  # (B*F, n_fft//2+1, n_frames, 2)
-        n_freq, n_frames = stft.shape[1], stft.shape[2]
-        stft = stft.view(B, F_dim, n_freq, n_frames, 2)
-        # Layout the rest of WavRx expects: (B, time, mod_freq, 2, F),
-        # matching speechbrain.STFT's old output ordering so downstream
-        # code (the log-power combine + temporal average) is unchanged.
-        x_mod = torch.abs(stft).permute(0, 3, 2, 4, 1)
-        # log-power and combine real+imag — same as original.
-        x_mod = torch.log(x_mod.pow(2).sum(-2) + self.eps)
+        x_mod = torch.abs(self.compute_STFT(x)) # (num_bacth, time, num_mod_freq, 2, num_features)
+        x_mod = torch.log(x_mod.pow(2).sum(-2)+self.eps) # take log of power and combine real and imaginary parts
         if not self.keep_temporal_dim:
-            return torch.mean(x_mod, dim=1)  # (B, mod_freq, F)
-        return x_mod
+            x_mod_ave = torch.mean(x_mod,axis=1) # average over time axis -> (num_batch, num_mod_freq, num_features)
+            return x_mod_ave
+        else:
+            return x_mod
         
 ##############################################
 
