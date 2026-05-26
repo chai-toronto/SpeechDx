@@ -63,21 +63,25 @@ fi
 
 # Overrides:
 #   slurm_tmpdir          → read cache straight from /scratch (no rsync).
-#   max_concurrent_trials → ConcurrencyLimiter ceiling. With Ray's resource
-#                           scheduler also gating, this is the upper bound,
-#                           not a guarantee.
-#   ray_tune_config       → 2 samples (one HP draw per trial), gpu=1.
 #   number_of_epochs      → keep each trial short; we only need them
 #                           overlapping (or not) for a few minutes.
+#   hpopt_params          → main.yaml exposes ray_tune_config /
+#                           max_concurrent_trials only via !ref
+#                           <hpopt_params[...]>, so overriding them at the
+#                           top level trips hyperpyyaml's recursive_update
+#                           ("Expected to update a mapping, but got: <ref>").
+#                           Overriding at the hpopt_params source — the
+#                           dict actually loaded from hpopt.yaml — merges
+#                           cleanly. resources_per_trial defaults to
+#                           cpu=2/gpu=1 in hpopt.yaml, so we don't need
+#                           to restate it here.
 OVERRIDES=$(cat <<'YAML'
 slurm_tmpdir: /scratch/kieu/Audio-Health-Benchmark/embeddings_avg_finalv2/
-max_concurrent_trials: 2
 number_of_epochs: 3
-ray_tune_config:
-  num_samples: 2
-  resources_per_trial:
-    cpu: 2
-    gpu: 1
+hpopt_params:
+  max_concurrent_trials: 2
+  ray_tune_config:
+    num_samples: 2
 YAML
 )
 
