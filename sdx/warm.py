@@ -28,7 +28,7 @@ import speechbrain as sb
 import torch
 
 from sdx.config import compose_config
-from sdx.dataio.cache import CachedHDF5DynamicItem
+from sdx.dataio.cache import CachedHDF5DynamicItem, _to_ndarray
 from sdx.dataio.pipeline import (
     ID,
     LABEL_ENCODED,
@@ -205,9 +205,10 @@ def _compute_emb_from_signals(raw_signals, speech_encoder, cache_pool: str):
 
 def _make_cache_writer(cache_dir: Path, num_versions: int,
                        speech_encoder, output_vars: list[str],
-                       cache_pool: str):
+                       cache_pool: str, cache_dtype: str = "fp16"):
     """Build the ``cache_emb`` DynamicItem that runs the encoder and writes HDF5."""
-    @CachedHDF5DynamicItem.cache(cache_dir, file_mode="a", num_version=num_versions)
+    @CachedHDF5DynamicItem.cache(cache_dir, file_mode="a",
+                                 num_version=num_versions, dtype=cache_dtype)
     @sb.utils.data_pipeline.takes(ID, SIGNALS)
     @sb.utils.data_pipeline.provides(*output_vars)
     def cache_emb(_id, raw_signals):
@@ -290,7 +291,7 @@ def _combine_chunk_embs(per_chunk: list, output_hidden_states: bool,
 
 
 def _encode_chunk_batch(buffer: list, speech_encoder, tmp: h5py.File,
-                        ohs: bool, device) -> None:
+                        ohs: bool, device, cache_dtype: str = "fp16") -> None:
     """Encode one batch of ``(chunk_key, signal)`` and write each output to tmp.
 
     A single-chunk batch uses the plain ``forward`` (no padding). A
@@ -324,27 +325,19 @@ def _encode_chunk_batch(buffer: list, speech_encoder, tmp: h5py.File,
             else:
                 crops = [out[i, :feat_len[i]] for i in range(len(sigs))]
     # Scratch HDF5 stores one chunk's per-layer activations between Phase 1
-    # (encode) and Phase 2 (concat + final write). For multi-layer caches
-    # this scratch can blow up to TB-scale on the bigger datasets (24
-    # layers × ~256-frame chunks × ~hundreds of thousands of chunks for
-    # c19sounds), so we drop to fp16 here too. The final cache writer
-    # already stores fp16, so this is a pure size/throughput win with no
-    # math impact downstream.
-    #
-    # numpy lacks a bfloat16 dtype, so we cast through torch (fp16 is a
-    # narrowing of bf16 — exponent range truncates but for downstream use
-    # as a read-only cache the loss is irrelevant).
+    # (encode) and Phase 2 (concat + final write). On the bigger datasets
+    # this scratch can grow to TB scale (24 layers × ~256-frame chunks ×
+    # ~100k chunks for c19sounds), so it follows the same cache_dtype the
+    # final writer uses — picking fp32 doubles scratch I/O as well as
+    # final on-disk size, but stays internally consistent.
     for (key, _), o in zip(buffer, crops):
         if ohs:
             for li, layer in enumerate(o):
                 tmp.create_dataset(
-                    f"{key}/L{li}",
-                    data=layer.detach().to(torch.float16).cpu().numpy(),
+                    f"{key}/L{li}", data=_to_ndarray(layer, cache_dtype),
                 )
         else:
-            tmp.create_dataset(
-                key, data=o.detach().float().cpu().numpy(),
-            )
+            tmp.create_dataset(key, data=_to_ndarray(o, cache_dtype))
 
 
 def _is_cuda_oom(exc: BaseException) -> bool:
@@ -362,7 +355,8 @@ def _is_cuda_oom(exc: BaseException) -> bool:
 
 
 def _encode_chunk_batch_oom_safe(buffer: list, speech_encoder, tmp: h5py.File,
-                                 ohs: bool, device) -> None:
+                                 ohs: bool, device,
+                                 cache_dtype: str = "fp16") -> None:
     """Run ``_encode_chunk_batch`` with an OOM-driven halve-and-retry.
 
     The gated relative position bias in WavLMAttention (and similar encoders)
@@ -374,7 +368,7 @@ def _encode_chunk_batch_oom_safe(buffer: list, speech_encoder, tmp: h5py.File,
     nothing left to shrink, so the error propagates).
     """
     try:
-        _encode_chunk_batch(buffer, speech_encoder, tmp, ohs, device)
+        _encode_chunk_batch(buffer, speech_encoder, tmp, ohs, device, cache_dtype)
         return
     except BaseException as exc:  # noqa: BLE001 — narrowed inside
         if not _is_cuda_oom(exc) or len(buffer) <= 1:
@@ -394,11 +388,13 @@ def _encode_chunk_batch_oom_safe(buffer: list, speech_encoder, tmp: h5py.File,
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     print(msg)
-    _encode_chunk_batch_oom_safe(buffer[:mid], speech_encoder, tmp, ohs, device)
+    _encode_chunk_batch_oom_safe(buffer[:mid], speech_encoder, tmp, ohs, device,
+                                 cache_dtype)
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-    _encode_chunk_batch_oom_safe(buffer[mid:], speech_encoder, tmp, ohs, device)
+    _encode_chunk_batch_oom_safe(buffer[mid:], speech_encoder, tmp, ohs, device,
+                                 cache_dtype)
 
 
 def _read_chunk(tmp: h5py.File, key: str, ohs: bool):
@@ -410,7 +406,8 @@ def _read_chunk(tmp: h5py.File, key: str, ohs: bool):
 
 
 def _drive_warm_batched(warmup, speech_encoder, cache_pool: str,
-                        all_ids: list[str], batch_size: int) -> None:
+                        all_ids: list[str], batch_size: int,
+                        cache_dtype: str = "fp16") -> None:
     """Batched driver — the main warm path for local encoders.
 
     Two phases per (kind, version):
@@ -466,7 +463,8 @@ def _drive_warm_batched(warmup, speech_encoder, cache_pool: str,
                     for ci, sig in enumerate(signals):
                         buffer.append((f"{uid}/c{ci}", sig))
                         if len(buffer) >= batch_size:
-                            _encode_chunk_batch_oom_safe(buffer, speech_encoder, tmp, ohs, device)
+                            _encode_chunk_batch_oom_safe(buffer, speech_encoder, tmp,
+                                                         ohs, device, cache_dtype)
                             done_n += len(buffer)
                             buffer = []
                             rate = (time.time() - t0) / done_n
@@ -481,7 +479,8 @@ def _drive_warm_batched(warmup, speech_encoder, cache_pool: str,
                             if torch.cuda.is_available() and done_n % 256 == 0:
                                 torch.cuda.empty_cache()
                 if buffer:
-                    _encode_chunk_batch_oom_safe(buffer, speech_encoder, tmp, ohs, device)
+                    _encode_chunk_batch_oom_safe(buffer, speech_encoder, tmp,
+                                                 ohs, device, cache_dtype)
                     done_n += len(buffer)
 
             # Phase 2: concat each uid's chunks from scratch, pool, write cache.
@@ -532,10 +531,25 @@ def _warm_uncached(task: str, encoder: str, *,
         or hparams.get("encoder_params", {}).get("warm_batch_size", 1)
     )
 
+    cache_pool = hparams.get("cache_pool", "none")
+    cache_dtype = hparams.get("cache_dtype", "fp16")
+
     if not is_api:
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         speech_encoder = speech_encoder.to(torch.device(device))
+        # Drive the encoder's compute dtype from main.yaml: cache_dtype so
+        # the warm chain is end-to-end one precision (weights, autocast,
+        # input wav, scratch + final HDF5). Encoder yamls intentionally
+        # don't carry compute_dtype anymore — single source of truth.
+        # .to(dtype) recasts every parameter/buffer; setting compute_dtype
+        # makes WavLM.forward (and other encoders that read this attr)
+        # autocast and cast the input wav to the same dtype.
+        from sdx.dataio.cache import _CACHE_TORCH_DTYPES
+        th_dt = _CACHE_TORCH_DTYPES[cache_dtype.lower()]
+        speech_encoder.to(th_dt)
+        if hasattr(speech_encoder, "compute_dtype"):
+            speech_encoder.compute_dtype = th_dt
 
     num_layers = hparams["num_layers"]
     num_outputs = num_layers if speech_encoder.output_hidden_states else 1
@@ -543,13 +557,13 @@ def _warm_uncached(task: str, encoder: str, *,
     # writer._cache directly, so it is only load-bearing when a writer is
     # used as an inline pipeline DynamicItem (cross-warm) — keep it.
     output_vars = [f"emb_{i}" for i in range(num_outputs)]
-    cache_pool = hparams.get("cache_pool", "none")
 
     train_writer = _make_cache_writer(
         train_cache_dir, num_versions, speech_encoder, output_vars, cache_pool,
+        cache_dtype,
     )
     val_writer = _make_cache_writer(
-        val_cache_dir, 1, speech_encoder, output_vars, cache_pool,
+        val_cache_dir, 1, speech_encoder, output_vars, cache_pool, cache_dtype,
     )
 
     # Both drivers call the encoder + writer themselves, so the datasets
@@ -573,7 +587,8 @@ def _warm_uncached(task: str, encoder: str, *,
             max_workers = int(hparams.get("api_max_workers", 50))
             _drive_warm_api(warmup, speech_encoder, cache_pool, all_ids, max_workers)
         else:
-            _drive_warm_batched(warmup, speech_encoder, cache_pool, all_ids, warm_batch_size)
+            _drive_warm_batched(warmup, speech_encoder, cache_pool, all_ids,
+                                warm_batch_size, cache_dtype)
     finally:
         train_writer.close()
         val_writer.close()

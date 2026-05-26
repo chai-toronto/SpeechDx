@@ -53,6 +53,14 @@ warm_cache: true
 # Must be "none" for the WavRx probe — its modulation block STFTs over the
 # time axis, so mean-pooling at warm time would discard the signal it needs.
 cache_pool: none
+# On-disk dtype for the multi-layer (output_hidden_states=True) cache.
+# Allowed: "fp16" or "fp32" — numpy has no bf16 dtype so h5py can't write
+# bf16 even if asked. Default fp16 to halve disk footprint at training-
+# dtype parity (training.yaml: precision=fp16). Single-layer caches
+# (cache_pool=mean or output_hidden_states=False) are unaffected; they
+# pass the encoder output to h5py at its native dtype for back-compat
+# with the existing on-disk caches written before this knob existed.
+cache_dtype: fp16
 
 # ----------------------------------
 # DYNAMIC SCRIPT CONFIGURATION (Generic)

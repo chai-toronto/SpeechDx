@@ -66,12 +66,11 @@ encoder: !new:model.wavlm.WavLM
   # multi_L12 path to halve the on-disk footprint.
   output_hidden_states: True
   sample_rate: !ref <sample_rate>
-  # Wrap the transformer forward in torch.autocast at this dtype on CUDA.
-  # bfloat16 has the same exponent range as fp32 (so the gated rel-pos bias
-  # doesn't underflow), gives ~2× memory headroom, and is native on H100.
-  # Output dtype matches; sdx/warm.py upcasts back to fp32 before writing
-  # the HDF5 cache so on-disk representation is unchanged.
-  compute_dtype: bfloat16
+  # compute_dtype is intentionally NOT set here. sdx/warm.py:_warm_uncached
+  # casts encoder weights + autocast dtype to main.yaml: cache_dtype at
+  # runtime so the warm chain is end-to-end one precision (weights,
+  # autocast, input wav, scratch HDF5, final HDF5). Keeping the dtype
+  # knob in one place (main.yaml) avoids drift between cache and encoder.
   # Attention impl: "sdpa" (PyTorch SDPA — works), "flex" (broken on
   # PyTorch 2.11; see wavlm.yaml's comment block above), "original"
   # (transformers' default — materializes everything). model.wavlm falls

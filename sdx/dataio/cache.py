@@ -13,19 +13,33 @@ import torch
 from speechbrain.utils.data_pipeline import DynamicItem, CachedDynamicItem
 
 
-def _to_fp16_ndarray(t):
-    """Coerce torch.Tensor or ndarray to a fp16 numpy array for cache write.
+# Numpy dtypes the cache layer can write to h5py. bf16 is intentionally
+# absent — numpy has no native bf16 dtype, so h5py can't write it.
+_CACHE_NP_DTYPES = {
+    "fp16": np.float16, "float16": np.float16, "half": np.float16,
+    "fp32": np.float32, "float32": np.float32,
+}
+_CACHE_TORCH_DTYPES = {
+    "fp16": torch.float16, "float16": torch.float16, "half": torch.float16,
+    "fp32": torch.float32, "float32": torch.float32,
+}
 
-    Cache reads always pass through to fp32 in the trainer (the brain casts
-    on .to(device)), so on-disk fp16 is a pure space/time optimization with
-    no math impact. bf16 → fp16 conversion has the same exponent range
-    truncation a downstream .half() would do anyway.
-    """
+
+def _to_ndarray(t, dtype: str):
+    """Coerce torch.Tensor or ndarray to a numpy array of the requested
+    cache dtype (``"fp16"`` or ``"fp32"``)."""
+    try:
+        np_dt = _CACHE_NP_DTYPES[dtype.lower()]
+        th_dt = _CACHE_TORCH_DTYPES[dtype.lower()]
+    except KeyError as e:
+        raise ValueError(
+            f"cache_dtype: unsupported {dtype!r}; expected one of "
+            f"{sorted(_CACHE_NP_DTYPES)}. (bf16 is not supported — numpy "
+            f"has no bf16 dtype.)"
+        ) from e
     if hasattr(t, "detach"):
-        t = t.detach().to(torch.float16).cpu().numpy()
-    else:
-        t = np.asarray(t, dtype=np.float16)
-    return t
+        return t.detach().to(th_dt).cpu().numpy()
+    return np.asarray(t, dtype=np_dt)
 
 
 class CachedHDF5DynamicItem(CachedDynamicItem):
@@ -37,12 +51,21 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
     augmentation variety; one is sampled uniformly at load time.
     """
 
-    def __init__(self, cache_location, file_mode="a", num_version=1, *args, **kwargs):
+    def __init__(self, cache_location, file_mode="a", num_version=1,
+                 dtype: str = "fp16", *args, **kwargs):
         super().__init__(cache_location, *args, **kwargs)
 
         self.file_mode = file_mode
         self.cache_location /= "cache.hdf5"
         self.num_version = num_version
+        # Validates the dtype string here so a typo fails fast at warm-time,
+        # not 30 min later in the middle of a forward pass.
+        if dtype.lower() not in _CACHE_NP_DTYPES:
+            raise ValueError(
+                f"cache_dtype: unsupported {dtype!r}; expected one of "
+                f"{sorted(_CACHE_NP_DTYPES)}."
+            )
+        self.dtype = dtype.lower()
         print(f"Opening HDF5 cache at {self.cache_location} with mode {file_mode}")
         open_kwargs = {"locking": False} if file_mode == "r" else {}
         self.hdf5file = h5py.File(self.cache_location, file_mode, **open_kwargs)
@@ -173,13 +196,13 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
                 # Multi-layer write: store one dataset per layer so each
                 # layer keeps its native (T, D) shape (T can vary across
                 # layers in principle, though WavLM's layers all share T).
-                # fp16 on disk halves the size vs default fp32; activations
-                # have plenty of fp16 headroom for use as a read-only cache.
-                # Storage budget is the binding constraint for multi_L24
-                # (~9TB at fp16 across all 12 datasets vs ~18TB at fp32).
+                # On-disk dtype follows self.dtype (main.yaml: cache_dtype);
+                # fp16 (default) halves the storage footprint and matches
+                # training.yaml: precision=fp16, so no conversion happens
+                # between cache read and the autocast region.
                 grp = self.hdf5file.create_group(key)
                 for li, t in enumerate(result):
-                    arr = _to_fp16_ndarray(t)
+                    arr = _to_ndarray(t, self.dtype)
                     grp.create_dataset(f"L{li}", data=arr)
                 # Marker: only present once every L<i> dataset is written.
                 # _uid_version_complete looks for this so a partial write
@@ -204,7 +227,8 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
         self.hdf5file.close()
 
     @classmethod
-    def cache(cls, cache_location, file_mode="a", num_version=1):
+    def cache(cls, cache_location, file_mode="a", num_version=1,
+              dtype: str = "fp16"):
         """Decorator: wrap a ``DynamicItem`` factory into a cached one."""
 
         def decorator(obj):
@@ -214,6 +238,7 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
                 cache_location,
                 file_mode,
                 num_version,
+                dtype,
                 takes=obj.takes,
                 func=obj.func,
                 provides=obj.provides,
