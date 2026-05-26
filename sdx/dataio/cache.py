@@ -52,12 +52,27 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
     """
 
     def __init__(self, cache_location, file_mode="a", num_version=1,
-                 dtype: str = "fp16", *args, **kwargs):
+                 dtype: str = "fp16", read_max_frames: int = 0,
+                 *args, **kwargs):
         super().__init__(cache_location, *args, **kwargs)
 
         self.file_mode = file_mode
         self.cache_location /= "cache.hdf5"
         self.num_version = num_version
+        # Read-time crop along the time axis. Each cached uid stores its
+        # full pre-encoded length (up to ~9000 frames for a 3-min clip);
+        # without a cap the dataloader collator pads the batch to that
+        # max-T and feeds the probe a (B, L, 9000, F) tensor — fine for
+        # WavRx's own modulation block (it crops to max_frames internally)
+        # but disastrous for the batch-level activation memory and the
+        # autograd graph. Bounding T at the reader caps the whole pipeline.
+        # 0 = disabled (default; keeps the existing cross/warm code paths
+        # unchanged). For WavRx we set this to 500 frames (10 s at WavLM's
+        # 50 fps), matching the paper's clamp_length=160000 samples and the
+        # in-probe crop. Deterministic first-N for reproducibility — random
+        # windowing would need a train/eval signal we don't have at the
+        # reader level.
+        self.read_max_frames = int(read_max_frames or 0)
         # Validates the dtype string here so a typo fails fast at warm-time,
         # not 30 min later in the middle of a forward pass.
         if dtype.lower() not in _CACHE_NP_DTYPES:
@@ -181,10 +196,17 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
         # (h5py group); single-layer caches store one ndarray dataset at
         # ``<uid>/v{v}``. Dispatch on the on-disk type so both shapes
         # round-trip without the caller needing to know which mode we're in.
+        # When read_max_frames is set, the slice happens at h5py read time
+        # (T_slice = slice(0, read_max_frames)) — h5py only reads the bytes
+        # we need off disk rather than the full (T, D) tensor.
+        if self.read_max_frames > 0:
+            t_slice = slice(0, self.read_max_frames)
+        else:
+            t_slice = slice(None)
         if isinstance(grp, h5py.Group):
             n = len(grp)
-            return tuple(grp[f"L{li}"][:] for li in range(n))
-        return grp[:]
+            return tuple(grp[f"L{li}"][t_slice] for li in range(n))
+        return grp[t_slice]
 
     def _cache(self, result, uid):
         self._ensure_handle()
@@ -228,7 +250,7 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
 
     @classmethod
     def cache(cls, cache_location, file_mode="a", num_version=1,
-              dtype: str = "fp16"):
+              dtype: str = "fp16", read_max_frames: int = 0):
         """Decorator: wrap a ``DynamicItem`` factory into a cached one."""
 
         def decorator(obj):
@@ -239,6 +261,7 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
                 file_mode,
                 num_version,
                 dtype,
+                read_max_frames,
                 takes=obj.takes,
                 func=obj.func,
                 provides=obj.provides,
