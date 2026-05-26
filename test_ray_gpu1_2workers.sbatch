@@ -1,26 +1,27 @@
 #!/bin/bash
-#SBATCH --job-name=ray_gpu1_2trials
+#SBATCH --job-name=ray_gpu1_2workers
 #SBATCH --account=def-mariakak_gpu
 #SBATCH --gpus=nvidia_h100_80gb_hbm3_1g.10gb:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=1:00:00
-#SBATCH --output=logs/ray_gpu1_2trials_%j.out
-#SBATCH --error=logs/ray_gpu1_2trials_%j.err
+#SBATCH --output=logs/ray_gpu1_2workers_%j.out
+#SBATCH --error=logs/ray_gpu1_2workers_%j.err
 #SBATCH --exclude=fc10713
 
-# Ray-resource sanity test: does resources_per_trial.gpu=1 starve a second
-# concurrent trial on a single MIG slice? We run `sdx single train -t T7
-# -e wavlm` with max_concurrent_trials=2, num_samples=2, gpu=1. If Ray
-# treats the MIG slice as 1 logical GPU (the expected behaviour), the
-# second trial sits in PENDING until the first releases the slice; if it
-# somehow runs both concurrently we'd see two `Ray Tune override:` blocks
-# interleaved in the log within seconds of each other.
+# Ray-resource sanity test: with `sdx single train --workers 2` the
+# orchestrator fans out into TWO leaf subprocesses, each of which calls
+# ray.init() and tune.run() with resources_per_trial.gpu=1. Two separate
+# Ray clusters, both claiming the same MIG slice — does one block on
+# the other (starvation) or do they happily share the GPU at the CUDA
+# level? That's the answer we need before deciding whether to drop to
+# gpu=0.5 (one cluster, two fractional trials) instead.
 #
-# Reader-only: T7 (dementiabank) has a complete multi_L12 wavlm cache on
-# /scratch (53 GB train + 18 GB val) so we read straight from there
-# instead of rsync'ing to SLURM_TMPDIR — the test only cares about Ray
-# scheduling behavior, not IO.
+# Pick T7 + T8: both non-CV, both on dementiabank, so the two
+# subprocesses read the *same* cache file (53 GB train + 18 GB val) —
+# h5py opens with locking=False so concurrent reads are safe. Reader-
+# only: no encoder load, the 1g.10gb slice is plenty for a probe +
+# Adam on a per-batch (16, T, 768) tensor.
 
 set -euo pipefail
 
@@ -43,8 +44,7 @@ export NUMEXPR_NUM_THREADS=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # Cap Ray's object store and disable its memory monitor — same rationale
-# as train_wavrx.sbatch (default 30% of node memory is psutil-detected,
-# not cgroup-aware on Fir's 768 GB nodes).
+# as train_wavrx.sbatch. The two leaf Ray clusters each pick this up.
 export RAY_DEFAULT_OBJECT_STORE_MEMORY_PROPORTION=0.01
 export RAY_DEFAULT_OBJECT_STORE_MAX_MEMORY_BYTES=$((2 * 1024 * 1024 * 1024))
 export RAY_memory_monitor_refresh_ms=0
@@ -62,37 +62,39 @@ if [[ "$CUDA_RC" -ne 0 ]]; then
 fi
 
 # Overrides:
-#   slurm_tmpdir          → read cache straight from /scratch (no rsync).
-#   number_of_epochs      → keep each trial short; we only need them
-#                           overlapping (or not) for a few minutes.
-#   hpopt_params          → main.yaml exposes ray_tune_config /
-#                           max_concurrent_trials only via !ref
-#                           <hpopt_params[...]>, so overriding them at the
-#                           top level trips hyperpyyaml's recursive_update
-#                           ("Expected to update a mapping, but got: <ref>").
-#                           Overriding at the hpopt_params source — the
-#                           dict actually loaded from hpopt.yaml — merges
-#                           cleanly. resources_per_trial defaults to
-#                           cpu=2/gpu=1 in hpopt.yaml, so we don't need
-#                           to restate it here.
+#   slurm_tmpdir → read cache straight from /scratch (no rsync).
+#   number_of_epochs → keep each trial short.
+#   hpopt_params.ray_tune_config.num_samples=1 → single HP draw per task;
+#     we only need one trial per subprocess to observe whether the two
+#     subprocesses execute on the GPU in parallel.
+#   (max_concurrent_trials stays at the hpopt.yaml default of 1 — there's
+#   only one trial per Ray cluster, so it doesn't matter.)
+#
+# Why override hpopt_params and not ray_tune_config at top level:
+# main.yaml exposes ray_tune_config only via !ref <hpopt_params[ray_tune_config]>,
+# and hyperpyyaml's recursive_update trips trying to merge a dict
+# override into a placeholder ("Expected to update a mapping, but got:
+# <hpopt_params[ray_tune_config]>"). Overriding at the included
+# hpopt_params dict merges cleanly.
 OVERRIDES=$(cat <<'YAML'
 slurm_tmpdir: /scratch/kieu/Audio-Health-Benchmark/embeddings_avg_finalv2/
 number_of_epochs: 3
 hpopt_params:
-  max_concurrent_trials: 2
   ray_tune_config:
-    num_samples: 2
+    num_samples: 1
 YAML
 )
 
 echo "[sbatch] Overrides:"
 printf '%s\n' "$OVERRIDES"
-echo "[sbatch] ==== train T7 × wavlm × wavrx (Ray gpu=1, 2 trials) ===="
+echo "[sbatch] ==== train T7 + T8 × wavlm × wavrx with --workers 2 ===="
 
 # --tag picks an out-of-the-way exp folder so this test doesn't collide
-# with any real wavrx run.
-python -u -m sdx single train -t T7 -e wavlm \
-    --tag ray_gpu1_2trials_test --workers 1 \
-    --overrides "$OVERRIDES" --leaf
+# with any real wavrx run. --workers 2 → ThreadPoolExecutor(max_workers=2)
+# in sdx/run.py dispatches the two (task, wavlm) pairs to two leaf
+# subprocesses concurrently.
+python -u -m sdx single train -t T7 -t T8 -e wavlm \
+    --tag ray_gpu1_2workers_test --workers 2 \
+    --overrides "$OVERRIDES"
 
 echo "[sbatch] done."
