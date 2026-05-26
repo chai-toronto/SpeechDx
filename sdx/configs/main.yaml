@@ -62,6 +62,19 @@ cache_pool: none
 # with the existing on-disk caches written before this knob existed.
 cache_dtype: fp16
 
+# Read-time crop along the time axis (first-N frames per uid). The cache
+# stores the FULL pre-encoded length per uid — up to ~9000 frames for a
+# 3-min clip. The dataloader collator pads the batch to max-T, so without
+# this cap a single long uid balloons the batched (B, L, T, F) tensor
+# (e.g. 16×12×9000×768 fp16 ≈ 2.7 GB *before* any forward intermediate)
+# and pushes the autograd graph past the slice. 500 frames = 10 s at
+# WavLM's 50 fps, matching the WavRx paper's clamp_length=160000 samples
+# (10 s @ 16 kHz) and the in-probe max_frames=500 crop in model/wavrx.py.
+# 0 disables (cross/warm code paths that don't pass cache_max_frames go
+# through unchanged). h5py performs the slice at read time, so on-disk
+# rows past frame 500 are never paged in.
+cache_max_frames: 500
+
 # ----------------------------------
 # DYNAMIC SCRIPT CONFIGURATION (Generic)
 # ----------------------------------

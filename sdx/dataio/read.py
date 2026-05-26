@@ -61,9 +61,16 @@ def _label_pipeline_dynitem():
     return label_pipeline
 
 
-def _make_cache_reader(cache_dir: Path, num_versions: int, output_vars: list[str]):
-    """Build a read-only DynamicItem that loads embeddings from HDF5."""
-    @CachedHDF5DynamicItem.cache(cache_dir, file_mode="r", num_version=num_versions)
+def _make_cache_reader(cache_dir: Path, num_versions: int, output_vars: list[str],
+                       read_max_frames: int = 0):
+    """Build a read-only DynamicItem that loads embeddings from HDF5.
+
+    ``read_max_frames`` caps the time axis at h5py-read time (first-N).
+    See :class:`CachedHDF5DynamicItem` for the rationale.
+    """
+    @CachedHDF5DynamicItem.cache(cache_dir, file_mode="r",
+                                 num_version=num_versions,
+                                 read_max_frames=read_max_frames)
     @sb.utils.data_pipeline.takes(ID)
     @sb.utils.data_pipeline.provides(*output_vars)
     def read_cache(id):
@@ -104,9 +111,12 @@ def build_read_datasets_standard(data_dict: dict[str, dict],
     val_cache_dir = Path(hparams["val_cache_dir"]) / cache_mode
     num_versions = int(hparams["data_params"].get("num_aug_ver", 1))
     output_vars = _output_vars(hparams)
+    read_max_frames = int(hparams.get("cache_max_frames", 0) or 0)
 
-    train_reader = _make_cache_reader(train_cache_dir, num_versions, output_vars)
-    val_reader = _make_cache_reader(val_cache_dir, 1, output_vars)
+    train_reader = _make_cache_reader(train_cache_dir, num_versions,
+                                      output_vars, read_max_frames)
+    val_reader = _make_cache_reader(val_cache_dir, 1, output_vars,
+                                    read_max_frames)
 
     label = _label_pipeline_dynitem()
 
@@ -173,9 +183,12 @@ def build_read_datasets_cv(train_fold: dict, val_fold: dict,
     val_cache_dir = Path(hparams["val_cache_dir"]) / cache_mode
     num_versions = int(hparams["data_params"].get("num_aug_ver", 1))
     output_vars = _output_vars(hparams)
+    read_max_frames = int(hparams.get("cache_max_frames", 0) or 0)
 
-    train_reader = _make_cache_reader(train_cache_dir, num_versions, output_vars)
-    val_reader = _make_cache_reader(val_cache_dir, 1, output_vars)
+    train_reader = _make_cache_reader(train_cache_dir, num_versions,
+                                      output_vars, read_max_frames)
+    val_reader = _make_cache_reader(val_cache_dir, 1, output_vars,
+                                    read_max_frames)
 
     label = _label_pipeline_dynitem()
     output_keys = [ID, "path", "Participant_ID", LABEL_ENCODED] + output_vars
@@ -220,10 +233,14 @@ def build_read_datasets_cross(data_dict: dict[str, dict],
     test_cache_dir = Path(hparams["val_cache_dir_2"]) / cache_mode
     num_versions = int(hparams["data_params"].get("num_aug_ver", 1))
     output_vars = _output_vars(hparams)
+    read_max_frames = int(hparams.get("cache_max_frames", 0) or 0)
 
-    train_reader = _make_cache_reader(train_cache_dir, num_versions, output_vars)
-    val_reader = _make_cache_reader(val_cache_dir, 1, output_vars)
-    test_reader = _make_cache_reader(test_cache_dir, 1, output_vars)
+    train_reader = _make_cache_reader(train_cache_dir, num_versions,
+                                      output_vars, read_max_frames)
+    val_reader = _make_cache_reader(val_cache_dir, 1, output_vars,
+                                    read_max_frames)
+    test_reader = _make_cache_reader(test_cache_dir, 1, output_vars,
+                                     read_max_frames)
 
     label = _label_pipeline_dynitem()
     output_keys = [ID, "path", "Participant_ID", LABEL_ENCODED] + output_vars
