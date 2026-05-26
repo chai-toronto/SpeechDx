@@ -13,7 +13,17 @@ ray_tune_config:
   num_samples: 5  # Number of trial runs
   resources_per_trial:
     cpu: 2   # CPUs per trial
-    gpu: 0
+    # ⚠ gpu: 0 used to hide the GPU from the trial actor entirely.
+    # Ray 2.54 announced via FutureWarning: "Ray will no longer override
+    # accelerator visible devices env var if num_gpus=0 or num_gpus=None
+    # ... set RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO=0". In our smoke run
+    # (41294939) the actor saw an empty CUDA_VISIBLE_DEVICES,
+    # torch.cuda.is_available()=False, and the brain landed on CPU —
+    # nvidia-smi showed 47 MiB used on the 40 GiB MIG and the actor was
+    # 99% on a single CPU core, ~60 s/batch for a 7M-param probe. Set
+    # gpu: 1 so Ray claims the full slice (we only run 1 concurrent
+    # trial per actor anyway, so this matches reality).
+    gpu: 1
 
 # Define hyperparameter search space
 # This is optional - if not provided, defaults will be used

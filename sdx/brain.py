@@ -396,9 +396,15 @@ class DiagnosticsBrain(sb.Brain):
             num_layers = self.hparams.num_layers
             emb_vars = ["emb_{}".format(i) for i in range(num_layers)]
             # Multi-layer caches are stored fp16 on disk to fit ~24× the
-            # single-layer footprint; upcast to fp32 here so the probe
-            # weights (which stay fp32) can matmul without dtype mismatch.
-            wavs = tuple(getattr(batch, var).data.to(self.device).float()
+            # single-layer footprint. Cast to the brain's actual training
+            # dtype (bf16 / fp16 / fp32 via training.yaml: precision) so we
+            # don't round-trip via fp32 inside speechbrain's autocast.
+            # SB stashes the active autocast dtype on self.precision
+            # ("fp32"|"fp16"|"bf16"); fall back to fp32 for older builds.
+            _PREC = {"fp32": torch.float32, "fp16": torch.float16,
+                     "bf16": torch.bfloat16}
+            tgt = _PREC.get(getattr(self, "precision", "fp32"), torch.float32)
+            wavs = tuple(getattr(batch, var).data.to(self.device, dtype=tgt)
                          for var in emb_vars)
             lens = getattr(batch, emb_vars[0]).lengths.to(self.device)
         else:

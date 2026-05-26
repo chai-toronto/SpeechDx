@@ -12,8 +12,8 @@ batch_size: 16
 persistent_workers: False
 progressbar: True
 test_only: False
-precision: fp32
-eval_precision: fp32
+precision: bf16
+eval_precision: bf16
 skip_nonfinite_grads: True
 nonfinite_patience: 10
 grad_accumulation_factor: 1
