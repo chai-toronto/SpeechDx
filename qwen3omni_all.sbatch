@@ -37,7 +37,9 @@ mkdir -p "$HF_HUB_CACHE" exps/qwen3omni_all logs
 
 nvidia-smi || true
 
-python -u scripts/test_qwen3omni_all.py \
+# data/ is a SquashFS image (data.sqfs); run_with_data.sh mounts it inside a
+# user namespace so the absolute audio paths in the manifests resolve.
+./run_with_data.sh python -u scripts/test_qwen3omni_all.py \
   --tasks "$TASKS_ARG" \
   --out-dir exps/qwen3omni_all \
   --max-duration 600 \

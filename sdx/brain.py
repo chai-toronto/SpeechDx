@@ -395,7 +395,15 @@ class DiagnosticsBrain(sb.Brain):
         if self.model.encoder.output_hidden_states:
             num_layers = self.hparams.num_layers
             emb_vars = ["emb_{}".format(i) for i in range(num_layers)]
-            wavs = tuple(getattr(batch, var).data.to(self.device) for var in emb_vars)
+            # Multi-layer caches are stored fp16 on disk (numpy has no
+            # bf16, so fp16 is the only standard half-precision the
+            # h5py/numpy stack supports). training.yaml: precision=fp16
+            # matches that, so cache reads pass straight into the brain
+            # at their native dtype — no explicit cast, no upcast/down-
+            # cast round-trip. SpeechBrain's autocast handles any op
+            # that needs a different dtype internally.
+            wavs = tuple(getattr(batch, var).data.to(self.device)
+                         for var in emb_vars)
             lens = getattr(batch, emb_vars[0]).lengths.to(self.device)
         else:
             wavs = getattr(batch, "emb_0").data.to(self.device)

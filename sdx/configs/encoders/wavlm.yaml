@@ -1,20 +1,52 @@
 
 sample_rate: 16000
-feature_dim: 1024   # 768 for base, 1024 for large
-num_layers: 24   # 12 for base, 24 for large
+feature_dim: 768   # 768 for base/base+, 1024 for large
+num_layers: 12   # 12 for base/base+, 24 for large
 layer_dim: 1
-max_length: 300 # to prevent OOM
+max_length: 60 # resized from 300 for wavrx (26 May).
 min_length: 1
 
 # Chunks per encoder forward() call during cache warming (the batched warm
 # path, sdx/warm.py:_drive_warm_batched). 1 = one chunk at a time; >1 pads
-# variable-length chunks and batches them. Lower it for long-audio datasets —
-# transformer attention is O(T^2), so a few long clips per batch dominate
-# memory.
-warm_batch_size: 8
+# variable-length chunks and batches them.
+#
+# Sized for a 3g.40gb MIG slice on Fir with these patches engaged:
+#   1. attn_impl: sdpa — PyTorch SDPA replaces F.multi_head_attention_forward,
+#      killing the (B,H,T,T) score matrix. The gated rel-pos bias is still
+#      materialized (B*H*T*T*2 bytes bf16) — that's the binding constraint.
+#   2. compute_dtype: bfloat16 — halves activation memory + the bias tensor.
+#   3. sdx/warm.py:_encode_chunk_batch_oom_safe — halves+retries on OOM,
+#      so an over-aggressive batch shrinks gracefully on edaic 300 s chunks.
+# 64 saturates short-clip datasets (T<3000); OOM-shrinks to ~B=4 on edaic's
+# 300 s chunks where the bias caps the safe batch.
+#
+# B history on the 3g.40gb MIG slice:
+#   B=64  → OOM in the high-30s GiB after ~500 chunks (fragmentation, not
+#           per-batch peak — steady-state working set was ~15 GiB on B=8).
+#   B=8   → ran clean through 3 pairs + most of T12 in 41123736; nvidia-smi
+#           reported ~16 GiB used out of 40 GiB, so we were sitting on ~24 GiB
+#           of headroom.
+#   B=32  → ran 10k T12 chunks clean at 0.09 s/chunk (vs B=8's 0.10 s/chunk —
+#           only ~10% faster, conv feature-extractor is the cap not attention),
+#           then OOM'd on a long-chunk batch and the shrink wrapper cascaded
+#           all the way to B=1 still OOM'd because exception tracebacks held
+#           ~38 GiB in unreachable frames (now fixed in
+#           _encode_chunk_batch_oom_safe — del exc + gc.collect before
+#           empty_cache).
+#   B=16  → current setting. Marginal speedup over B=8 (~5%) but ~half the
+#           peak memory of B=32, well clear of the 40 GiB ceiling so even
+#           a long-chunk batch doesn't push us into the cascade.
+#
+# attn_impl: flex (model/wavlm_flex_patch.py) is implemented and CPU-verified,
+# but PyTorch 2.11.0's inductor lowering raises InductorError "unbacked_bindings"
+# on dynamic-shape compilation of our score_mod, and the torch.compile worker
+# processes also grab their own CUDA contexts on a MIG slice (multi-process OOM
+# at runtime). Try flex again after a torch upgrade fixes the inductor bug.
+warm_batch_size: 16
 
 encoder: !new:model.wavlm.WavLM
-  ssl_encoder_source: "microsoft/wavlm-large"
+  ssl_encoder_source: "microsoft/wavlm-base-plus"
   freeze_encoder: True
   output_hidden_states: True
   sample_rate: !ref <sample_rate>
+  attn_impl: sdpa

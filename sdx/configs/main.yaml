@@ -5,8 +5,8 @@ __set_seed_torch_cuda: !!python/object/apply:torch.cuda.manual_seed_all [!ref <r
 __set_seed_numpy:      !!python/object/apply:numpy.random.seed          [!ref <random_seed>]
 __set_seed_random:     !!python/object/apply:random.seed                [!ref <random_seed>]
 
-model_name: qwen3voice
-probe_name: AvgTProbe
+model_name: wavlm
+probe_name: wavrx
 experiment_tag: run1
 # task_id is the task YAML stem (e.g. "T9", "avfad_ageR"). It names the
 # experiment folder under exps/single_task/. compose_yaml_text rewrites
@@ -19,15 +19,15 @@ data_folder: ./data/
 slurm_tmpdir: ./embeddings_avg_finalv2/
 #----------------------------------
 # Most of the knobs you should change
-data_params: !include:tasks/T21.yaml  # c19sounds_t2 — placeholder default; runtime overrides via --task
+data_params: !include:tasks/T13.yaml  # mdvr_parkC — placeholder default; runtime overrides via --task
 ratio: [70, 10, 20]
 
-encoder_params: !include:encoders/qwen3_voice.yaml
+encoder_params: !include:encoders/wavlm.yaml
 
 num_layers: !ref <encoder_params[num_layers]>
 num_labels: !ref <data_params[num_labels]>
 
-probe_params: !include:probes/Probe.yaml # Change encover params accordingly
+probe_params: !include:probes/wavrx.yaml # WavRx — per-layer fusion + modulation block
   feature_dim: !ref <encoder_params[feature_dim]>
   num_labels: !ref <num_labels>
   num_layers: !ref <num_layers>
@@ -50,7 +50,17 @@ val_cache_dir: !ref <slurm_tmpdir>/<dataset>/<model_name>/val
 warm_cache: true
 # Pooling applied before saving to cache (single mode only): "none" stores T x D,
 # "mean" avg-pools over T to D sized vector and writes under a single_avg/ subdir.
-cache_pool: mean
+# Must be "none" for the WavRx probe — its modulation block STFTs over the
+# time axis, so mean-pooling at warm time would discard the signal it needs.
+cache_pool: none
+# On-disk dtype for the multi-layer (output_hidden_states=True) cache.
+# Allowed: "fp16" or "fp32" — numpy has no bf16 dtype so h5py can't write
+# bf16 even if asked. Default fp16 to halve disk footprint at training-
+# dtype parity (training.yaml: precision=fp16). Single-layer caches
+# (cache_pool=mean or output_hidden_states=False) are unaffected; they
+# pass the encoder output to h5py at its native dtype for back-compat
+# with the existing on-disk caches written before this knob existed.
+cache_dtype: fp16
 
 # ----------------------------------
 # DYNAMIC SCRIPT CONFIGURATION (Generic)

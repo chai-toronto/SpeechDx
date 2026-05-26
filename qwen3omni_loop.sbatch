@@ -56,7 +56,9 @@ nvidia-smi || true
 # Run the all-tasks sweep with resume; on exit-2 (incomplete), requeue.
 # ------------------------------------------------------------------
 set +e
-python -u scripts/test_qwen3omni_all.py \
+# data/ is a SquashFS image (data.sqfs); run_with_data.sh mounts it inside a
+# user namespace so the absolute audio paths in the manifests resolve.
+./run_with_data.sh python -u scripts/test_qwen3omni_all.py \
     --all \
     --out-dir exps/qwen3omni_all \
     --max-duration 600 \

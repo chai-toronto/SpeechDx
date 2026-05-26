@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers import AutoFeatureExtractor, WavLMModel
 from speechbrain.lobes.models.ECAPA_TDNN import AttentiveStatisticsPooling
 from speechbrain.processing.features import STFT
 
@@ -74,6 +73,11 @@ class WavRx(nn.Module):
         hop_length: int = 64,
         dp = 0.25,
         num_hidden_layers = 12,
+        # WavRx paper trains on clamp_length=160000 audio samples
+        # (10 s @ 16 kHz). At WavLM's 50 fps that's max_frames=500. We
+        # implement the clamp at WavRx entry: random window in train mode,
+        # first-N at eval. Setting to 0 disables.
+        max_frames: int = 500,
         *args,
         **kwargs
         ):
@@ -118,6 +122,8 @@ class WavRx(nn.Module):
         self.weights_temporal = nn.Parameter(torch.ones(num_hidden_layers))
         self.weights_dynamics = nn.Parameter(torch.ones(num_hidden_layers))
 
+        self.max_frames = int(max_frames or 0)
+
     def _init_clf_head(self):
         """
         Define classification head. FC+dropout+activation+FC.
@@ -150,6 +156,20 @@ class WavRx(nn.Module):
         # Upstream encoder processing
         x = torch.stack(x, dim=1)
         B,L,T,F = x.shape # (batch, layer, time, features)
+
+        # Match the paper's audio clamp (clamp_length=160000 samples
+        # @ 16 kHz = 10 s = 500 frames @ 50 fps). The modulation block
+        # output scales O(T_freq) where T_freq ≈ T/hop_samples; without
+        # this cap a single long-form uid (e.g. mdvr T≈9000) blows the
+        # STFT intermediate past 300 GB. Random window during training;
+        # first-N at eval for reproducibility. No-op when T <= max_frames.
+        if self.max_frames > 0 and T > self.max_frames:
+            if self.training:
+                start = int(torch.randint(0, T - self.max_frames + 1, (1,)).item())
+            else:
+                start = 0
+            x = x[:, :, start:start + self.max_frames, :]
+            T = self.max_frames
 
         # temporal branch:
         feat_t = self.weight_layer(x,branch='temporal',return_sum=True) # (batch, time, features)

@@ -24,7 +24,7 @@ def build_stub_encoder_params(encoder_yaml_path: Path) -> str:
     ohs = (m.group(1).lower() if m else "false")
     fields: dict[str, str] = {}
     for key in ("sample_rate", "feature_dim", "num_layers", "layer_dim",
-                "max_length", "min_length"):
+                "max_length", "min_length", "warm_batch_size"):
         m = re.search(rf"^{key}:\s*(.+?)\s*(?:#.*)?$", text, re.MULTILINE)
         if m:
             fields[key] = m.group(1).strip()

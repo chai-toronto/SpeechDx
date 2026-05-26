@@ -114,7 +114,7 @@ def _train_one_trial(config: dict, hparams_file: str, run_opts: dict,
 
 
 def cmd_train(task: str, encoder: str, *,
-              probe: str = "AvgTProbe", probe_yaml: str = "Probe.yaml",
+              probe: str = "wavrx", probe_yaml: str = "wavrx.yaml",
               tag: str = "run1", overrides: str = "",
               level_dir: str | None = None) -> None:
     """Run HP search + final eval for one (task, encoder, probe) triple.
