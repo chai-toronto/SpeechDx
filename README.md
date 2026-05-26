@@ -1,6 +1,12 @@
 
 # SpeechDx
 
+## TODO:
+- Auto download noise and rir
+- Support and Doc for LLM thru local and API
+- Instructions to download and put gated-access datasets at the correct places
+  - Non gated datasets should automate all this at download scripts 
+
 [**Leaderboard**](./leaderboard.csv)
 
 A reproducible benchmark for self-supervised audio encoders on health-related
