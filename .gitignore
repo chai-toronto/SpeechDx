@@ -23,13 +23,20 @@ embeddings_avg_*/
 embeddings_avg_*.tar.zst
 cks/
 
-# Datasets and generated metadata (large; READMEs are tracked separately)
-data/*
-!data/README.md
-!data/dementiabank/
-data/dementiabank/*
-!data/dementiabank/README.md
+# Datasets and generated metadata. data/ used to be a populated tree
+# (with READMEs tracked separately); after the SquashFS migration the
+# repo root holds the local artifacts data.sqfs (the image), data.orig/
+# (the original unpacked tree we packed from), and data (a local
+# symlink). None of them belong in git.
+/data
+/data.orig/
+/data.sqfs
+/data_eff_exps/
+/emb_avg_zip/
 metadata/*
 !metadata/README.md
 .venv/
 /PhysioBench-2/
+
+# Agent notes (local-only — separate from .claude/ project memory).
+/memory/
