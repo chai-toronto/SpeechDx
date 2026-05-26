@@ -33,3 +33,4 @@ metadata/*
 !metadata/README.md
 .venv/
 /PhysioBench-2/
+/data/dementiabank/
