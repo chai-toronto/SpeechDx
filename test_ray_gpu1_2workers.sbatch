@@ -61,27 +61,24 @@ if [[ "$CUDA_RC" -ne 0 ]]; then
     exit 1
 fi
 
-# Overrides:
+# Overrides: scalar top-level keys only — they stamp cleanly through the
+# fork machinery. A nested-dict override of a multi-line block target
+# like hpopt_params would drop sibling keys: stamp_overrides rewrites
+# the matched lines as a single flow-style scalar, so partial dict
+# overrides lose every key that wasn't explicitly listed
+# (continue_exp, optim_metric, ... → "reference not valid" at trial
+# load time). The fork would need a full-merge stamp to handle that,
+# which is a separate change.
+#
 #   slurm_tmpdir → read cache straight from /scratch (no rsync).
 #   number_of_epochs → keep each trial short.
-#   hpopt_params.ray_tune_config.num_samples=1 → single HP draw per task;
-#     we only need one trial per subprocess to observe whether the two
-#     subprocesses execute on the GPU in parallel.
-#   (max_concurrent_trials stays at the hpopt.yaml default of 1 — there's
-#   only one trial per Ray cluster, so it doesn't matter.)
 #
-# Why override hpopt_params and not ray_tune_config at top level:
-# main.yaml exposes ray_tune_config only via !ref <hpopt_params[ray_tune_config]>,
-# and hyperpyyaml's recursive_update trips trying to merge a dict
-# override into a placeholder ("Expected to update a mapping, but got:
-# <hpopt_params[ray_tune_config]>"). Overriding at the included
-# hpopt_params dict merges cleanly.
+# Default num_samples=5 from hpopt.yaml stands. Each leaf runs 5 trials
+# sequentially (max_concurrent_trials=1 inside each Ray cluster); the
+# FIRST trial from each is the only overlap signal we need.
 OVERRIDES=$(cat <<'YAML'
 slurm_tmpdir: /scratch/kieu/Audio-Health-Benchmark/embeddings_avg_finalv2/
 number_of_epochs: 3
-hpopt_params:
-  ray_tune_config:
-    num_samples: 1
 YAML
 )
 
