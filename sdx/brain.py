@@ -395,16 +395,14 @@ class DiagnosticsBrain(sb.Brain):
         if self.model.encoder.output_hidden_states:
             num_layers = self.hparams.num_layers
             emb_vars = ["emb_{}".format(i) for i in range(num_layers)]
-            # Multi-layer caches are stored fp16 on disk to fit ~24× the
-            # single-layer footprint. Cast to the brain's actual training
-            # dtype (bf16 / fp16 / fp32 via training.yaml: precision) so we
-            # don't round-trip via fp32 inside speechbrain's autocast.
-            # SB stashes the active autocast dtype on self.precision
-            # ("fp32"|"fp16"|"bf16"); fall back to fp32 for older builds.
-            _PREC = {"fp32": torch.float32, "fp16": torch.float16,
-                     "bf16": torch.bfloat16}
-            tgt = _PREC.get(getattr(self, "precision", "fp32"), torch.float32)
-            wavs = tuple(getattr(batch, var).data.to(self.device, dtype=tgt)
+            # Multi-layer caches are stored fp16 on disk (numpy has no
+            # bf16, so fp16 is the only standard half-precision the
+            # h5py/numpy stack supports). training.yaml: precision=fp16
+            # matches that, so cache reads pass straight into the brain
+            # at their native dtype — no explicit cast, no upcast/down-
+            # cast round-trip. SpeechBrain's autocast handles any op
+            # that needs a different dtype internally.
+            wavs = tuple(getattr(batch, var).data.to(self.device)
                          for var in emb_vars)
             lens = getattr(batch, emb_vars[0]).lengths.to(self.device)
         else:
