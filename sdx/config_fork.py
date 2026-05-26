@@ -95,12 +95,24 @@ def _stamp_overrides(text: str, overrides: Dict[str, Any]) -> str:
     Keys that don't already exist at the top level are appended. Matches
     HyperPyYAML override semantics: shadowing the top-level line means
     downstream ``!ref <key>`` chains pick up the new literal.
+
+    The header pattern also consumes any indented continuation lines
+    below it — multi-line block mappings (``probe_params: !include:...``
+    followed by ``  feature_dim: ...``, or ``hpopt_params: !include:...``
+    followed by ``  hp_search_seed: ...``) would otherwise leave orphaned
+    children under the replacement's flow-style scalar, which the next
+    yaml parse rejects with ``expected <block end>, but found '<block
+    mapping start>'``. Blank lines and the first non-indented line
+    terminate the block.
     """
     for key, value in overrides.items():
         new_line = f'{key}: {_yaml_scalar(value)}'
-        pattern = re.compile(rf'^{re.escape(key)}:.*$', re.MULTILINE)
+        pattern = re.compile(
+            rf'^{re.escape(key)}:.*\n(?:[ \t]+\S.*\n)*',
+            re.MULTILINE,
+        )
         if pattern.search(text):
-            text = pattern.sub(lambda _m, n=new_line: n, text)
+            text = pattern.sub(lambda _m, n=new_line + '\n': n, text)
         else:
             if not text.endswith('\n'):
                 text += '\n'
