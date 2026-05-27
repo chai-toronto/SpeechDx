@@ -48,6 +48,9 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export RAY_DEFAULT_OBJECT_STORE_MEMORY_PROPORTION=0.01
 export RAY_DEFAULT_OBJECT_STORE_MAX_MEMORY_BYTES=$((2 * 1024 * 1024 * 1024))
 export RAY_memory_monitor_refresh_ms=0
+# hpopt.yaml uses gpu: 0 (so CPU jobs can schedule). Keep CUDA visible
+# to the trial actor — see hpopt.yaml.
+export RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO=0
 
 nvidia-smi || true
 

@@ -62,6 +62,11 @@ export RAY_DEFAULT_OBJECT_STORE_MAX_MEMORY_BYTES=$((2 * 1024 * 1024 * 1024))  # 
 # Ray's memory monitor also derives its threshold from the full node
 # memory; false-positive worker kills hit us before the cgroup OOM does.
 export RAY_memory_monitor_refresh_ms=0
+# hpopt.yaml uses gpu: 0 (so CPU jobs can schedule). Ray 2.54+ would
+# otherwise hide CUDA from the actor under num_gpus=0 — see hpopt.yaml
+# for the smoke-run reference. Keep CUDA_VISIBLE_DEVICES intact so the
+# trial actor lands on the slice we requested.
+export RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO=0
 
 nvidia-smi || true
 
