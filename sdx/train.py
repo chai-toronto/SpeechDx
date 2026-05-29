@@ -38,6 +38,7 @@ from sdx.ray_search import (  # noqa: E402
     as_override_dict,
     collect_resolved_paths,
     parse_hp_search_space,
+    ray_init_kwargs,
 )
 from sdx.registry import encoders as registry_encoders  # noqa: E402
 
@@ -199,18 +200,10 @@ def cmd_train(task: str, encoder: str, *,
             resources_per_trial = tune_config.get(
                 "resources_per_trial", {"cpu": 1, "gpu": 0},
             )
-            # Cap Ray's CPU count when SDX_RAY_NUM_CPUS is set. Without it,
-            # ray.init() detects every core on the node (192 on Fir) and
-            # prestarts ~one worker per core; with several leaf processes
-            # cold-starting their own Ray clusters at once (sdx ... --workers
-            # N), that's hundreds of simultaneous worker spawns → GCS startup
-            # timeout ("node timed out during startup"). Each trial only needs
-            # resources_per_trial[cpu] scheduling slots (the heavy compute is
-            # OMP threads, not Ray workers), so a small cap is safe and stops
-            # the prestart storm. Unset → current behavior (all cores).
-            _ray_cpus = os.environ.get("SDX_RAY_NUM_CPUS")
-            ray.init(ignore_reinit_error=True,
-                     num_cpus=int(_ray_cpus) if _ray_cpus else None)
+            # Hardened ray.init: CPU cap + per-pid temp dir + no dashboard.
+            # See sdx.ray_search.ray_init_kwargs for the rationale (prevents
+            # the GCS startup timeout under --workers N and CV per-fold churn).
+            ray.init(**ray_init_kwargs())
             try:
                 search_space = parse_hp_search_space(hparams)
 

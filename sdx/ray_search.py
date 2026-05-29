@@ -9,10 +9,39 @@ single-split and CV trainers need them.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import yaml
 from ray import tune
+
+
+def ray_init_kwargs() -> dict:
+    """Kwargs for every ``ray.init`` in the trainers.
+
+    Hardening for many leaf processes (sdx ... --workers N) and the
+    per-fold ray.init/shutdown churn of the CV trainer on shared Slurm nodes:
+
+    * ``num_cpus`` (from ``SDX_RAY_NUM_CPUS``): without it ray.init detects
+      every core (192 on Fir) and prestarts ~one worker per core; several
+      leaves cold-starting at once → hundreds of spawns → GCS startup
+      timeout. A trial needs only its resources_per_trial[cpu] scheduling
+      slots (compute is OMP threads, not Ray workers). Unset → all cores.
+    * ``_temp_dir`` (per-pid, under SLURM_TMPDIR when set): isolates each
+      leaf's Ray session dir + GCS sockets. The default ``/tmp/ray`` is
+      shared, so concurrent leaves — and the CV trainer's repeated
+      init/shutdown per fold — race on session files/ports and time out
+      ("node timed out during startup"). A unique dir per process removes it.
+    * ``include_dashboard=False``: unused headless; its port/agent startup
+      is pure overhead and another contention point.
+    """
+    kwargs: dict = {"ignore_reinit_error": True, "include_dashboard": False}
+    ncpus = os.environ.get("SDX_RAY_NUM_CPUS")
+    if ncpus:
+        kwargs["num_cpus"] = int(ncpus)
+    tmp_root = os.environ.get("SLURM_TMPDIR", "/tmp")
+    kwargs["_temp_dir"] = os.path.join(tmp_root, f"ray_{os.getpid()}")
+    return kwargs
 
 
 # Top-level source paths in main.yaml whose absolute values get stamped
