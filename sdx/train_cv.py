@@ -128,7 +128,11 @@ def _run_fold_hp_optimization(fold_idx, hparams, hparams_file, run_opts,
         "resources_per_trial", {"cpu": 1, "gpu": 0},
     )
 
-    ray.init(ignore_reinit_error=True)
+    # See sdx/train.py: cap Ray CPUs via SDX_RAY_NUM_CPUS to avoid the
+    # prestart-worker storm when several leaves cold-start at once.
+    _ray_cpus = os.environ.get("SDX_RAY_NUM_CPUS")
+    ray.init(ignore_reinit_error=True,
+             num_cpus=int(_ray_cpus) if _ray_cpus else None)
     try:
         trainable = tune.with_parameters(
             _train_fold_trial,
