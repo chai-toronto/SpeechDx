@@ -210,3 +210,51 @@ c. **Also added `model.wavrx` to the trainer-side encoder allow-list**
    `--mem` (probably 96–160 G) for the leaner fan-out config.
 4. Repair the warm→train chain for datasets that need multi-cycle
    warming (see §10).
+
+---
+
+## 15. Full-benchmark run: CPU/GPU split + precision deviation (audit)
+
+The 27 single tasks (T1–T27, numbered only) are run across two compute
+classes. This section records every value that differs from the canonical
+protocol (`sdx/configs/training.yaml`) in that run, classified by whether
+it changes results.
+
+**Task → hardware split**
+- **GPU** (3g.40gb MIG, `wavrx_c19sounds_gpu.sbatch`): the 5 c19sounds
+  tasks (T19–T23), whose 1.3 TB cache makes CPU epochs ~15 h. tag `c19_gpu`.
+- **CPU** (`wavrx_cpu_long_loop.sbatch`, 3-node array): the other 22 tasks.
+  Non-CV → tag `cpu_long`; CV → tag `cpu_long_cv` (per-fold via train_cv).
+
+**Affects results — the one real deviation:**
+- **precision: CPU=fp32, GPU=fp16.** Canonical is fp16. CPUs have no native
+  fp16 path, so the CPU sbatch overrides `precision=eval_precision=fp32`;
+  GPU tasks keep the canonical fp16. → the 22 CPU tasks and 5 GPU tasks are
+  NOT trained at identical precision. Cross-task comparisons spanning both
+  carry an fp32-vs-fp16 caveat. Hardware constraint, not a methodology
+  choice. To eliminate: run all 27 on GPU at fp16.
+
+**Does NOT affect results (verified / infra only):**
+- `WAVRX_MOD_CHUNK=16`: chunks the modulation-block STFT over the (B·L)
+  axis with gradient checkpointing. Output is **bit-identical** to the
+  single-pass paper path (verified max|diff|=0, both keep_temporal_dim
+  branches). It only bounds the ~40 GB STFT intermediate (→~3.3 GB) so the
+  protocol batch_size=16 fits a 40 GB MIG and CPU fanout can run 6 workers.
+  Same STFT math, same numbers.
+- `batch_size=16` everywhere = the canonical protocol. (An earlier GPU run
+  used batch_size=4 to fit the MIG before STFT chunking existed; those
+  results were discarded — nothing retained was trained at 4.)
+- `--workers 3/6` (orchestrator concurrency), `SDX_RAY_NUM_CPUS=8`, per-pid
+  Ray `_temp_dir`, dashboard off, OMP thread counts: pure orchestration/Ray
+  plumbing, no effect on per-task math.
+- `num_workers=0`, `persistent_workers=False`: these ARE the canonical
+  defaults, not overrides.
+
+**Paper-faithful (not hardware hacks):**
+- `cache_max_frames=500` + random-window crop at read time = the paper's
+  `clamp_length=160000` (10 s @ 50 fps). The random window matches the
+  paper's train-time augmentation (see also §4b).
+
+**Unchanged HP-search methodology:** `num_samples=5`,
+`lr_s∈[1e-4,1e-3]`, `l2∈[0.01,0.1]`, `grace_period=5`, `limit_warmup=2`,
+`number_of_epochs=50`.
