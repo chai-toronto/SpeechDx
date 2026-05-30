@@ -52,6 +52,10 @@ export CUDA_VISIBLE_DEVICES=""
 # runs 1 concurrent trial × 2 cpu, so 8 is ample; the 32 OMP compute
 # threads are unaffected (not Ray workers). See sdx/train.py.
 export SDX_RAY_NUM_CPUS=8
+# Chunk + gradient-checkpoint the modulation-block STFT (bit-identical
+# output, verified). Bounds the ~40 GB STFT intermediate to ~3.3 GB/chunk,
+# which is what lets us run --workers 6 again without OOM. See model/wavrx.py.
+export WAVRX_MOD_CHUNK=16
 export RAY_DEFAULT_OBJECT_STORE_MEMORY_PROPORTION=0.01
 export RAY_DEFAULT_OBJECT_STORE_MAX_MEMORY_BYTES=$((2 * 1024 * 1024 * 1024))
 export RAY_memory_monitor_refresh_ms=0
@@ -112,10 +116,10 @@ YAML
 T_ARGS=""
 for t in $TASKS; do T_ARGS="$T_ARGS -t $t"; done
 
-echo "[sbatch] ==== train [$TASKS] tag=$TAG --workers 3 (ep=50, cycle ${WAVRX_CYCLE}) ===="
+echo "[sbatch] ==== train [$TASKS] tag=$TAG --workers 6 (ep=50, cycle ${WAVRX_CYCLE}) ===="
 set +e
 # shellcheck disable=SC2086
-python -u -m sdx single train $T_ARGS -e wavlm --tag "$TAG" --workers 3 --overrides "$OVERRIDES" &
+python -u -m sdx single train $T_ARGS -e wavlm --tag "$TAG" --workers 6 --overrides "$OVERRIDES" &
 PID=$!
 while :; do wait "$PID"; RC=$?; (( RC > 128 )) || break; done
 set -e

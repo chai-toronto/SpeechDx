@@ -53,6 +53,10 @@ export RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO=0
 # Cap Ray CPU count → fewer prestart workers (one --workers 1 leaf here,
 # but keeps behavior consistent with the CPU jobs). See sdx/train.py.
 export SDX_RAY_NUM_CPUS=8
+# Chunk + gradient-checkpoint the modulation-block STFT (bit-identical
+# output). Bounds the ~40 GB STFT intermediate to ~3.3 GB/chunk, which
+# lets batch_size go back to the protocol 16 on a 40 GB MIG. See model/wavrx.py.
+export WAVRX_MOD_CHUNK=16
 
 WAVRX_CYCLE="${WAVRX_CYCLE:-1}"
 WAVRX_CYCLE_MAX="${WAVRX_CYCLE_MAX:-8}"
@@ -98,11 +102,12 @@ fi
 
 # Scalar overrides only (fork-stamp can't take a partial hpopt_params
 # dict — it drops sibling keys). number_of_epochs NOT overridden:
-# training.yaml's 50 is the protocol (early-stops at patience 5). Only
-# batch_size (GPU-memory safe) + the /scratch cache path are stamped.
+# training.yaml's 50 is the protocol. batch_size = protocol default 16
+# now that the chunked modulation block (WAVRX_MOD_CHUNK) keeps the STFT
+# intermediate small enough to fit the 40 GB MIG at B=16.
 OVERRIDES=$(cat <<'YAML'
 slurm_tmpdir: /scratch/kieu/Audio-Health-Benchmark/embeddings_avg_finalv2/
-batch_size: 4
+batch_size: 16
 YAML
 )
 

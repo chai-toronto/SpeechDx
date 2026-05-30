@@ -1,6 +1,9 @@
+import os
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.utils.checkpoint as _ckpt
 # NOTE: the original wavrx.py imported transformers.WavLMModel +
 # AutoFeatureExtractor here — vestigial. The WavLM upstream is handled
 # separately by model/wavlm.py at warm time; this probe only ever sees
@@ -10,6 +13,18 @@ import torch.nn.functional as F
 # allow-list as an encoder leak.
 from speechbrain.lobes.models.ECAPA_TDNN import AttentiveStatisticsPooling
 from speechbrain.processing.features import STFT
+
+# Process the modulation-block STFT in chunks of this many rows along the
+# leading (batch*layer) axis, gradient-checkpointing each chunk, when set
+# >0 via the WAVRX_MOD_CHUNK env var. The STFT materializes a
+# (B*L, frames, bins, 2, F) intermediate — ~40 GB fp32 at B=16/L=12/
+# T=500 (167 frames, 201 bins) — which is the binding memory constraint
+# (forces GPU batch=4, caps CPU concurrency). Each row is independent and
+# the downstream pow.sum(real/imag) + mean(frames) collapse the big axes,
+# so chunking + checkpointing yields BIT-IDENTICAL output (verified
+# max|diff|=0) at a peak that scales with the chunk, not the batch
+# (chunk=16 → ~3.3 GB). 0 = disabled (original single-pass behavior).
+_MOD_CHUNK = int(os.environ.get("WAVRX_MOD_CHUNK", "0") or 0)
 
 
 #############################################
@@ -50,15 +65,33 @@ class modulation_block(nn.Module):
         self.eps = 1e-10
         self.keep_temporal_dim = keep_temporal_dim
 
-    def forward(self, x):
-        assert x.ndim == 3, "input to the modulation block needs to be 3D (batch, time, feat)"
+    def _reduce(self, x):
+        """STFT → log-power → (optional) temporal mean for one block of rows.
+        Identical math to the original single-pass forward; factored out so
+        it can be applied per-chunk."""
         x_mod = torch.abs(self.compute_STFT(x)) # (num_bacth, time, num_mod_freq, 2, num_features)
         x_mod = torch.log(x_mod.pow(2).sum(-2)+self.eps) # take log of power and combine real and imaginary parts
         if not self.keep_temporal_dim:
-            x_mod_ave = torch.mean(x_mod,axis=1) # average over time axis -> (num_batch, num_mod_freq, num_features)
-            return x_mod_ave
-        else:
-            return x_mod
+            return torch.mean(x_mod,axis=1) # average over time axis -> (num_batch, num_mod_freq, num_features)
+        return x_mod
+
+    def forward(self, x):
+        assert x.ndim == 3, "input to the modulation block needs to be 3D (batch, time, feat)"
+        # Fast path: original single-pass (WAVRX_MOD_CHUNK unset/0).
+        if _MOD_CHUNK <= 0 or x.shape[0] <= _MOD_CHUNK:
+            return self._reduce(x)
+        # Memory path: chunk over the leading axis, gradient-checkpoint each
+        # chunk when training (recompute STFT in backward, keeping the giant
+        # intermediate from being retained). Output is bit-identical because
+        # every row is independent. See _MOD_CHUNK comment above.
+        outs = []
+        for i in range(0, x.shape[0], _MOD_CHUNK):
+            xc = x[i:i + _MOD_CHUNK]
+            if self.training and xc.requires_grad:
+                outs.append(_ckpt.checkpoint(self._reduce, xc, use_reentrant=False))
+            else:
+                outs.append(self._reduce(xc))
+        return torch.cat(outs, dim=0)
         
 ##############################################
 
