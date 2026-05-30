@@ -1,5 +1,36 @@
 # Audio-Health-Benchmark — agent notes
 
+## Benchmark integrity: change HOW FAST it runs, never WHAT it runs
+
+The benchmark protocol is the science. You may optimize **throughput**
+(speed, memory, concurrency, scheduling) freely, but you must NOT change
+**what is computed** — the values that affect a task's result.
+
+- **Free to change (performance only):** orchestration concurrency
+  (`--workers`), Ray plumbing (`SDX_RAY_NUM_CPUS`, temp dir, dashboard),
+  thread counts (OMP/MKL), node/MIG/mem sizing, rolling-resubmit cadence,
+  and bit-identical compute rewrites (e.g. `WAVRX_MOD_CHUNK` chunks the
+  modulation STFT — verified max|diff|=0, same numbers).
+- **Methodological — do NOT change to fit hardware:** `batch_size`,
+  `precision`, `number_of_epochs`, the HP search space (`num_samples`,
+  `lr_s`/`l2` ranges), `grace_period`/`limit_warmup`, the probe/loss, the
+  crop length, augmentation. These define *what* the benchmark measures.
+  Changing any of them makes results non-comparable across tasks.
+- **Absolute last resort only:** if a methodological value genuinely
+  cannot run on the available hardware (e.g. CPUs have no native fp16, so
+  CPU tasks run fp32 while GPU tasks keep the canonical fp16), it is a
+  deviation, not an optimization. Before doing it: (1) exhaust the
+  performance levers above, (2) get the user's sign-off, (3) record it in
+  `DEVIATIONS_wavrx_smoke.md` with the reason and the cross-task caveat.
+- **Test/debug configs are ALWAYS a temporary override or a forked test
+  file — never an edit to the canonical config.** A smoke test runs with
+  `--overrides "number_of_epochs: 3"` (reverted after) or a
+  `*_test.sbatch`, never by editing `sdx/configs/training.yaml`. The
+  committed configs must always hold the real protocol values so a plain
+  run reproduces the benchmark. (Lesson learned the hard way: an
+  `ep=3`/`batch=4` value that leaks into a real run silently corrupts the
+  benchmark — wipe and rerun.)
+
 ## `data/` is a SquashFS image — wrap anything that touches it
 
 `data/` is **not a regular directory**. The ~610k loose audio files it used to
