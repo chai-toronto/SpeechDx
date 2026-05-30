@@ -1,0 +1,23 @@
+{
+  "_comment": "cluster-orchestrator config for SpeechDx (chai-toronto/SpeechDx). Proves the skill is project-agnostic: different repo, branch (dev), and launch sbatches than audio-pretrainer2, same DRAC fleet/account.",
+  "clusters": ["fir", "trillium", "nibi", "rorqual", "tamia"],
+  "account_gpu": "def-mariakak_gpu",
+  "account_cpu": "def-mariakak_cpu",
+  "remote": "https://github.com/chai-toronto/SpeechDx.git",
+  "repo_dir_name": "SpeechDx",
+  "default_branch": "dev",
+  "sacct_lookback": "3days",
+  "work_root": {
+    "_comment": "Tamia uses /project (its scratch isn't provisioned); others $SCRATCH.",
+    "default": "$SCRATCH/SpeechDx",
+    "tamia": "/project/def-mariakak/$USER/SpeechDx"
+  },
+  "globus_collections": {
+    "fir": "d6a86f93-b5de-4d26-ae5a-bcbec9cc6600",
+    "trillium": "ad462f99-8436-42b4-adc6-3644e36c1b67",
+    "nibi": "07baf15f-d7fd-4b6a-bf8a-5b5ef2e229d3",
+    "rorqual": "f19f13f5-5553-40e3-ba30-6c151b9d35d4",
+    "tamia": "72c3bca0-9281-4742-b066-333ba0fdef72",
+    "hpss": "c55ce750-19d6-4a42-9c30-6a58f06bec7a"
+  }
+}
