@@ -56,39 +56,39 @@ CATEGORIES = [
     {"code": "c4", "label": "Articulation (Phonatory/Respiratory)", "color": "#4E8C5A"},  # green
 ]
 
-# canonical task id -> (category code, short label, long hover description)
+# canonical task id -> (category code, short label, detailed hover description)
 TASK_META = {
-    # c1 — Affective
-    "edaic_depC":    ("c1", "Depression / healthy (E-DAIC)", "Binary depression screening from clinical-interview speech (E-DAIC-WOZ)."),
-    "edaic_phqR":    ("c1", "PHQ-8 score (E-DAIC)", "Regress the PHQ-8 depression-severity score from interview speech (E-DAIC-WOZ)."),
-    "ravdess_emoC":  ("c1", "Emotion class (RAVDESS)", "Multi-class emotion recognition on acted speech (RAVDESS)."),
-    "ravdess_emoBC": ("c1", "Neg. emotion (RAVDESS)", "Binary negative-vs-non-negative affect on acted speech (RAVDESS)."),
-    "iemocap_emoC":  ("c1", "Emotion class (IEMOCAP)", "Multi-class emotion recognition on dyadic sessions (IEMOCAP)."),
-    "iemocap_emoBC": ("c1", "Neg. emotion (IEMOCAP)", "Binary negative-vs-non-negative affect (IEMOCAP)."),
-    # c2 — Cognitive
-    "dbank_adC":     ("c2", "Dementia / healthy (DementiaBank)", "Binary Alzheimer's-dementia detection from picture-description speech (DementiaBank / ADReSS-M)."),
-    "dbank_mmseR":   ("c2", "MMSE score (DementiaBank)", "Regress the MMSE cognitive score (DementiaBank / ADReSS-M)."),
-    "aphasia_pwaC":  ("c2", "Aphasia / healthy (AphasiaBank)", "Binary aphasia detection (AphasiaBank)."),
-    # c3 — Motor
-    "torgo_dysC":    ("c3", "Dysarthria / healthy (TORGO)", "Binary dysarthria detection (TORGO)."),
-    "torgo_sevR":    ("c3", "Dysarthria severity (TORGO)", "Regress dysarthria severity (TORGO)."),
-    "uaspeech_dysC": ("c3", "Dysarthria / healthy (UASpeech)", "Binary dysarthria detection (UASpeech)."),
-    "mdvr_parkC":    ("c3", "Parkinson's / healthy (MDVR-KCL)", "Binary Parkinson's detection from voice (MDVR-KCL)."),
-    "mdvr_updrs5R":  ("c3", "UPDRS-II.5 (MDVR-KCL)", "Regress UPDRS-II item 5 (speech disability) (MDVR-KCL)."),
-    "mdvr_updrs18R": ("c3", "UPDRS-III.18 (MDVR-KCL)", "Regress UPDRS-III item 18 (speech, examiner-rated) (MDVR-KCL)."),
-    "mdvr_hyR":      ("c3", "Hoehn & Yahr (MDVR-KCL)", "Regress the Hoehn & Yahr Parkinson's stage (MDVR-KCL)."),
-    "ksof_intC":     ("c3", "Disfluency / healthy (KSoF)", "Binary stuttering / disfluency detection (KSoF)."),
-    "ksof_stutL":    ("c3", "Disfluency type (KSoF)", "Multi-label stuttering-type classification (KSoF)."),
-    # c4 — Respiratory / phonatory
-    "c9s_t1":        ("c4", "Symptomatic / healthy (C19-Sounds)", "Binary symptomatic detection (COVID-19 Sounds)."),
-    "c9s_L_t1":      ("c4", "Symptomatic / healthy (C19-Sounds-Large)", "Binary symptomatic detection (COVID-19 Sounds, large subset)."),
-    "c9s_t2":        ("c4", "COVID-19 / non-COVID (C19-Sounds)", "Binary COVID-19 detection (COVID-19 Sounds)."),
-    "c9s_L_t2":      ("c4", "COVID-19 / non-COVID (C19-Sounds-Large)", "Binary COVID-19 detection (COVID-19 Sounds, large subset)."),
-    "c9s_sympL":     ("c4", "Resp. symptoms (C19-Sounds)", "Multi-label respiratory-symptom classification (COVID-19 Sounds)."),
-    "coswara_sympC": ("c4", "Symptomatic / healthy (Coswara)", "Binary symptomatic detection (Coswara)."),
-    "coswara_covidC":("c4", "COVID-19 / non-COVID (Coswara)", "Binary COVID-19 detection (Coswara)."),
-    "coswara_sympL": ("c4", "Resp. symptoms (Coswara)", "Multi-label respiratory-symptom classification (Coswara)."),
-    "avfad_pathC":   ("c4", "Vocal pathology / healthy (AVFAD)", "Binary voice-pathology detection (AVFAD)."),
+    # c1 — Conceptualization (affective)
+    "edaic_depC":    ("c1", "Depression / healthy (E-DAIC)", "Binary screening for clinical depression from semi-structured clinical-interview speech (Extended DAIC-WOZ); label thresholded on the PHQ-8."),
+    "edaic_phqR":    ("c1", "PHQ-8 score (E-DAIC)", "Regression of the PHQ-8 depression-severity score (0–24) from clinical-interview speech (Extended DAIC-WOZ)."),
+    "ravdess_emoC":  ("c1", "Emotion class (RAVDESS)", "Eight-way emotion recognition (neutral, calm, happy, sad, angry, fearful, disgust, surprise) on professionally acted utterances (RAVDESS)."),
+    "ravdess_emoBC": ("c1", "Neg. emotion (RAVDESS)", "Binary affective valence — negative vs. non-negative emotion — on acted speech (RAVDESS)."),
+    "iemocap_emoC":  ("c1", "Emotion class (IEMOCAP)", "Four-way emotion recognition (angry, happy, sad, neutral) on scripted and improvised dyadic conversations (IEMOCAP)."),
+    "iemocap_emoBC": ("c1", "Neg. emotion (IEMOCAP)", "Binary affective valence — negative vs. non-negative emotion — on dyadic conversational speech (IEMOCAP)."),
+    # c2 — Formulation (cognitive / linguistic)
+    "dbank_adC":     ("c2", "Dementia / healthy (DementiaBank)", "Binary Alzheimer's-disease vs. healthy-control detection from Cookie-Theft picture-description speech (DementiaBank / ADReSS-M)."),
+    "dbank_mmseR":   ("c2", "MMSE score (DementiaBank)", "Regression of the Mini-Mental State Examination (MMSE) cognitive score (0–30) from picture-description speech (DementiaBank / ADReSS-M)."),
+    "aphasia_pwaC":  ("c2", "Aphasia / healthy (AphasiaBank)", "Binary detection of aphasia (persons with aphasia vs. controls) from spontaneous connected speech (AphasiaBank)."),
+    # c3 — Articulation (neuromuscular)
+    "torgo_dysC":    ("c3", "Dysarthria / healthy (TORGO)", "Binary dysarthria vs. healthy detection from read and spontaneous speech of speakers with cerebral palsy or ALS (TORGO)."),
+    "torgo_sevR":    ("c3", "Dysarthria severity (TORGO)", "Regression of clinician-rated dysarthria severity from speech (TORGO)."),
+    "uaspeech_dysC": ("c3", "Dysarthria / healthy (UASpeech)", "Binary dysarthria vs. healthy detection from isolated-word speech of speakers with cerebral palsy (UASpeech)."),
+    "mdvr_parkC":    ("c3", "Parkinson's / healthy (MDVR-KCL)", "Binary Parkinson's-disease vs. healthy detection from smartphone voice recordings (MDVR-KCL)."),
+    "mdvr_updrs5R":  ("c3", "UPDRS-II.5 (MDVR-KCL)", "Regression of UPDRS-II item 5 (patient-reported speech difficulty) from voice (MDVR-KCL)."),
+    "mdvr_updrs18R": ("c3", "UPDRS-III.18 (MDVR-KCL)", "Regression of UPDRS-III item 18 (clinician-rated speech) from voice (MDVR-KCL)."),
+    "mdvr_hyR":      ("c3", "Hoehn & Yahr (MDVR-KCL)", "Regression of the Hoehn & Yahr Parkinson's-stage score from voice (MDVR-KCL)."),
+    "ksof_intC":     ("c3", "Disfluency / healthy (KSoF)", "Binary stuttering/disfluency vs. fluent detection from German speech-therapy recordings (Kassel State of Fluency, KSoF)."),
+    "ksof_stutL":    ("c3", "Disfluency type (KSoF)", "Multi-label classification of disfluency types (blocks, prolongations, sound/word repetitions, interjections) in speech-therapy recordings (KSoF)."),
+    # c4 — Articulation (phonatory / respiratory)
+    "c9s_t1":        ("c4", "Symptomatic / healthy (C19-Sounds)", "Binary symptomatic vs. healthy detection from respiratory audio (cough, breathing, voice) in the COVID-19 Sounds dataset."),
+    "c9s_L_t1":      ("c4", "Symptomatic / healthy (C19-Sounds-Large)", "Binary symptomatic vs. healthy detection on the larger COVID-19 Sounds split (C19-Sounds-Large)."),
+    "c9s_t2":        ("c4", "COVID-19 / non-COVID (C19-Sounds)", "Binary COVID-19 vs. non-COVID detection from respiratory audio (COVID-19 Sounds)."),
+    "c9s_L_t2":      ("c4", "COVID-19 / non-COVID (C19-Sounds-Large)", "Binary COVID-19 vs. non-COVID detection on the larger COVID-19 Sounds split (C19-Sounds-Large)."),
+    "c9s_sympL":     ("c4", "Resp. symptoms (C19-Sounds)", "Multi-label respiratory-symptom classification from audio (COVID-19 Sounds)."),
+    "coswara_sympC": ("c4", "Symptomatic / healthy (Coswara)", "Binary symptomatic vs. healthy detection from cough, breathing and vowel recordings (Coswara)."),
+    "coswara_covidC":("c4", "COVID-19 / non-COVID (Coswara)", "Binary COVID-19 vs. non-COVID detection from respiratory audio (Coswara)."),
+    "coswara_sympL": ("c4", "Resp. symptoms (Coswara)", "Multi-label respiratory-symptom classification from audio (Coswara)."),
+    "avfad_pathC":   ("c4", "Vocal pathology / healthy (AVFAD)", "Binary voice-pathology vs. healthy detection from sustained-vowel and connected-speech recordings (Advanced Voice Function Assessment Database, AVFAD)."),
 }
 
 # encoder column id -> (shorthand, full display name, HF / source checkpoint)
@@ -105,6 +105,23 @@ ENCODER_META = {
     "opera_gt":    ("OPERA-GT", "OPERA-GT", "evelyn0414/OPERA (encoder-operaGT.ckpt)"),
     "w2v2":        ("wav2vec2", "wav2vec 2.0 (Large, ASR-FT)", "facebook/wav2vec2-large-960h-lv60-self"),
     "clap":        ("CLAP", "CLAP (LAION-Larger-General)", "laion/larger_clap_general"),
+}
+
+# encoder id -> (host, repo, pinned revision HEAD, last-commit date). Source of truth
+# for the checkpoint link + revision shown on the site (README revision table).
+REVISIONS = {
+    "wavlm_large": ("hf", "microsoft/wavlm-large",                  "c1423ed94bb01d80a3f5ce5bc39f6026a0f4828c", "2022-02-02"),
+    "w2v2":        ("hf", "facebook/wav2vec2-large-960h-lv60-self", "54074b1c16f4de6a5ad59affb4caa8f2ea03a119", "2022-05-23"),
+    "hubert":      ("hf", "facebook/hubert-large-ls960-ft",         "ece5fabbf034c1073acae96d5401b25be96709d8", "2022-05-24"),
+    "whisper":     ("hf", "openai/whisper-large-v3",                "06f233fe06e710322aca913c1bc4249a0d71fce1", "2024-08-12"),
+    "ast":         ("hf", "MIT/ast-finetuned-audioset-10-10-0.4593","f826b80d28226b62986cc218e5cec390b1096902", "2023-09-06"),
+    "audiomae":    ("hf", "hance-ai/audiomae",                      "c1379969532da421855d2f225f40c9c7b4959188", "2024-08-16"),
+    "clap":        ("hf", "laion/larger_clap_general",              "ada0c23a36c4e8582805bb38fec3905903f18b41", "2023-10-31"),
+    "mms":         ("hf", "facebook/mms-1b",                        "0d2f7adb9903d98894d70ae11f7fbdfc8cb71a69", "2023-06-05"),
+    "wavjepa":     ("hf", "labhamlet/wavjepa-nat-base",             "15d95ff67fa98117b17e83a1653bbca97877ff6f", "2025-11-06"),
+    "qwen3voice":  ("hf", "Qwen/Qwen3-TTS-Tokenizer-12Hz",          "7dd38ad4e9bad454aae9cd937d0cd577604fe229", "2026-01-29"),
+    "emotion2vec": ("hf", "emotion2vec/emotion2vec_plus_large",     "6c303ba987b86b93193de93e34bb2b077a6bedc4", "2024-06-24"),
+    "opera_gt":    ("gh", "evelyn0414/OPERA",                       "d8de4322870b596f0a6ff6ea907b9a6996cd243a", "2024-11-15"),
 }
 
 CAT_INDEX = {c["code"]: i for i, c in enumerate(CATEGORIES)}
@@ -180,10 +197,16 @@ def build_view(scores: pd.DataFrame, kinds: dict, meta: dict) -> dict:
     order = mrr.sort_values(ascending=False)
     models = []
     for rank, enc in enumerate(order.index, start=1):
-        short, disp, ckpt = ENCODER_META[enc]
+        short, disp, _ = ENCODER_META[enc]
+        host, repo, commit, date = REVISIONS[enc]
+        url = (f"https://huggingface.co/{repo}/tree/{commit}" if host == "hf"
+               else f"https://github.com/{repo}/tree/{commit}")
         vals = {t: (None if pd.isna(scores.loc[t, enc]) else round(float(scores.loc[t, enc]), 4))
                 for t in task_ids}
-        models.append({"id": enc, "short": short, "display": disp, "checkpoint": ckpt,
+        models.append({"id": enc, "short": short, "display": disp,
+                       "repo": repo, "repo_url": url,
+                       "host": "Hugging Face" if host == "hf" else "GitHub",
+                       "revision": commit[:10], "revision_date": date,
                        "rank": rank, "mrr": round(float(order[enc]), 4), "scores": vals})
     return {"n_tasks": len(task_ids), "tasks": tasks, "models": models}
 

@@ -146,7 +146,9 @@
       tdM.className = "col-model cell-model";
       tdM.innerHTML = `<span class="rank">${m.rank}</span><span class="name">${m.short}</span>`;
       const mHtml = `<div class="tt-title">${m.display}</div>` +
-        `<div class="tt-sub">checkpoint</div><code>${m.checkpoint}</code>`;
+        `<div class="tt-sub">checkpoint · ${m.host}</div>` +
+        `<a class="tt-link" href="${m.repo_url}" target="_blank" rel="noopener">${m.repo} ↗</a>` +
+        `<div class="tt-rev">revision <code>${m.revision}</code> · ${m.revision_date}</div>`;
       tdM.addEventListener("mouseenter", () => showTip(mHtml));
       tdM.addEventListener("click", e => { showTip(mHtml); e.stopPropagation(); });
       tr.appendChild(tdM);
