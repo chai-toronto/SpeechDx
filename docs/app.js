@@ -61,25 +61,19 @@
       `<span class="legend-item"><span class="swatch" style="background:${COL_BG.regression}"></span>Regression · MAE (lower better)</span>` +
     `</div>`;
 
-  // ---- tooltip (hover on desktop; tap to pin, tap-away / × to dismiss) ------
+  // ---- info box (locked to a fixed spot via CSS — bottom-centre) -----------
+  // It does NOT follow the cursor or the tap point. Shows on hover/tap; dismiss
+  // with the × or by tapping anywhere else; on desktop it also clears when the
+  // pointer leaves the table.
   const tip = document.getElementById("tooltip");
-  function showTip(html, e) {
+  function showTip(html) {
     tip.innerHTML = html + '<button class="tt-close" aria-label="Dismiss">&times;</button>';
     tip.hidden = false;
-    if (e) moveTip(e);
-  }
-  function moveTip(e) {
-    const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
-    let x = e.clientX + pad, y = e.clientY + pad;
-    if (x + w > window.innerWidth - 8) x = e.clientX - w - pad;
-    if (y + h > window.innerHeight - 8) y = e.clientY - h - pad;
-    tip.style.left = Math.max(6, x) + "px"; tip.style.top = Math.max(6, y) + "px";
   }
   function hideTip() { tip.hidden = true; }
-  // Tapping the box itself (e.g. the × button) shouldn't bubble out to the
-  // page-wide dismiss; tapping anywhere else dismisses a pinned box.
   tip.addEventListener("click", e => { e.stopPropagation(); if (e.target.closest(".tt-close")) hideTip(); });
   document.addEventListener("click", () => { if (!tip.hidden) hideTip(); });
+  document.querySelector(".table-wrap").addEventListener("mouseleave", hideTip);
 
   // ---- sorting state -------------------------------------------------------
   let sortKey = "mrr", sortDir = -1;   // -1 desc, 1 asc
@@ -132,10 +126,8 @@
     const tipHtml =
       `<div class="tt-title">${t.tnum} · ${t.label}</div><div>${t.desc}</div>` +
       `<div class="tt-sub">${t.metric} · ${catLabel[t.category]} · <code>${t.id}</code></div>`;
-    th.addEventListener("mouseenter", e => showTip(tipHtml, e));
-    th.addEventListener("mousemove", moveTip);
-    th.addEventListener("mouseleave", hideTip);
-    th.addEventListener("click", e => { showTip(tipHtml, e); e.stopPropagation(); });
+    th.addEventListener("mouseenter", () => showTip(tipHtml));
+    th.addEventListener("click", e => { showTip(tipHtml); e.stopPropagation(); });
     hrow.appendChild(th);
   });
 
@@ -174,10 +166,8 @@
         `<span class="name">${m.short}</span>`;
       const mHtml = `<div class="tt-title">${m.display}</div>` +
         `<div class="tt-sub">checkpoint</div><code>${m.checkpoint}</code>`;
-      tdM.addEventListener("mouseenter", e => showTip(mHtml, e));
-      tdM.addEventListener("mousemove", moveTip);
-      tdM.addEventListener("mouseleave", hideTip);
-      tdM.addEventListener("click", e => { showTip(mHtml, e); e.stopPropagation(); });
+      tdM.addEventListener("mouseenter", () => showTip(mHtml));
+      tdM.addEventListener("click", e => { showTip(mHtml); e.stopPropagation(); });
       tr.appendChild(tdM);
 
       const tdR = document.createElement("td");

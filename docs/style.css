@@ -106,10 +106,12 @@ tbody td { border-bottom: 1px solid var(--line); }
 
 /* tooltip */
 .tooltip {
-  position: fixed; z-index: 50; max-width: 300px;
-  background: #1b2230; color: #f4f6fa; padding: 9px 28px 9px 12px; border-radius: 8px;
-  font-size: 12.5px; line-height: 1.4; pointer-events: auto;
-  box-shadow: 0 6px 24px rgba(10, 18, 35, 0.28);
+  position: fixed; z-index: 50;
+  left: 50%; bottom: 16px; transform: translateX(-50%);   /* locked: bottom-centre */
+  max-width: min(380px, calc(100vw - 24px));
+  background: #1b2230; color: #f4f6fa; padding: 11px 30px 11px 14px; border-radius: 10px;
+  font-size: 12.5px; line-height: 1.45; pointer-events: auto;
+  box-shadow: 0 8px 30px rgba(10, 18, 35, 0.4);
 }
 .tooltip .tt-title { font-weight: 700; margin-bottom: 3px; }
 .tooltip .tt-sub { color: #aeb7c6; }
