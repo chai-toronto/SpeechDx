@@ -6,7 +6,7 @@ The benchmark evaluates multiple state-of-the-art audio and speech encoders usin
 
 ![Performance of state-of-the-art audio/speech encoders across all tasks in the benchmark.](all_tasks_results.png)
 
-[**Leaderboard**](./leaderboard.csv) · [**interactive leaderboard ↗**](https://chai.cs.toronto.edu/speechdx-leaderboard/)
+[**Leaderboard**](./leaderboard.csv)
 ## Contents
 
 - [Install](#install)
