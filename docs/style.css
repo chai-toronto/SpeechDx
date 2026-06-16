@@ -64,8 +64,8 @@ thead th .th-inner { padding: 9px 10px; }
 
 /* model + MRR columns pinned while scrolling tasks */
 .col-model { position: sticky; left: 0; z-index: 2; background: var(--panel); text-align: left; min-width: 150px; }
-.col-mrr   { position: sticky; z-index: 2; background: var(--panel); text-align: center; min-width: 86px; }
-thead .col-model, thead .col-mrr { z-index: 4; }
+.col-mrr   { text-align: center; min-width: 86px; }   /* not pinned — scrolls with the tasks */
+thead .col-model { z-index: 4; }
 .col-model { border-right: 1px solid var(--line); }
 .col-mrr   { border-right: 2px solid var(--line); }
 
@@ -107,10 +107,17 @@ tbody td { border-bottom: 1px solid var(--line); }
 /* tooltip */
 .tooltip {
   position: fixed; z-index: 50; max-width: 300px;
-  background: #1b2230; color: #f4f6fa; padding: 9px 11px; border-radius: 8px;
-  font-size: 12.5px; line-height: 1.4; pointer-events: none;
+  background: #1b2230; color: #f4f6fa; padding: 9px 28px 9px 12px; border-radius: 8px;
+  font-size: 12.5px; line-height: 1.4; pointer-events: auto;
   box-shadow: 0 6px 24px rgba(10, 18, 35, 0.28);
 }
 .tooltip .tt-title { font-weight: 700; margin-bottom: 3px; }
 .tooltip .tt-sub { color: #aeb7c6; }
 .tooltip code { background: rgba(255,255,255,0.12); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+.tooltip .tt-close {
+  position: absolute; top: 4px; right: 5px; width: 20px; height: 20px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: 0; color: #aeb7c6; font-size: 17px; line-height: 1;
+  cursor: pointer; padding: 0; border-radius: 4px;
+}
+.tooltip .tt-close:hover { color: #fff; background: rgba(255,255,255,0.14); }

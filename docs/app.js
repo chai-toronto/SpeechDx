@@ -61,19 +61,25 @@
       `<span class="legend-item"><span class="swatch" style="background:${COL_BG.regression}"></span>Regression · MAE (lower better)</span>` +
     `</div>`;
 
-  // ---- tooltip -------------------------------------------------------------
+  // ---- tooltip (hover on desktop; tap to pin, tap-away / × to dismiss) ------
   const tip = document.getElementById("tooltip");
   function showTip(html, e) {
-    tip.innerHTML = html; tip.hidden = false; moveTip(e);
+    tip.innerHTML = html + '<button class="tt-close" aria-label="Dismiss">&times;</button>';
+    tip.hidden = false;
+    if (e) moveTip(e);
   }
   function moveTip(e) {
     const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
     let x = e.clientX + pad, y = e.clientY + pad;
     if (x + w > window.innerWidth - 8) x = e.clientX - w - pad;
     if (y + h > window.innerHeight - 8) y = e.clientY - h - pad;
-    tip.style.left = x + "px"; tip.style.top = y + "px";
+    tip.style.left = Math.max(6, x) + "px"; tip.style.top = Math.max(6, y) + "px";
   }
   function hideTip() { tip.hidden = true; }
+  // Tapping the box itself (e.g. the × button) shouldn't bubble out to the
+  // page-wide dismiss; tapping anywhere else dismisses a pinned box.
+  tip.addEventListener("click", e => { e.stopPropagation(); if (e.target.closest(".tt-close")) hideTip(); });
+  document.addEventListener("click", () => { if (!tip.hidden) hideTip(); });
 
   // ---- sorting state -------------------------------------------------------
   let sortKey = "mrr", sortDir = -1;   // -1 desc, 1 asc
@@ -123,11 +129,13 @@
     th.style.setProperty("--cat", catColor[t.category]);
     th.innerHTML = `<div class="th-inner"><span class="task-tnum">${t.tnum}</span>` +
                    `<span class="task-label">${t.slabel}</span></div>`;
-    th.addEventListener("mouseenter", e => showTip(
+    const tipHtml =
       `<div class="tt-title">${t.tnum} · ${t.label}</div><div>${t.desc}</div>` +
-      `<div class="tt-sub">${t.metric} · ${catLabel[t.category]} · <code>${t.id}</code></div>`, e));
+      `<div class="tt-sub">${t.metric} · ${catLabel[t.category]} · <code>${t.id}</code></div>`;
+    th.addEventListener("mouseenter", e => showTip(tipHtml, e));
     th.addEventListener("mousemove", moveTip);
     th.addEventListener("mouseleave", hideTip);
+    th.addEventListener("click", e => { showTip(tipHtml, e); e.stopPropagation(); });
     hrow.appendChild(th);
   });
 
@@ -135,12 +143,6 @@
   table.appendChild(thead);
   const tbody = document.createElement("tbody");
   table.appendChild(tbody);
-
-  // place the sticky MRR column right after the model column
-  function placeMrrColumn() {
-    const left = thModel.offsetWidth;
-    document.querySelectorAll(".col-mrr").forEach(el => { el.style.left = left + "px"; });
-  }
 
   // delegate sort clicks
   hrow.querySelectorAll(".th-sortable").forEach(th =>
@@ -170,11 +172,12 @@
       tdM.innerHTML =
         `<span class="rank">${m.rank}.</span>` +
         `<span class="name">${m.short}</span>`;
-      tdM.addEventListener("mouseenter", e => showTip(
-        `<div class="tt-title">${m.display}</div>` +
-        `<div class="tt-sub">checkpoint</div><code>${m.checkpoint}</code>`, e));
+      const mHtml = `<div class="tt-title">${m.display}</div>` +
+        `<div class="tt-sub">checkpoint</div><code>${m.checkpoint}</code>`;
+      tdM.addEventListener("mouseenter", e => showTip(mHtml, e));
       tdM.addEventListener("mousemove", moveTip);
       tdM.addEventListener("mouseleave", hideTip);
+      tdM.addEventListener("click", e => { showTip(mHtml, e); e.stopPropagation(); });
       tr.appendChild(tdM);
 
       const tdR = document.createElement("td");
@@ -197,10 +200,8 @@
 
       tbody.appendChild(tr);
     });
-    placeMrrColumn();
   }
 
   renderBody();
   renderSortIndicators();
-  window.addEventListener("resize", placeMrrColumn);
 })();
