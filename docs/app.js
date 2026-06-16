@@ -36,7 +36,9 @@
   const COL_BG = { classification: tint(CLS, 0.14), regression: tint(REG, 0.16) };
   const scoreBg = type => COL_BG[type] || "#ffffff";
   const fmt = (v, type) =>
-    (v == null ? "—" : type === "regression" ? v.toFixed(2) : v.toFixed(3));
+    (v == null ? "—"
+     : type === "regression" ? v.toFixed(2)
+     : v.toFixed(3).replace(/^0\./, "."));   // AUC: ".989" not "0.989" (1.000 stays)
 
   // ---- meta + legend -------------------------------------------------------
   const meta = document.getElementById("meta");
