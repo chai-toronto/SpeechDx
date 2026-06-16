@@ -14,12 +14,12 @@
   const taskById = {};
   DATA.tasks.forEach(t => { taskById[t.id] = t; });
   const maxMrr = Math.max.apply(null, DATA.models.map(m => m.mrr || 0));
-  // best model per task (for the top-1 outline)
+  // best model per task for the top-1 outline (regression = MAE → lowest wins)
   const bestByTask = {};
   DATA.tasks.forEach(t => {
-    let best = -Infinity;
-    DATA.models.forEach(m => { const v = m.scores[t.id]; if (v != null && v > best) best = v; });
-    bestByTask[t.id] = best;
+    const vals = DATA.models.map(m => m.scores[t.id]).filter(v => v != null);
+    bestByTask[t.id] = !vals.length ? null
+      : (t.type === "regression" ? Math.min.apply(null, vals) : Math.max.apply(null, vals));
   });
 
   // ---- colour helpers ------------------------------------------------------
@@ -31,12 +31,12 @@
     const b = Math.round(lerp(255, p[2], alpha));
     return `rgb(${r},${g},${b})`;
   }
-  function scoreBg(v, type) {
-    if (v == null) return "#ffffff";
-    const t = Math.max(0, Math.min(1, (v - 0.5) / 0.5));
-    return tint(type === "classification" ? CLS : REG, 0.10 + 0.52 * t);
-  }
-  const fmt = v => (v == null ? "—" : v.toFixed(3));
+  // Flat per-column background to differentiate the two metrics (no heatmap):
+  // ROC-AUC columns get one tint, MAE columns a slightly different tint.
+  const COL_BG = { classification: tint(CLS, 0.14), regression: tint(REG, 0.16) };
+  const scoreBg = type => COL_BG[type] || "#ffffff";
+  const fmt = (v, type) =>
+    (v == null ? "—" : type === "regression" ? v.toFixed(2) : v.toFixed(3));
 
   // ---- meta + legend -------------------------------------------------------
   const meta = document.getElementById("meta");
@@ -55,9 +55,8 @@
   legend.innerHTML =
     `<div class="legend-group"><span class="legend-title">Category</span>${catItems}</div>` +
     `<div class="legend-group"><span class="legend-title">Metric</span>` +
-      `<span class="legend-item"><span class="swatch" style="background:${tint(CLS, 0.45)}"></span>Classification · ROC-AUC</span>` +
-      `<span class="legend-item"><span class="swatch" style="background:${tint(REG, 0.45)}"></span>Regression · C-index</span>` +
-      `<span class="legend-item">fainter → darker = chance → 1.0</span>` +
+      `<span class="legend-item"><span class="swatch" style="background:${COL_BG.classification}"></span>Classification · ROC-AUC (higher better)</span>` +
+      `<span class="legend-item"><span class="swatch" style="background:${COL_BG.regression}"></span>Regression · MAE (lower better)</span>` +
     `</div>`;
 
   // ---- tooltip -------------------------------------------------------------
@@ -190,11 +189,9 @@
         const v = m.scores[t.id];
         const td = document.createElement("td");
         td.className = "cell-score" + (v == null ? " na" : "");
-        if (v != null) {
-          td.style.background = scoreBg(v, t.type);
-          if (v === bestByTask[t.id]) td.classList.add("top1");
-        }
-        td.textContent = fmt(v);
+        td.style.background = scoreBg(t.type);
+        if (v != null && v === bestByTask[t.id]) td.classList.add("top1");
+        td.textContent = fmt(v, t.type);
         tr.appendChild(td);
       });
 

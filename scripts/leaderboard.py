@@ -22,6 +22,8 @@ Filtering / metric flags:
   --no-merge   keep the raw per-dataset tasks (skip the six merged courses)
   --mrr        write only the mean-reciprocal-rank board (avg = MRR) as
                leaderboard<tag>.csv
+  --mae        score regression tasks by raw MAE (lower better) instead of the
+               C-index (ranks them ascending); only with --mrr
 """
 from __future__ import annotations
 
@@ -163,30 +165,43 @@ def apply_merges(scores: pd.DataFrame) -> pd.DataFrame:
     return merged.sort_index()
 
 
-def normalize_scores(input_dir: Path, repo: Path) -> pd.DataFrame:
-    """Tasks x encoders score table on the unified [0,1] discrimination axis.
+def normalize_scores(input_dir: Path, repo: Path,
+                     regression: str = "cindex") -> pd.DataFrame:
+    """Tasks x encoders score table.
 
-    Classification = clipped ROC-AUC; regression = concordance index. Both are
-    already in [0,1] with 0.5 = chance, so no denominator/normalisation step.
+    Classification = clipped ROC-AUC (higher better, [0,1], 0.5 = chance).
+    Regression = ``cindex`` (concordance index, clipped [0,1], higher better) or
+    ``mae`` (raw MAE.csv, lower better, NOT clipped — only meaningful for the
+    per-task MRR ranking, which takes regression ranks ascending).
     """
     frames = []
     auc_path = input_dir / "AUC.csv"
     if auc_path.exists():
         auc = pd.read_csv(auc_path).set_index("task").rename(index=canonical_task)
         frames.append(auc.clip(lower=0, upper=1))
-    cindex_path = input_dir / "Cindex.csv"
-    if cindex_path.exists():
-        cidx = pd.read_csv(cindex_path).set_index("task").rename(index=canonical_task)
-        frames.append(cidx.clip(lower=0, upper=1))
+    reg_file = "MAE.csv" if regression == "mae" else "Cindex.csv"
+    reg_path = input_dir / reg_file
+    if reg_path.exists():
+        reg = pd.read_csv(reg_path).set_index("task").rename(index=canonical_task)
+        frames.append(reg if regression == "mae" else reg.clip(lower=0, upper=1))
     if not frames:
-        raise SystemExit(f"no AUC.csv or Cindex.csv in {input_dir} "
-                         f"(build Cindex.csv with scripts/aggregate_cindex.py)")
+        raise SystemExit(f"no AUC.csv or {reg_file} in {input_dir}")
     encoders = sorted(set().union(*(f.columns for f in frames)))
     return pd.concat([f.reindex(columns=encoders) for f in frames], axis=0).sort_index()
 
 
-def reciprocal_rank(scores: pd.DataFrame) -> pd.DataFrame:
-    return 1.0 / scores.rank(axis=1, method="min", ascending=False)
+# Regression tasks are scored lower-is-better under --mae (raw MAE), so their
+# per-task ranks must be taken ascending; ROC-AUC / C-index stay higher-is-better.
+REGRESSION_TASKS = frozenset(t for t, v in TASK_TYPE.items() if v == "Regression")
+
+
+def reciprocal_rank(scores: pd.DataFrame,
+                    lower_better: frozenset = frozenset()) -> pd.DataFrame:
+    ranks = scores.rank(axis=1, method="min", ascending=False)
+    lb = [t for t in scores.index if t in lower_better]
+    if lb:
+        ranks.loc[lb] = scores.loc[lb].rank(axis=1, method="min", ascending=True)
+    return 1.0 / ranks
 
 
 def build_task_leaderboard(scores: pd.DataFrame) -> pd.DataFrame:
@@ -247,32 +262,44 @@ def main() -> None:
                     help="emit the mean-reciprocal-rank board (per-task reciprocal "
                          "rank + a leading avg = MRR) as the sole leaderboard<tag>.csv "
                          "output, instead of the three score/category/rank tables")
+    ap.add_argument("--mae", action="store_true",
+                    help="score regression tasks by raw MAE (lower better, from "
+                         "MAE.csv) instead of the C-index; ranks those tasks ascending. "
+                         "Only valid with --mrr (MAE is not averageable with AUC).")
     args = ap.parse_args()
+
+    if args.mae and not args.mrr:
+        raise SystemExit("--mae is only supported with --mrr")
 
     out_dir = args.output_dir or REPO
     out_dir.mkdir(parents=True, exist_ok=True)
     tag = args.tag
 
-    scores = normalize_scores(args.input_dir, REPO)
+    scores = normalize_scores(args.input_dir, REPO,
+                              regression="mae" if args.mae else "cindex")
     if args.drop:
         drop = [e.strip() for e in args.drop.split(",") if e.strip()]
         missing = [e for e in drop if e not in scores.columns]
         if missing:
             raise SystemExit(f"--drop: encoder(s) not in scores: {missing}")
         scores = scores.drop(columns=drop)
+    # Drop encoders with no data at all (every task NaN) — an all-empty row.
+    scores = scores.loc[:, scores.notna().any(axis=0)]
     if not args.no_merge:
         scores = apply_merges(scores)
 
     if args.mrr:
         # Mean-reciprocal-rank board: rank the encoders within each task, take the
         # reciprocal, and average across tasks (the leading avg column = MRR). This
-        # is the sole output in --mrr mode.
-        rranks = reciprocal_rank(scores).T
+        # is the sole output in --mrr mode. Regression tasks rank ascending under --mae.
+        lower_better = REGRESSION_TASKS if args.mae else frozenset()
+        rranks = reciprocal_rank(scores, lower_better=lower_better).T
         rranks.insert(0, "avg", rranks.mean(axis=1, skipna=True))
-        rranks = rranks.sort_values("avg", ascending=False)
+        rranks = rranks[rranks["avg"].notna()].sort_values("avg", ascending=False)
         rranks.index.name = "encoder"
         rranks.round(4).to_csv(out_dir / f"leaderboard{tag}.csv")
-        print(f"wrote {out_dir / f'leaderboard{tag}.csv'} (MRR board)")
+        print(f"wrote {out_dir / f'leaderboard{tag}.csv'} (MRR board, "
+              f"regression={'MAE' if args.mae else 'C-index'})")
         return
 
     lb = build_task_leaderboard(scores)

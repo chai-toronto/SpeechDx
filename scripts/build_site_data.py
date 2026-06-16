@@ -119,17 +119,21 @@ def canonical(label: str) -> str:
 
 def load_typed(input_dir: Path) -> pd.DataFrame:
     """Tasks x encoders, each row tagged with its metric ('classification' from
-    AUC.csv = ROC-AUC, 'regression' from Cindex.csv = C-index)."""
+    AUC.csv = ROC-AUC, higher better, clipped [0,1]; 'regression' from MAE.csv =
+    mean absolute error, lower better, NOT clipped)."""
     frames = []
-    for fname, kind in (("AUC.csv", "classification"), ("Cindex.csv", "regression")):
+    for fname, kind, clip in (("AUC.csv", "classification", True),
+                              ("MAE.csv", "regression", False)):
         p = input_dir / fname
         if not p.exists():
             continue
-        df = pd.read_csv(p).set_index("task").rename(index=canonical).clip(0, 1)
+        df = pd.read_csv(p).set_index("task").rename(index=canonical)
+        if clip:
+            df = df.clip(0, 1)
         df["__kind__"] = kind
         frames.append(df)
     if not frames:
-        raise SystemExit(f"no AUC.csv / Cindex.csv in {input_dir}")
+        raise SystemExit(f"no AUC.csv / MAE.csv in {input_dir}")
     return pd.concat(frames, axis=0)
 
 
@@ -148,13 +152,21 @@ def main() -> None:
     if unknown:
         raise SystemExit(f"encoders with no ENCODER_META: {sorted(unknown)}")
     scores = scores[encoders]
+    # Drop encoders whose entire row is empty (no data on any task).
+    scores = scores.loc[:, scores.notna().any(axis=0)]
+    encoders = list(scores.columns)
 
     missing_meta = [t for t in scores.index if t not in TASK_META]
     if missing_meta:
         raise SystemExit(f"tasks with no TASK_META: {sorted(missing_meta)}")
 
-    # Mean reciprocal rank: rank encoders within each task, reciprocate, average.
-    rr = 1.0 / scores.rank(axis=1, method="min", ascending=False)
+    # Mean reciprocal rank: rank encoders within each task (regression = MAE is
+    # lower-better → ascending), reciprocate, average across tasks.
+    ranks = scores.rank(axis=1, method="min", ascending=False)
+    reg_tasks = [t for t in scores.index if kinds[t] == "regression"]
+    if reg_tasks:
+        ranks.loc[reg_tasks] = scores.loc[reg_tasks].rank(axis=1, method="min", ascending=True)
+    rr = 1.0 / ranks
     mrr = rr.mean(axis=0, skipna=True)
 
     # Tasks ordered by category, then classification before regression, then id.
@@ -169,7 +181,7 @@ def main() -> None:
         "desc": TASK_META[t][2],
         "category": TASK_META[t][0],
         "type": kinds[t],
-        "metric": "ROC-AUC" if kinds[t] == "classification" else "C-index",
+        "metric": "ROC-AUC" if kinds[t] == "classification" else "MAE",
     } for t in task_ids]
 
     order = mrr.sort_values(ascending=False)
