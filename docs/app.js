@@ -154,7 +154,7 @@
       const tdR = document.createElement("td");
       tdR.className = "col-mrr cell-mrr";
       const w = maxMrr ? Math.round((m.mrr / maxMrr) * 100) : 0;
-      tdR.innerHTML = `<div class="mrr-val">${m.mrr.toFixed(3)}</div>` +
+      tdR.innerHTML = `<div class="mrr-val">${m.mrr.toFixed(3).replace(/^0\./, ".")}</div>` +
         `<div class="mrr-track"><div class="mrr-bar" style="width:${w}%"></div></div>`;
       tr.appendChild(tdR);
 

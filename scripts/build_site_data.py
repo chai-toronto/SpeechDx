@@ -95,7 +95,7 @@ TASK_META = {
 ENCODER_META = {
     "wavlm_large": ("WavLM-Large", "WavLM (Large)", "microsoft/wavlm-large"),
     "whisper":     ("Whisper", "Whisper (Large-v3)", "openai/whisper-large-v3"),
-    "qwen3voice":  ("Qwen3-Voice", "Qwen3-TTS-Tokenizer (12 Hz)", "Qwen/Qwen3-TTS-Tokenizer-12Hz"),
+    "qwen3voice":  ("Qwen3TTS Tok", "Qwen3-TTS-Tokenizer-12Hz", "Qwen/Qwen3-TTS-Tokenizer-12Hz"),
     "ast":         ("AST", "AST (AudioSet-finetuned)", "MIT/ast-finetuned-audioset-10-10-0.4593"),
     "audiomae":    ("AudioMAE", "AudioMAE", "hance-ai/audiomae"),
     "wavjepa":     ("WavJEPA", "WavJEPA-Nat (Base)", "labhamlet/wavjepa-nat-base"),

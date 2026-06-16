@@ -340,8 +340,8 @@ window.LEADERBOARD_DATA = {
         },
         {
           "id": "qwen3voice",
-          "short": "Qwen3-Voice",
-          "display": "Qwen3-TTS-Tokenizer (12 Hz)",
+          "short": "Qwen3TTS Tok",
+          "display": "Qwen3-TTS-Tokenizer-12Hz",
           "checkpoint": "Qwen/Qwen3-TTS-Tokenizer-12Hz",
           "rank": 2,
           "mrr": 0.4103,
@@ -1002,8 +1002,8 @@ window.LEADERBOARD_DATA = {
         },
         {
           "id": "qwen3voice",
-          "short": "Qwen3-Voice",
-          "display": "Qwen3-TTS-Tokenizer (12 Hz)",
+          "short": "Qwen3TTS Tok",
+          "display": "Qwen3-TTS-Tokenizer-12Hz",
           "checkpoint": "Qwen/Qwen3-TTS-Tokenizer-12Hz",
           "rank": 3,
           "mrr": 0.3901,
