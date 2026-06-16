@@ -19,6 +19,10 @@ def prepare_data(
     df = pd.read_csv(metadata_path)
     df["path"] = Path(wav_folder).resolve() / df["path"]
 
+    # Use the per-task raw_label_key as the training target.
+    if raw_label_key and raw_label_key != "label" and raw_label_key in df.columns:
+        df["label"] = df[raw_label_key]
+
     folds = list(stratified_group_kfold_df(
         df, 'uid', raw_label_key, "Participant_ID",
         random_seed=random_seed, n_splits=num_fold,
