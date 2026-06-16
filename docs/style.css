@@ -11,6 +11,7 @@
   --mrr-track: #eef1f6;
   --top1: rgba(20, 30, 50, 0.55);
   --ctrl-bg: #ffffff;
+  color-scheme: light;          /* native controls (checkbox) follow the page theme */
 }
 [data-theme="dark"] {
   --bg: #0b0e12;
@@ -25,8 +26,8 @@
   --mrr-track: #232a33;
   --top1: rgba(255, 255, 255, 0.65);
   --ctrl-bg: #1b212a;
+  color-scheme: dark;
 }
-html { color-scheme: light dark; }
 
 * { box-sizing: border-box; }
 

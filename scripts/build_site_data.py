@@ -81,9 +81,9 @@ TASK_META = {
     "ksof_stutL":    ("c3", "Disfluency type (KSoF)", "Multi-label stuttering-type classification (KSoF)."),
     # c4 — Respiratory / phonatory
     "c9s_t1":        ("c4", "Symptomatic / healthy (C19-Sounds)", "Binary symptomatic detection (COVID-19 Sounds)."),
-    "c9s_L_t1":      ("c4", "Symptomatic / healthy — long (C19-Sounds)", "Binary symptomatic detection, long-form audio (COVID-19 Sounds)."),
+    "c9s_L_t1":      ("c4", "Symptomatic / healthy (C19-Sounds-Large)", "Binary symptomatic detection (COVID-19 Sounds, large subset)."),
     "c9s_t2":        ("c4", "COVID-19 / non-COVID (C19-Sounds)", "Binary COVID-19 detection (COVID-19 Sounds)."),
-    "c9s_L_t2":      ("c4", "COVID-19 / non-COVID — long (C19-Sounds)", "Binary COVID-19 detection, long-form audio (COVID-19 Sounds)."),
+    "c9s_L_t2":      ("c4", "COVID-19 / non-COVID (C19-Sounds-Large)", "Binary COVID-19 detection (COVID-19 Sounds, large subset)."),
     "c9s_sympL":     ("c4", "Resp. symptoms (C19-Sounds)", "Multi-label respiratory-symptom classification (COVID-19 Sounds)."),
     "coswara_sympC": ("c4", "Symptomatic / healthy (Coswara)", "Binary symptomatic detection (Coswara)."),
     "coswara_covidC":("c4", "COVID-19 / non-COVID (Coswara)", "Binary COVID-19 detection (Coswara)."),
@@ -111,16 +111,16 @@ CAT_INDEX = {c["code"]: i for i, c in enumerate(CATEGORIES)}
 CANON_TO_TNUM = {v: k for k, v in JUN2_TASK_MAP.items()}   # canonical id -> "T1"..
 REPO_URL = "https://github.com/chai-toronto/SpeechDx"
 
-# "Average similar tasks": the six paper-faithful merges (same datasets/condition,
-# different corpus or framing). merged id -> (category, short label, member task ids).
+# "Average similar tasks": the six paper-faithful merges (same condition, different
+# corpus or framing). merged id -> (category, short label, member task ids, description).
 # All merged tasks are classification (ROC-AUC).
 MERGES = {
-    "emo_classify":   ("c1", "Emotion classification", ["ravdess_emoC", "iemocap_emoC"]),
-    "emo_neg":        ("c1", "Neg. emotion",           ["ravdess_emoBC", "iemocap_emoBC"]),
-    "dysarthria_det": ("c3", "Dysarthria detection",   ["torgo_dysC", "uaspeech_dysC"]),
-    "symptomatic":    ("c4", "Symptomatic",            ["c9s_t1", "c9s_L_t1", "coswara_sympC"]),
-    "covid_det":      ("c4", "COVID-19 detection",     ["c9s_t2", "c9s_L_t2", "coswara_covidC"]),
-    "symptom_multi":  ("c4", "Resp. symptoms",         ["c9s_sympL", "coswara_sympL"]),
+    "emo_classify":   ("c1", "Emotion classification", ["ravdess_emoC", "iemocap_emoC"],   "Multi-class emotion recognition"),
+    "emo_neg":        ("c1", "Neg. emotion",           ["ravdess_emoBC", "iemocap_emoBC"], "Negative vs. non-negative emotion"),
+    "dysarthria_det": ("c3", "Dysarthria detection",   ["torgo_dysC", "uaspeech_dysC"],     "Binary dysarthria detection"),
+    "symptomatic":    ("c4", "Symptomatic",            ["c9s_t1", "c9s_L_t1", "coswara_sympC"], "Symptomatic vs. healthy"),
+    "covid_det":      ("c4", "COVID-19 detection",     ["c9s_t2", "c9s_L_t2", "coswara_covidC"], "COVID-19 vs. non-COVID"),
+    "symptom_multi":  ("c4", "Resp. symptoms",         ["c9s_sympL", "coswara_sympL"],      "Respiratory-symptom multi-label"),
 }
 
 
@@ -156,7 +156,7 @@ def _strip_dataset(label: str) -> str:
 def apply_merges(scores: pd.DataFrame) -> pd.DataFrame:
     """Average each merge's member rows into a single merged-task row."""
     merged = scores.copy()
-    for new, (_cat, _label, src) in MERGES.items():
+    for new, (_cat, _label, src, _desc) in MERGES.items():
         present = [s for s in src if s in merged.index]
         if len(present) != len(src):
             continue
@@ -223,12 +223,18 @@ def main() -> None:
     merged_meta = {}
     for t in merged_scores.index:
         if t in MERGES:
-            cat, label, src = MERGES[t]
+            cat, label, src, descr = MERGES[t]
             tnums = [CANON_TO_TNUM[s] for s in src]
+            datasets = []                     # unique dataset names from member labels
+            for s in src:
+                mm = re.search(r"\(([^)]*)\)\s*$", TASK_META[s][1])
+                name = mm.group(1) if mm else s
+                if name not in datasets:
+                    datasets.append(name)
             merged_meta[t] = {
                 "sort": min(int(CANON_TO_TNUM[s][1:]) for s in src),
                 "tnum": "·".join(tnums), "slabel": label, "label": label,
-                "desc": "Average of " + " + ".join(TASK_META[s][1] for s in src),
+                "desc": f"{descr} · {', '.join(datasets)}",
                 "category": cat, "type": "classification", "metric": "ROC-AUC",
             }
         else:

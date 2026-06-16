@@ -222,9 +222,9 @@ window.LEADERBOARD_DATA = {
         {
           "id": "c9s_L_t1",
           "tnum": "T20",
-          "slabel": "Symptomatic / healthy — long",
-          "label": "Symptomatic / healthy — long (C19-Sounds)",
-          "desc": "Binary symptomatic detection, long-form audio (COVID-19 Sounds).",
+          "slabel": "Symptomatic / healthy",
+          "label": "Symptomatic / healthy (C19-Sounds-Large)",
+          "desc": "Binary symptomatic detection (COVID-19 Sounds, large subset).",
           "category": "c4",
           "type": "classification",
           "metric": "ROC-AUC"
@@ -242,9 +242,9 @@ window.LEADERBOARD_DATA = {
         {
           "id": "c9s_L_t2",
           "tnum": "T22",
-          "slabel": "COVID-19 / non-COVID — long",
-          "label": "COVID-19 / non-COVID — long (C19-Sounds)",
-          "desc": "Binary COVID-19 detection, long-form audio (COVID-19 Sounds).",
+          "slabel": "COVID-19 / non-COVID",
+          "label": "COVID-19 / non-COVID (C19-Sounds-Large)",
+          "desc": "Binary COVID-19 detection (COVID-19 Sounds, large subset).",
           "category": "c4",
           "type": "classification",
           "metric": "ROC-AUC"
@@ -775,7 +775,7 @@ window.LEADERBOARD_DATA = {
           "tnum": "T3·T5",
           "slabel": "Emotion classification",
           "label": "Emotion classification",
-          "desc": "Average of Emotion class (RAVDESS) + Emotion class (IEMOCAP)",
+          "desc": "Multi-class emotion recognition · RAVDESS, IEMOCAP",
           "category": "c1",
           "type": "classification",
           "metric": "ROC-AUC"
@@ -785,7 +785,7 @@ window.LEADERBOARD_DATA = {
           "tnum": "T4·T6",
           "slabel": "Neg. emotion",
           "label": "Neg. emotion",
-          "desc": "Average of Neg. emotion (RAVDESS) + Neg. emotion (IEMOCAP)",
+          "desc": "Negative vs. non-negative emotion · RAVDESS, IEMOCAP",
           "category": "c1",
           "type": "classification",
           "metric": "ROC-AUC"
@@ -825,7 +825,7 @@ window.LEADERBOARD_DATA = {
           "tnum": "T10·T12",
           "slabel": "Dysarthria detection",
           "label": "Dysarthria detection",
-          "desc": "Average of Dysarthria / healthy (TORGO) + Dysarthria / healthy (UASpeech)",
+          "desc": "Binary dysarthria detection · TORGO, UASpeech",
           "category": "c3",
           "type": "classification",
           "metric": "ROC-AUC"
@@ -905,7 +905,7 @@ window.LEADERBOARD_DATA = {
           "tnum": "T19·T20·T24",
           "slabel": "Symptomatic",
           "label": "Symptomatic",
-          "desc": "Average of Symptomatic / healthy (C19-Sounds) + Symptomatic / healthy — long (C19-Sounds) + Symptomatic / healthy (Coswara)",
+          "desc": "Symptomatic vs. healthy · C19-Sounds, C19-Sounds-Large, Coswara",
           "category": "c4",
           "type": "classification",
           "metric": "ROC-AUC"
@@ -915,7 +915,7 @@ window.LEADERBOARD_DATA = {
           "tnum": "T21·T22·T25",
           "slabel": "COVID-19 detection",
           "label": "COVID-19 detection",
-          "desc": "Average of COVID-19 / non-COVID (C19-Sounds) + COVID-19 / non-COVID — long (C19-Sounds) + COVID-19 / non-COVID (Coswara)",
+          "desc": "COVID-19 vs. non-COVID · C19-Sounds, C19-Sounds-Large, Coswara",
           "category": "c4",
           "type": "classification",
           "metric": "ROC-AUC"
@@ -925,7 +925,7 @@ window.LEADERBOARD_DATA = {
           "tnum": "T23·T26",
           "slabel": "Resp. symptoms",
           "label": "Resp. symptoms",
-          "desc": "Average of Resp. symptoms (C19-Sounds) + Resp. symptoms (Coswara)",
+          "desc": "Respiratory-symptom multi-label · C19-Sounds, Coswara",
           "category": "c4",
           "type": "classification",
           "metric": "ROC-AUC"
