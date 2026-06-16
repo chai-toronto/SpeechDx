@@ -73,8 +73,9 @@ thead .col-model, thead .col-mrr { z-index: 4; }
    header row — the border is on the cell, so same-category columns (which are
    contiguous in T-number order) form one straight line. Inner = short T-number. */
 .th-task { cursor: pointer; border-top: 4px solid var(--cat, #ccc); }
-.th-task .th-inner { text-align: center; min-width: 30px; padding: 9px 7px; }
-.th-task .task-label { display: block; font-weight: 700; font-size: 12px; font-variant-numeric: tabular-nums; }
+.th-task .th-inner { text-align: center; width: 96px; padding: 8px 7px; white-space: normal; }
+.th-task .task-tnum { display: block; font-size: 10px; font-weight: 700; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.th-task .task-label { display: block; font-weight: 600; font-size: 11px; line-height: 1.2; margin-top: 1px; }
 .th-sortable { cursor: pointer; user-select: none; }
 .th-sortable:hover .th-inner { background: #f0f3f9; }
 .sort-active { color: var(--accent); }

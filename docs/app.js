@@ -119,7 +119,8 @@
     th.className = "th-task th-sortable";
     th.dataset.key = t.id;
     th.style.setProperty("--cat", catColor[t.category]);
-    th.innerHTML = `<div class="th-inner"><span class="task-label">${t.tnum}</span></div>`;
+    th.innerHTML = `<div class="th-inner"><span class="task-tnum">${t.tnum}</span>` +
+                   `<span class="task-label">${t.slabel}</span></div>`;
     th.addEventListener("mouseenter", e => showTip(
       `<div class="tt-title">${t.tnum} · ${t.label}</div><div>${t.desc}</div>` +
       `<div class="tt-sub">${t.metric} · ${catLabel[t.category]} · <code>${t.id}</code></div>`, e));

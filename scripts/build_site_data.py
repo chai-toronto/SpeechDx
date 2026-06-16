@@ -177,6 +177,8 @@ def main() -> None:
         "id": t,
         "tnum": CANON_TO_TNUM[t],
         "label": TASK_META[t][1],
+        # header shorthand: the label with the trailing "(dataset)" stripped.
+        "slabel": re.sub(r"\s*\([^)]*\)\s*$", "", TASK_META[t][1]),
         "desc": TASK_META[t][2],
         "category": TASK_META[t][0],
         "type": kinds[t],
