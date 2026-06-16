@@ -127,6 +127,9 @@ REVISIONS = {
 CAT_INDEX = {c["code"]: i for i, c in enumerate(CATEGORIES)}
 CANON_TO_TNUM = {v: k for k, v in JUN2_TASK_MAP.items()}   # canonical id -> "T1"..
 REPO_URL = "https://github.com/chai-toronto/SpeechDx"
+LAB_URL = "https://chai.cs.toronto.edu/"
+AUTHOR = "Larry Kieu"
+AUTHOR_URL = "https://kieu.bearblog.dev"
 
 # "Average similar tasks": the six paper-faithful merges (same condition, different
 # corpus or framing). merged id -> (category, short label, member task ids, description).
@@ -267,6 +270,9 @@ def main() -> None:
     data = {
         "generated": dt.date.today().isoformat(),
         "repo_url": REPO_URL,
+        "lab_url": LAB_URL,
+        "author": AUTHOR,
+        "author_url": AUTHOR_URL,
         "n_models": len(scores.columns),
         "categories": CATEGORIES,
         "views": {"raw": raw_view, "merged": merged_view},

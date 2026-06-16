@@ -83,7 +83,9 @@
   function renderMeta() {
     document.getElementById("meta").innerHTML =
       `${DATA.n_models} external encoders · ${V().n_tasks} tasks · generated ${DATA.generated} · ` +
-      `<a href="${DATA.repo_url}" target="_blank" rel="noopener">GitHub repo ↗</a>`;
+      `<a href="${DATA.repo_url}" target="_blank" rel="noopener">GitHub repo ↗</a> · ` +
+      `<a href="${DATA.lab_url}" target="_blank" rel="noopener">CHAI Lab ↗</a> · ` +
+      `by <a href="${DATA.author_url}" target="_blank" rel="noopener">${DATA.author}</a>`;
   }
 
   function buildHeader() {

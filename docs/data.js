@@ -2,6 +2,9 @@
 window.LEADERBOARD_DATA = {
   "generated": "2026-06-16",
   "repo_url": "https://github.com/chai-toronto/SpeechDx",
+  "lab_url": "https://chai.cs.toronto.edu/",
+  "author": "Larry Kieu",
+  "author_url": "https://kieu.bearblog.dev",
   "n_models": 12,
   "categories": [
     {
