@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SpeechDx Leaderboard</title>
+  <meta name="description" content="Interactive leaderboard for the SpeechDx speech-health benchmark — external audio/speech encoders ranked by mean reciprocal rank across 27 clinical tasks." />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="page-head">
+    <h1>SpeechDx&nbsp;Leaderboard</h1>
+    <p class="tagline">
+      External audio &amp; speech encoders ranked by <strong>mean reciprocal rank</strong>
+      (MRR) across the SpeechDx clinical tasks. Each cell is a frozen-encoder linear
+      probe: <span class="chip chip-cls">ROC-AUC</span> for classification,
+      <span class="chip chip-reg">C-index</span> for regression — higher is better,
+      0.5&nbsp;=&nbsp;chance.
+    </p>
+    <p class="meta" id="meta"></p>
+  </header>
+
+  <section class="legend" id="legend" aria-label="Legend"></section>
+
+  <main>
+    <div class="table-wrap">
+      <table id="board" aria-label="SpeechDx leaderboard"></table>
+    </div>
+    <p class="hint">
+      Hover a <em>task</em> header for its description · hover a <em>model</em> for
+      its checkpoint · click a column header to sort.
+    </p>
+  </main>
+
+  <footer class="page-foot">
+    <span id="foot-src"></span>
+  </footer>
+
+  <div id="tooltip" class="tooltip" role="tooltip" hidden></div>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
