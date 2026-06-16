@@ -4,20 +4,35 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SpeechDx Leaderboard</title>
-  <meta name="description" content="Interactive leaderboard for the SpeechDx speech-health benchmark — external audio/speech encoders ranked by mean reciprocal rank across 27 clinical tasks." />
+  <meta name="description" content="Interactive leaderboard for the SpeechDx speech-health benchmark — external audio/speech encoders ranked by mean reciprocal rank across clinical tasks." />
+  <script>
+    /* set theme before paint to avoid a flash */
+    (function () {
+      try {
+        var t = localStorage.getItem("sdx-theme");
+        if (!t) t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.dataset.theme = t;
+      } catch (e) { document.documentElement.dataset.theme = "light"; }
+    })();
+  </script>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header class="page-head">
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dark / light mode" title="Toggle dark / light"></button>
     <h1>SpeechDx&nbsp;Leaderboard</h1>
     <p class="tagline">
       External audio &amp; speech encoders ranked by <strong>mean reciprocal rank</strong>
-      (MRR) across the SpeechDx clinical tasks. Each cell is a frozen-encoder linear
-      probe: <span class="chip chip-cls">ROC-AUC</span> for classification
+      (MRR) across the SpeechDx clinical tasks, grouped by a speech-production taxonomy.
+      Each cell is a frozen-encoder linear probe: <strong>AUC</strong> for classification
       (higher&nbsp;=&nbsp;better, 0.5&nbsp;=&nbsp;chance),
-      <span class="chip chip-reg">MAE</span> for regression (lower&nbsp;=&nbsp;better).
+      <strong>MAE&nbsp;↓</strong> for regression (lower&nbsp;=&nbsp;better).
     </p>
     <p class="meta" id="meta"></p>
+    <label class="merge-toggle">
+      <input type="checkbox" id="merge-toggle" />
+      <span>Average similar tasks</span>
+    </label>
   </header>
 
   <section class="legend" id="legend" aria-label="Legend"></section>
@@ -27,14 +42,10 @@
       <table id="board" aria-label="SpeechDx leaderboard"></table>
     </div>
     <p class="hint">
-      Hover a <em>task</em> header for its description · hover a <em>model</em> for
-      its checkpoint · click a column header to sort.
+      Hover/tap a <em>task</em> header for its description · a <em>model</em> for its
+      checkpoint · click a column header to sort.
     </p>
   </main>
-
-  <footer class="page-foot">
-    <span id="foot-src"></span>
-  </footer>
 
   <div id="tooltip" class="tooltip" role="tooltip" hidden></div>
 

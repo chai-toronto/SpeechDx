@@ -48,13 +48,12 @@ JUN2_TASK_MAP = {
     "T26": "coswara_sympL", "T27": "avfad_pathC",
 }
 
-# Speech-production taxonomy categories (paper). Colours are a colourblind-safe
-# placeholder palette — swap for the exact paper hexes if they differ.
+# Speech-production taxonomy categories (paper figure colours).
 CATEGORIES = [
-    {"code": "c1", "label": "Affective", "color": "#E15759"},
-    {"code": "c2", "label": "Cognitive", "color": "#4E79A7"},
-    {"code": "c3", "label": "Motor", "color": "#59A14F"},
-    {"code": "c4", "label": "Respiratory", "color": "#B07AA1"},
+    {"code": "c1", "label": "Conceptualization", "color": "#B58A2E"},                 # gold
+    {"code": "c2", "label": "Formulation", "color": "#4E79A7"},                        # blue
+    {"code": "c3", "label": "Articulation (Neuromuscular)", "color": "#A24E5E"},       # rose/red
+    {"code": "c4", "label": "Articulation (Phonatory/Respiratory)", "color": "#4E8C5A"},  # green
 ]
 
 # canonical task id -> (category code, short label, long hover description)
@@ -110,7 +109,19 @@ ENCODER_META = {
 
 CAT_INDEX = {c["code"]: i for i, c in enumerate(CATEGORIES)}
 CANON_TO_TNUM = {v: k for k, v in JUN2_TASK_MAP.items()}   # canonical id -> "T1"..
-LEADERBOARD_CSV_URL = "https://github.com/chai-toronto/SpeechDx/blob/main/leaderboard.csv"
+REPO_URL = "https://github.com/chai-toronto/SpeechDx"
+
+# "Average similar tasks": the six paper-faithful merges (same datasets/condition,
+# different corpus or framing). merged id -> (category, short label, member task ids).
+# All merged tasks are classification (ROC-AUC).
+MERGES = {
+    "emo_classify":   ("c1", "Emotion classification", ["ravdess_emoC", "iemocap_emoC"]),
+    "emo_neg":        ("c1", "Neg. emotion",           ["ravdess_emoBC", "iemocap_emoBC"]),
+    "dysarthria_det": ("c3", "Dysarthria detection",   ["torgo_dysC", "uaspeech_dysC"]),
+    "symptomatic":    ("c4", "Symptomatic",            ["c9s_t1", "c9s_L_t1", "coswara_sympC"]),
+    "covid_det":      ("c4", "COVID-19 detection",     ["c9s_t2", "c9s_L_t2", "coswara_covidC"]),
+    "symptom_multi":  ("c4", "Resp. symptoms",         ["c9s_sympL", "coswara_sympL"]),
+}
 
 
 def canonical(label: str) -> str:
@@ -138,52 +149,33 @@ def load_typed(input_dir: Path) -> pd.DataFrame:
     return pd.concat(frames, axis=0)
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("input_dir", type=Path, nargs="?", default=DEFAULT_INPUT)
-    ap.add_argument("-o", "--output", type=Path, default=OUT)
-    args = ap.parse_args()
+def _strip_dataset(label: str) -> str:
+    return re.sub(r"\s*\([^)]*\)\s*$", "", label)
 
-    typed = load_typed(args.input_dir)
-    kinds = typed.pop("__kind__")
-    scores = typed.drop(columns=[c for c in DROP if c in typed.columns])
 
-    encoders = [e for e in scores.columns if e in ENCODER_META]
-    unknown = set(scores.columns) - set(ENCODER_META)
-    if unknown:
-        raise SystemExit(f"encoders with no ENCODER_META: {sorted(unknown)}")
-    scores = scores[encoders]
-    # Drop encoders whose entire row is empty (no data on any task).
-    scores = scores.loc[:, scores.notna().any(axis=0)]
-    encoders = list(scores.columns)
+def apply_merges(scores: pd.DataFrame) -> pd.DataFrame:
+    """Average each merge's member rows into a single merged-task row."""
+    merged = scores.copy()
+    for new, (_cat, _label, src) in MERGES.items():
+        present = [s for s in src if s in merged.index]
+        if len(present) != len(src):
+            continue
+        merged.loc[new] = merged.loc[present].mean(axis=0)
+        merged = merged.drop(index=present)
+    return merged
 
-    missing_meta = [t for t in scores.index if t not in TASK_META]
-    if missing_meta:
-        raise SystemExit(f"tasks with no TASK_META: {sorted(missing_meta)}")
 
-    # Mean reciprocal rank: rank encoders within each task (regression = MAE is
-    # lower-better → ascending), reciprocate, average across tasks.
+def build_view(scores: pd.DataFrame, kinds: dict, meta: dict) -> dict:
+    """scores: tasks x encoders. meta[task] -> {sort,tnum,slabel,label,desc,category,type,metric}.
+    Computes MRR (regression ranked ascending = lower-better) and assembles tasks+models."""
     ranks = scores.rank(axis=1, method="min", ascending=False)
-    reg_tasks = [t for t in scores.index if kinds[t] == "regression"]
-    if reg_tasks:
-        ranks.loc[reg_tasks] = scores.loc[reg_tasks].rank(axis=1, method="min", ascending=True)
-    rr = 1.0 / ranks
-    mrr = rr.mean(axis=0, skipna=True)
+    reg = [t for t in scores.index if kinds[t] == "regression"]
+    if reg:
+        ranks.loc[reg] = scores.loc[reg].rank(axis=1, method="min", ascending=True)
+    mrr = (1.0 / ranks).mean(axis=0, skipna=True)
 
-    # Tasks ordered by paper T-number (T1..T27); that numbering already groups by
-    # category, so same-category columns stay contiguous for the colour band.
-    task_ids = sorted(scores.index, key=lambda t: int(CANON_TO_TNUM[t][1:]))
-    tasks = [{
-        "id": t,
-        "tnum": CANON_TO_TNUM[t],
-        "label": TASK_META[t][1],
-        # header shorthand: the label with the trailing "(dataset)" stripped.
-        "slabel": re.sub(r"\s*\([^)]*\)\s*$", "", TASK_META[t][1]),
-        "desc": TASK_META[t][2],
-        "category": TASK_META[t][0],
-        "type": kinds[t],
-        "metric": "ROC-AUC" if kinds[t] == "classification" else "MAE",
-    } for t in task_ids]
+    task_ids = sorted(scores.index, key=lambda t: meta[t]["sort"])
+    tasks = [{"id": t, **{k: v for k, v in meta[t].items() if k != "sort"}} for t in task_ids]
 
     order = mrr.sort_values(ascending=False)
     models = []
@@ -191,20 +183,64 @@ def main() -> None:
         short, disp, ckpt = ENCODER_META[enc]
         vals = {t: (None if pd.isna(scores.loc[t, enc]) else round(float(scores.loc[t, enc]), 4))
                 for t in task_ids}
-        models.append({
-            "id": enc, "short": short, "display": disp, "checkpoint": ckpt,
-            "rank": rank, "mrr": round(float(order[enc]), 4), "scores": vals,
-        })
+        models.append({"id": enc, "short": short, "display": disp, "checkpoint": ckpt,
+                       "rank": rank, "mrr": round(float(order[enc]), 4), "scores": vals})
+    return {"n_tasks": len(task_ids), "tasks": tasks, "models": models}
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("input_dir", type=Path, nargs="?", default=DEFAULT_INPUT)
+    ap.add_argument("-o", "--output", type=Path, default=OUT)
+    args = ap.parse_args()
+
+    typed = load_typed(args.input_dir)
+    kinds = typed.pop("__kind__").to_dict()
+    scores = typed.drop(columns=[c for c in DROP if c in typed.columns])
+
+    unknown = set(scores.columns) - set(ENCODER_META)
+    if unknown:
+        raise SystemExit(f"encoders with no ENCODER_META: {sorted(unknown)}")
+    scores = scores[[e for e in scores.columns if e in ENCODER_META]]
+    scores = scores.loc[:, scores.notna().any(axis=0)]          # drop all-empty encoders
+
+    missing_meta = [t for t in scores.index if t not in TASK_META]
+    if missing_meta:
+        raise SystemExit(f"tasks with no TASK_META: {sorted(missing_meta)}")
+
+    # --- raw view (27 tasks) ---
+    raw_meta = {t: {
+        "sort": int(CANON_TO_TNUM[t][1:]), "tnum": CANON_TO_TNUM[t],
+        "slabel": _strip_dataset(TASK_META[t][1]), "label": TASK_META[t][1],
+        "desc": TASK_META[t][2], "category": TASK_META[t][0], "type": kinds[t],
+        "metric": "ROC-AUC" if kinds[t] == "classification" else "MAE",
+    } for t in scores.index}
+    raw_view = build_view(scores, kinds, raw_meta)
+
+    # --- merged view ("average similar tasks") ---
+    merged_scores = apply_merges(scores)
+    merged_kinds = {t: ("classification" if t in MERGES else kinds[t]) for t in merged_scores.index}
+    merged_meta = {}
+    for t in merged_scores.index:
+        if t in MERGES:
+            cat, label, src = MERGES[t]
+            tnums = [CANON_TO_TNUM[s] for s in src]
+            merged_meta[t] = {
+                "sort": min(int(CANON_TO_TNUM[s][1:]) for s in src),
+                "tnum": "·".join(tnums), "slabel": label, "label": label,
+                "desc": "Average of " + " + ".join(TASK_META[s][1] for s in src),
+                "category": cat, "type": "classification", "metric": "ROC-AUC",
+            }
+        else:
+            merged_meta[t] = raw_meta[t]
+    merged_view = build_view(merged_scores, merged_kinds, merged_meta)
 
     data = {
         "generated": dt.date.today().isoformat(),
-        "source": str(args.input_dir.relative_to(REPO)),
-        "leaderboard_csv_url": LEADERBOARD_CSV_URL,
-        "n_tasks": len(task_ids),
-        "n_models": len(models),
+        "repo_url": REPO_URL,
+        "n_models": len(scores.columns),
         "categories": CATEGORIES,
-        "tasks": tasks,
-        "models": models,
+        "views": {"raw": raw_view, "merged": merged_view},
     }
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -214,7 +250,8 @@ def main() -> None:
         f"window.LEADERBOARD_DATA = {payload};\n",
         encoding="utf-8",
     )
-    print(f"wrote {args.output} ({len(models)} models x {len(task_ids)} tasks)")
+    print(f"wrote {args.output} ({len(scores.columns)} models; "
+          f"raw {raw_view['n_tasks']} tasks / merged {merged_view['n_tasks']} tasks)")
 
 
 if __name__ == "__main__":
