@@ -92,23 +92,24 @@ TASK_META = {
     "avfad_pathC":   ("c4", "Vocal pathology / healthy (AVFAD)", "Binary voice-pathology detection (AVFAD)."),
 }
 
-# encoder column id -> (display name, HF / source checkpoint)
+# encoder column id -> (shorthand, full display name, HF / source checkpoint)
 ENCODER_META = {
-    "wavlm_large": ("WavLM (Large)", "microsoft/wavlm-large"),
-    "whisper":     ("Whisper (Large-v3)", "openai/whisper-large-v3"),
-    "qwen3voice":  ("Qwen3-TTS-Tokenizer (12 Hz)", "Qwen/Qwen3-TTS-Tokenizer-12Hz"),
-    "ast":         ("AST (AudioSet-finetuned)", "MIT/ast-finetuned-audioset-10-10-0.4593"),
-    "audiomae":    ("AudioMAE", "hance-ai/audiomae"),
-    "wavjepa":     ("WavJEPA-Nat (Base)", "labhamlet/wavjepa-nat-base"),
-    "mms":         ("MMS-1B", "facebook/mms-1b"),
-    "hubert":      ("HuBERT (Large, ASR-FT)", "facebook/hubert-large-ls960-ft"),
-    "emotion2vec": ("emotion2vec+ Large", "iic/emotion2vec_plus_large"),
-    "opera_gt":    ("OPERA-GT", "evelyn0414/OPERA (encoder-operaGT.ckpt)"),
-    "w2v2":        ("wav2vec 2.0 (Large, ASR-FT)", "facebook/wav2vec2-large-960h-lv60-self"),
-    "clap":        ("CLAP (LAION-Larger-General)", "laion/larger_clap_general"),
+    "wavlm_large": ("WavLM-Large", "WavLM (Large)", "microsoft/wavlm-large"),
+    "whisper":     ("Whisper", "Whisper (Large-v3)", "openai/whisper-large-v3"),
+    "qwen3voice":  ("Qwen3-Voice", "Qwen3-TTS-Tokenizer (12 Hz)", "Qwen/Qwen3-TTS-Tokenizer-12Hz"),
+    "ast":         ("AST", "AST (AudioSet-finetuned)", "MIT/ast-finetuned-audioset-10-10-0.4593"),
+    "audiomae":    ("AudioMAE", "AudioMAE", "hance-ai/audiomae"),
+    "wavjepa":     ("WavJEPA", "WavJEPA-Nat (Base)", "labhamlet/wavjepa-nat-base"),
+    "mms":         ("MMS", "MMS-1B", "facebook/mms-1b"),
+    "hubert":      ("HuBERT", "HuBERT (Large, ASR-FT)", "facebook/hubert-large-ls960-ft"),
+    "emotion2vec": ("emotion2vec", "emotion2vec+ Large", "iic/emotion2vec_plus_large"),
+    "opera_gt":    ("OPERA-GT", "OPERA-GT", "evelyn0414/OPERA (encoder-operaGT.ckpt)"),
+    "w2v2":        ("wav2vec2", "wav2vec 2.0 (Large, ASR-FT)", "facebook/wav2vec2-large-960h-lv60-self"),
+    "clap":        ("CLAP", "CLAP (LAION-Larger-General)", "laion/larger_clap_general"),
 }
 
 CAT_INDEX = {c["code"]: i for i, c in enumerate(CATEGORIES)}
+CANON_TO_TNUM = {v: k for k, v in JUN2_TASK_MAP.items()}   # canonical id -> "T1"..
 LEADERBOARD_CSV_URL = "https://github.com/chai-toronto/SpeechDx/blob/main/leaderboard.csv"
 
 
@@ -169,14 +170,12 @@ def main() -> None:
     rr = 1.0 / ranks
     mrr = rr.mean(axis=0, skipna=True)
 
-    # Tasks ordered by category, then classification before regression, then id.
-    def task_sort_key(t: str):
-        cat, _, _ = TASK_META[t]
-        return (CAT_INDEX[cat], 0 if kinds[t] == "classification" else 1, t)
-
-    task_ids = sorted(scores.index, key=task_sort_key)
+    # Tasks ordered by paper T-number (T1..T27); that numbering already groups by
+    # category, so same-category columns stay contiguous for the colour band.
+    task_ids = sorted(scores.index, key=lambda t: int(CANON_TO_TNUM[t][1:]))
     tasks = [{
         "id": t,
+        "tnum": CANON_TO_TNUM[t],
         "label": TASK_META[t][1],
         "desc": TASK_META[t][2],
         "category": TASK_META[t][0],
@@ -187,11 +186,11 @@ def main() -> None:
     order = mrr.sort_values(ascending=False)
     models = []
     for rank, enc in enumerate(order.index, start=1):
-        disp, ckpt = ENCODER_META[enc]
+        short, disp, ckpt = ENCODER_META[enc]
         vals = {t: (None if pd.isna(scores.loc[t, enc]) else round(float(scores.loc[t, enc]), 4))
                 for t in task_ids}
         models.append({
-            "id": enc, "display": disp, "checkpoint": ckpt,
+            "id": enc, "short": short, "display": disp, "checkpoint": ckpt,
             "rank": rank, "mrr": round(float(order[enc]), 4), "scores": vals,
         })
 

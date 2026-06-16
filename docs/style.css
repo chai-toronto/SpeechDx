@@ -63,17 +63,18 @@ thead th {
 thead th .th-inner { padding: 9px 10px; }
 
 /* model + MRR columns pinned while scrolling tasks */
-.col-model { position: sticky; left: 0; z-index: 2; background: var(--panel); text-align: left; min-width: 210px; }
+.col-model { position: sticky; left: 0; z-index: 2; background: var(--panel); text-align: left; min-width: 150px; }
 .col-mrr   { position: sticky; z-index: 2; background: var(--panel); text-align: center; min-width: 86px; }
 thead .col-model, thead .col-mrr { z-index: 4; }
 .col-model { border-right: 1px solid var(--line); }
 .col-mrr   { border-right: 2px solid var(--line); }
 
-/* task header cells: category-coloured top border + dot */
-.th-task { cursor: pointer; }
-.th-task .th-inner { border-top: 3px solid var(--cat, #ccc); text-align: center; max-width: 132px; white-space: normal; }
-.th-task .task-label { display: block; font-weight: 600; font-size: 12px; }
-.th-task .cat-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+/* task header cells: a continuous category-coloured band along the top of the
+   header row — the border is on the cell, so same-category columns (which are
+   contiguous in T-number order) form one straight line. Inner = short T-number. */
+.th-task { cursor: pointer; border-top: 4px solid var(--cat, #ccc); }
+.th-task .th-inner { text-align: center; min-width: 30px; padding: 9px 7px; }
+.th-task .task-label { display: block; font-weight: 700; font-size: 12px; font-variant-numeric: tabular-nums; }
 .th-sortable { cursor: pointer; user-select: none; }
 .th-sortable:hover .th-inner { background: #f0f3f9; }
 .sort-active { color: var(--accent); }

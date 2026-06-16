@@ -118,12 +118,10 @@
     const th = document.createElement("th");
     th.className = "th-task th-sortable";
     th.dataset.key = t.id;
-    th.innerHTML =
-      `<div class="th-inner" style="--cat:${catColor[t.category]}">` +
-        `<span class="task-label"><span class="cat-dot" style="background:${catColor[t.category]}"></span>${t.label}</span>` +
-      `</div>`;
+    th.style.setProperty("--cat", catColor[t.category]);
+    th.innerHTML = `<div class="th-inner"><span class="task-label">${t.tnum}</span></div>`;
     th.addEventListener("mouseenter", e => showTip(
-      `<div class="tt-title">${t.label}</div><div>${t.desc}</div>` +
+      `<div class="tt-title">${t.tnum} · ${t.label}</div><div>${t.desc}</div>` +
       `<div class="tt-sub">${t.metric} · ${catLabel[t.category]} · <code>${t.id}</code></div>`, e));
     th.addEventListener("mousemove", moveTip);
     th.addEventListener("mouseleave", hideTip);
@@ -168,8 +166,7 @@
       tdM.className = "col-model cell-model";
       tdM.innerHTML =
         `<span class="rank">${m.rank}.</span>` +
-        `<span class="name">${m.display}</span>` +
-        `<span class="ckpt">${m.checkpoint}</span>`;
+        `<span class="name">${m.short}</span>`;
       tdM.addEventListener("mouseenter", e => showTip(
         `<div class="tt-title">${m.display}</div>` +
         `<div class="tt-sub">checkpoint</div><code>${m.checkpoint}</code>`, e));
