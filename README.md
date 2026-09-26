@@ -12,6 +12,7 @@ The benchmark evaluates multiple state-of-the-art audio and speech encoders usin
 - [Install](#install)
 - [Reproducing the full benchmark](#reproducing-the-full-benchmark)
 - [Switching the readout to ASP](#switching-the-readout-to-asp)
+- [LoRA adaptation (top-3 encoders)](#lora-adaptation-top-3-encoders)
 - [Modes](#modes)
 - [Commands](#commands) — [`prep`](#prep), [`warm`](#warm), [`train`](#train), [`run`](#run--warm--train--summary), [`status`](#status), [`summary`](#summary)
 - [Examples](#examples)
@@ -159,6 +160,27 @@ Things to know before switching:
 - **Capacity.** The ASP head has roughly 4000x the parameters of the linear
   probe (about 4.2M vs about 1k for a 1024-d encoder on a binary task). An ASP-vs-mean
   gap measures attentive pooling *and* extra capacity together.
+
+## LoRA adaptation (top-3 encoders)
+
+`sdx/lora/` is an opt-in track that adapts the encoder itself instead of only
+training a readout. It adds rank-8 LoRA adapters to the query/value
+projections of the last few transformer blocks (at most 100k adapter
+parameters) and trains them together with the benchmark's linear head. It
+ships model-specific support for the three best encoders on the main board: **Whisper**, **WavLM-Large** (`wavlm`) and
+**Qwen3-TTS-Tokenizer** (`qwen3voice`).
+
+```bash
+# Once per (dataset, encoder): cache the activations entering the first adapted block.
+uv run python scripts/lora_warm.py  --task T13 --encoder whisper --device cuda
+# One LoRA cell (15 epochs, best-val checkpoint, one test evaluation).
+uv run python scripts/lora_train.py --task T13 --encoder whisper --device cuda
+```
+
+The full protocol, the split-parity check, and a step-by-step guide to adding
+another encoder are in [`sdx/lora/README.md`](sdx/lora/README.md). Nothing in
+`sdx/lora/` is imported by the frozen-probe pipeline, so the benchmark's own
+numbers cannot change because of it.
 
 ## Modes
 
@@ -768,10 +790,12 @@ CLAP requires `--warm-workers 1` because of 48 kHz memory pressure
 │   ├── run*.py             Top-level run loops per mode
 │   ├── prep/               Per-dataset manifest builders
 │   ├── dataio/             HDF5 cache + speechbrain pipeline glue
+│   ├── lora/               Opt-in LoRA adaptation track (see sdx/lora/README.md)
 │   └── configs/            YAML hierarchy (tasks/, encoders/, probes/, registry.yaml)
 ├── model/                  Encoder + probe + pooling implementations
 ├── metadata_script/        One create_<dataset>_metadata.py per dataset
-├── scripts/                Per-dataset download scripts (open-access corpora)
+├── scripts/                Download scripts, LoRA entry points (lora_*.py), warm checks
+├── tests/                  pytest suite (probe switch, LoRA); no downloads needed
 ├── slurm/                  SLURM job templates
 ├── third_party/OPERA/      Vendored OPERA encoder loader
 ├── data/                   Audio + per-dataset CSVs (gitignored, large)
