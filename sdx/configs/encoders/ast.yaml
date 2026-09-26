@@ -6,6 +6,11 @@ layer_dim: 1
 max_length: 10
 min_length: 10
 
+# Chunks batched per encoder forward() during warm. min_length==max_length (10s) -> uniform chunks, no padding: batching is EXACT (max|diff|=0).
+# Validated batched==serial before enabling (scripts/compare_warm_batched.py pattern).
+# Perf-only knob; OOM-safe halving shrinks it if a batch is too big.
+warm_batch_size: 32
+
 encoder: !new:model.ast.AST
   ssl_encoder_source: "MIT/ast-finetuned-audioset-10-10-0.4593"
   freeze_encoder: True

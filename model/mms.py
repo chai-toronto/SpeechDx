@@ -47,28 +47,44 @@ class MMS(nn.Module):
             If output_hidden_states is True: tuple of hidden states from all encoder layers
             Else: last hidden state tensor (B, T', D)
         """
-        # Convert to list for feature extractor
+        # Slice each row to its TRUE length before the feature extractor so
+        # per-sample normalization (and the conv frontend) never see a ragged
+        # batch's zero-padding — otherwise a padded batch's valid frames
+        # diverge from the per-chunk serial forward (validated: layer-norm
+        # feat-extract still contaminates without this). Mirrors WavLM.forward.
+        # The serial (lengths=None) path is unchanged, so existing caches match.
+        model_device = next(self.model.parameters()).device
         if isinstance(x, torch.Tensor):
-            x_list = [xi.cpu().numpy() for xi in x]
+            if x.dim() == 1:
+                x = x.unsqueeze(0)
+            B, T = x.shape
+            if lengths is None:
+                abs_len = None
+                x_list = [x[i].detach().cpu().numpy() for i in range(B)]
+            else:
+                abs_len = (lengths.to(x.device).float() * T).round().long().clamp(1, T)
+                x_list = [x[i, :int(abs_len[i])].detach().cpu().numpy() for i in range(B)]
         else:
+            abs_len = None
             x_list = x
-        
+
         inputs = self.feature_extractor(
             x_list,
             sampling_rate=self.sample_rate,
             return_tensors="pt",
             padding=True,
         )
-        
-        input_values = inputs.input_values.to(next(self.model.parameters()).device)
-        
-        # Create attention mask if lengths provided
+
+        # Cast to the model's weight dtype (e.g. an encoder cast to fp16) so
+        # the conv frontend doesn't hit an fp32/fp16 mismatch. No-op in fp32.
+        input_values = inputs.input_values.to(
+            model_device, dtype=next(self.model.parameters()).dtype)
+
+        # Attention mask from the true lengths, over the padded frame axis.
         attention_mask = None
-        if lengths is not None:
-            T = input_values.shape[1]
-            abs_lengths = (lengths * T).long()
-            attention_mask = length_to_mask(abs_lengths, max_len=T)
-            attention_mask = attention_mask.to(input_values.device)
+        if abs_len is not None:
+            attention_mask = length_to_mask(
+                abs_len, max_len=input_values.shape[1]).to(model_device)
 
         with (torch.no_grad() if self.freeze_encoder else torch.enable_grad()):
             outputs = self.model(input_values, attention_mask=attention_mask)
@@ -77,6 +93,17 @@ class MMS(nn.Module):
                 return outputs.hidden_states[1:]  # Skip embedding layer
             else:
                 return outputs.last_hidden_state
+
+    def feature_lengths(self, sample_lengths):
+        """Exact encoder output frame count per input sample length.
+
+        wav2vec2-family conv-stack downsampling is a deterministic function of
+        input samples, so the batched warmer can crop a padded ``(B, T', D)``
+        output back to each chunk's true frame count exactly (bit-identical to
+        the per-chunk serial path) instead of the proportional approximation.
+        """
+        return self.model._get_feat_extract_output_lengths(
+            torch.as_tensor(sample_lengths)).long()
 
 
 if __name__ == "__main__":

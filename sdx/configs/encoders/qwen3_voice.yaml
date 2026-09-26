@@ -5,6 +5,10 @@ layer_dim: 1
 max_length: 10e5
 min_length: 1
 
+# DO NOT BATCH (warm_batch_size must stay 1). Chunks are whole recordings
+# (max_length 10e5) => ragged batch. Validated: a padded batch yields a
+# DIFFERENT frame count than serial (serial (106,512) vs batched (107,512)) and
+# max|serial-batched| = 5.76 -> it would silently corrupt the cache.
 encoder: !new:model.qwen3_voice.Qwen3Voice
   source: "Qwen/Qwen3-TTS-Tokenizer-12Hz"
   freeze_encoder: True

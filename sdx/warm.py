@@ -280,6 +280,57 @@ def _encode_chunk_batch(buffer: list, speech_encoder, tmp: h5py.File,
             tmp.create_dataset(key, data=o.detach().cpu().numpy())
 
 
+def _is_cuda_oom(exc: BaseException) -> bool:
+    """Heuristic: a real CUDA OOM vs any other RuntimeError.
+
+    ``torch.cuda.OutOfMemoryError`` only exists in recent PyTorch; before
+    that it is a plain ``RuntimeError`` whose message starts with ``CUDA out
+    of memory``. Check both shapes so the retry logic works either way.
+    """
+    if torch.cuda.is_available():
+        oom_cls = getattr(torch.cuda, "OutOfMemoryError", None)
+        if oom_cls is not None and isinstance(exc, oom_cls):
+            return True
+    return isinstance(exc, RuntimeError) and "out of memory" in str(exc).lower()
+
+
+def _encode_chunk_batch_oom_safe(buffer: list, speech_encoder, tmp: h5py.File,
+                                 ohs: bool, device) -> None:
+    """Run ``_encode_chunk_batch`` with an OOM-driven halve-and-retry.
+
+    Attention is O(T^2), so a batch that happens to bundle several
+    max-length chunks can OOM even when the average batch fits. Rather than
+    crash the whole warm, split the batch in half and retry; the recursion
+    bottoms out at ``len == 1``, which is the per-chunk serial path (if a
+    single chunk OOMs there is nothing left to shrink, so the error
+    propagates).
+    """
+    try:
+        _encode_chunk_batch(buffer, speech_encoder, tmp, ohs, device)
+        return
+    except BaseException as exc:  # noqa: BLE001 — narrowed inside
+        if not _is_cuda_oom(exc) or len(buffer) <= 1:
+            raise
+        # The traceback holds frames whose locals include the tensors that
+        # just OOM'd; empty_cache() cannot reclaim them while those frames
+        # are alive. Drop the traceback first, then gc + empty the cache so
+        # the retry starts from a clean allocator state.
+        exc.__traceback__ = None
+        mid = len(buffer) // 2
+        msg = (f"  [warn] OOM at batch={len(buffer)} — splitting to "
+               f"{mid}+{len(buffer) - mid} and retrying.")
+        del exc
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    print(msg)
+    _encode_chunk_batch_oom_safe(buffer[:mid], speech_encoder, tmp, ohs, device)
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    _encode_chunk_batch_oom_safe(buffer[mid:], speech_encoder, tmp, ohs, device)
+
+
 def _read_chunk(tmp: h5py.File, key: str, ohs: bool):
     """Read one chunk's per-frame embedding back from the tmp HDF5."""
     if ohs:
@@ -339,14 +390,16 @@ def _drive_warm_batched(warmup, speech_encoder, cache_pool: str,
                     for ci, sig in enumerate(signals):
                         buffer.append((f"{uid}/c{ci}", sig))
                         if len(buffer) >= batch_size:
-                            _encode_chunk_batch(buffer, speech_encoder, tmp, ohs, device)
+                            _encode_chunk_batch_oom_safe(
+                                buffer, speech_encoder, tmp, ohs, device)
                             done_n += len(buffer)
                             buffer = []
                             rate = (time.time() - t0) / done_n
                             print(f"  [{kind} v{version}] {done_n} chunks encoded "
                                   f"({rate:.2f}s/chunk)")
                 if buffer:
-                    _encode_chunk_batch(buffer, speech_encoder, tmp, ohs, device)
+                    _encode_chunk_batch_oom_safe(
+                        buffer, speech_encoder, tmp, ohs, device)
                     done_n += len(buffer)
 
             # Phase 2: concat each uid's chunks from scratch, pool, write cache.
