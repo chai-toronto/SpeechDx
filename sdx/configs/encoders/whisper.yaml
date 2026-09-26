@@ -7,7 +7,7 @@ max_length: 30
 min_length: 30
 
 # Chunks batched per encoder forward() during warm. min_length==max_length (30s) -> uniform chunks; batched==serial to 4.8e-5 relative on raw frames.
-# Validated batched==serial before enabling (scripts/compare_warm_batched.py pattern).
+# Validated batched==serial on real audio before enabling (re-check: tests/test_batched_warm.py).
 # Perf-only knob; OOM-safe halving shrinks it if a batch is too big.
 warm_batch_size: 16
 

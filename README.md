@@ -11,8 +11,6 @@ The benchmark evaluates multiple state-of-the-art audio and speech encoders usin
 
 - [Install](#install)
 - [Reproducing the full benchmark](#reproducing-the-full-benchmark)
-- [Switching the readout to ASP](#switching-the-readout-to-asp)
-- [LoRA adaptation (top-3 encoders)](#lora-adaptation-top-3-encoders)
 - [Modes](#modes)
 - [Commands](#commands) — [`prep`](#prep), [`warm`](#warm), [`train`](#train), [`run`](#run--warm--train--summary), [`status`](#status), [`summary`](#summary)
 - [Examples](#examples)
@@ -21,6 +19,8 @@ The benchmark evaluates multiple state-of-the-art audio and speech encoders usin
 - [Adding a task](#adding-a-task) — [Cross-validation tasks](#cross-validation-tasks)
 - [Adding a cross task](#adding-a-cross-task)
 - [Adding an encoder](#adding-an-encoder)
+- [Switching the readout to ASP](#switching-the-readout-to-asp)
+- [LoRA adaptation (top-3 encoders)](#lora-adaptation-top-3-encoders)
 - [Notes](#notes)
 - [Concurrency](#concurrency)
 - [Repository layout](#repository-layout)
@@ -89,98 +89,6 @@ Each `_summary_<tag>/` directory holds per-metric CSVs (`AUC.csv`,
 `PearsonR.csv`, `R2.csv`, `completion.csv`) — rows are tasks, columns are
 encoders. The same matrices are pretty-printed to stdout at the end of
 the command.
-
-## Switching the readout to ASP
-
-The benchmark's default readout mean-pools each recording's frames at warm
-time and trains a linear probe on the pooled `(D,)` vector (`AvgTProbe`,
-cache `single_avg/`). The **ASP** readout keeps every frame instead
-(`single/`, a `(T, D)` matrix per recording) and trains
-[attentive statistics pooling](https://arxiv.org/abs/1803.10963) + a linear
-head: the probe learns which frames to attend to and pools an
-attention-weighted mean **and** standard deviation (`2D`). Tasks, splits,
-augmentation, losses, class weights, the HP search and the metrics are
-unchanged. Only the readout differs.
-
-Switching is one flag, `--probe ASP`, passed to every single-mode command:
-
-```bash
-# 1. Warm the temporal cache. ASP.yaml declares `cache_pool: none`, so this
-#    writes <dataset>/<encoder>/{train,val}/single/ next to single_avg/.
-uv run python -m sdx single warm  -t T13 -e whisper --probe ASP
-
-# 2. Train + evaluate. Results land in exps/single_task/T13/whisper-ASP-run1/,
-#    never on top of the mean-pool folder (whisper-AvgTProbe-run1/).
-uv run python -m sdx single train -t T13 -e whisper --probe ASP
-
-# Or both phases for many pairs at once:
-uv run python -m sdx single run -e whisper -e wavlm --probe ASP
-
-# Completion grid and CSVs for the ASP runs:
-uv run python -m sdx single status  --probe ASP
-uv run python -m sdx single summary --probe ASP   # → exps/single_task/_summary_ASP_run1/
-```
-
-Drop `--probe` (or pass `--probe AvgTProbe`) to go back to mean pooling;
-both caches and both result trees can live side by side.
-
-How it works: `--probe X` selects `sdx/configs/probes/X.yaml` as the head and
-labels the experiment folder `X`. If the probe yaml has a top-level
-`cache_pool:` line, that value replaces `main.yaml`'s `cache_pool: mean` at
-compose time, so the warm and the trainer agree on the cache layout. Any new
-probe yaml you drop into `probes/` is selectable the same way.
-
-Things to know before switching:
-
-- **Disk.** The temporal cache is roughly *frames-per-recording* times larger
-  than the pooled one, because it stores `T x D` instead of `D` per recording
-  and augmented version. Short-clip corpora are cheap, but the largest
-  (COVID-19 Sounds, ~53k recordings) is on the order of a terabyte per
-  encoder in fp32.
-- **Very long recordings.** SpeechBrain's ASP layer concatenates
-  `[x, mean, std]` into `3D` channels before a conv, and that tensor has to
-  stay under `2**31` elements. At the default `batch_size: 16` that is about
-  43.7k frames for `D=1024` and 35k for `D=1280`, which a few EDAIC and
-  AphasiaBank interviews exceed. `cache_max_frames` (default `-1`, off) keeps
-  only the first N frames of each recording at read time:
-
-  ```bash
-  uv run python -m sdx single train -t T9 -e whisper --probe ASP \
-      --overrides "cache_max_frames: 30000"
-  ```
-
-  It is a methodological change, so apply it only where needed and report it.
-  The ASP rows on the [leaderboard](https://chai.cs.toronto.edu/speechdx-leaderboard/)
-  capped reads at 30,000 frames (a no-op except on AphasiaBank and EDAIC),
-  and at 10,000 frames for most EDAIC (T1/T2) cells to fit GPU memory.
-- **Numerics.** The leaderboard's ASP track warmed fp16 caches on GPU and
-  trained the probe in bf16 (`--overrides "precision: bf16"`). The committed
-  configs here warm and train in fp32, so expect small differences, not
-  identical numbers.
-- **Capacity.** The ASP head has roughly 4000x the parameters of the linear
-  probe (about 4.2M vs about 1k for a 1024-d encoder on a binary task). An ASP-vs-mean
-  gap measures attentive pooling *and* extra capacity together.
-
-## LoRA adaptation (top-3 encoders)
-
-`sdx/lora/` is an opt-in track that adapts the encoder itself instead of only
-training a readout. It adds rank-8 LoRA adapters to the query/value
-projections of the last few transformer blocks (at most 100k adapter
-parameters) and trains them together with the benchmark's linear head. It
-ships model-specific support for the three best encoders on the main board: **Whisper**, **WavLM-Large** (`wavlm`) and
-**Qwen3-TTS-Tokenizer** (`qwen3voice`).
-
-```bash
-# Once per (dataset, encoder): cache the activations entering the first adapted block.
-uv run python scripts/lora_warm.py  --task T13 --encoder whisper --device cuda
-# One LoRA cell (15 epochs, best-val checkpoint, one test evaluation).
-uv run python scripts/lora_train.py --task T13 --encoder whisper --device cuda
-```
-
-The full protocol, the split-parity check, and a step-by-step guide to adding
-another encoder are in [`sdx/lora/README.md`](sdx/lora/README.md). Nothing in
-`sdx/lora/` is imported by the frozen-probe pipeline, so the benchmark's own
-numbers cannot change because of it.
 
 ## Modes
 
@@ -727,12 +635,107 @@ knob themselves (no fall-through to single-task yamls).
    normalization and mask the transformer, as `model/wavlm.py` does. Expose
    `feature_lengths(sample_lengths)` for an exact frame crop; without it the
    warmer crops proportionally. Encoders whose chunks all have the same length
-   (`min_length == max_length`) never pad, so batching them is exact. Check
-   batched against serial before enabling it (`scripts/compare_warm_batched.py`
-   shows how).
+   (`min_length == max_length`) never pad, so batching is exact up to float
+   rounding. Frame-axis normalization that sees the padding breaks it:
+   wav2vec2-family checkpoints with `feat_extract_norm: group` (the base-size
+   ones) GroupNorm over time, so keep those at 1. Before enabling it, check
+   batched against serial on a few real recordings with
+   `assert_batched_matches_serial` in `tests/test_batched_warm.py`.
 
 For the full encoder / probe / pool contracts and additional examples, see
 [`model/README.md`](model/README.md).
+
+## Switching the readout to ASP
+
+The benchmark's default readout mean-pools each recording's frames at warm
+time and trains a linear probe on the pooled `(D,)` vector (`AvgTProbe`,
+cache `single_avg/`). The **ASP** readout keeps every frame instead
+(`single/`, a `(T, D)` matrix per recording) and trains
+[attentive statistics pooling](https://arxiv.org/abs/1803.10963) + a linear
+head: the probe learns which frames to attend to and pools an
+attention-weighted mean **and** standard deviation (`2D`). Tasks, splits,
+augmentation, losses, class weights, the HP search and the metrics are
+unchanged. Only the readout differs.
+
+Switching is one flag, `--probe ASP`, passed to every single-mode command:
+
+```bash
+# 1. Warm the temporal cache. ASP.yaml declares `cache_pool: none`, so this
+#    writes <dataset>/<encoder>/{train,val}/single/ next to single_avg/.
+uv run python -m sdx single warm  -t T13 -e whisper --probe ASP
+
+# 2. Train + evaluate. Results land in exps/single_task/T13/whisper-ASP-run1/,
+#    never on top of the mean-pool folder (whisper-AvgTProbe-run1/).
+uv run python -m sdx single train -t T13 -e whisper --probe ASP
+
+# Or both phases for many pairs at once:
+uv run python -m sdx single run -e whisper -e wavlm --probe ASP
+
+# Completion grid and CSVs for the ASP runs:
+uv run python -m sdx single status  --probe ASP
+uv run python -m sdx single summary --probe ASP   # → exps/single_task/_summary_ASP_run1/
+```
+
+Drop `--probe` (or pass `--probe AvgTProbe`) to go back to mean pooling;
+both caches and both result trees can live side by side.
+
+How it works: `--probe X` selects `sdx/configs/probes/X.yaml` as the head and
+labels the experiment folder `X`. If the probe yaml has a top-level
+`cache_pool:` line, that value replaces `main.yaml`'s `cache_pool: mean` at
+compose time, so the warm and the trainer agree on the cache layout. Any new
+probe yaml you drop into `probes/` is selectable the same way.
+
+Things to know before switching:
+
+- **Disk.** The temporal cache is roughly *frames-per-recording* times larger
+  than the pooled one, because it stores `T x D` instead of `D` per recording
+  and augmented version. Short-clip corpora are cheap, but the largest
+  (COVID-19 Sounds, ~53k recordings) is on the order of a terabyte per
+  encoder in fp32.
+- **Very long recordings.** SpeechBrain's ASP layer concatenates
+  `[x, mean, std]` into `3D` channels before a conv, and that tensor has to
+  stay under `2**31` elements. At the default `batch_size: 16` that is about
+  43.7k frames for `D=1024` and 35k for `D=1280`, which a few EDAIC and
+  AphasiaBank interviews exceed. `cache_max_frames` (default `-1`, off) keeps
+  only the first N frames of each recording at read time:
+
+  ```bash
+  uv run python -m sdx single train -t T9 -e whisper --probe ASP \
+      --overrides "cache_max_frames: 30000"
+  ```
+
+  It is a methodological change, so apply it only where needed and report it.
+  The ASP rows on the [leaderboard](https://chai.cs.toronto.edu/speechdx-leaderboard/)
+  capped reads at 30,000 frames (a no-op except on AphasiaBank and EDAIC),
+  and at 10,000 frames for most EDAIC (T1/T2) cells to fit GPU memory.
+- **Numerics.** The leaderboard's ASP track warmed fp16 caches on GPU and
+  trained the probe in bf16 (`--overrides "precision: bf16"`). The committed
+  configs here warm and train in fp32, so expect small differences, not
+  identical numbers.
+- **Capacity.** The ASP head has roughly 4000x the parameters of the linear
+  probe (about 4.2M vs about 1k for a 1024-d encoder on a binary task). An ASP-vs-mean
+  gap measures attentive pooling *and* extra capacity together.
+
+## LoRA adaptation (top-3 encoders)
+
+`sdx/lora/` is an opt-in track that adapts the encoder itself instead of only
+training a readout. It adds rank-8 LoRA adapters to the query/value
+projections of the last few transformer blocks (at most 100k adapter
+parameters) and trains them together with the benchmark's linear head. It
+ships model-specific support for the three best encoders on the main board: **Whisper**, **WavLM-Large** (`wavlm`) and
+**Qwen3-TTS-Tokenizer** (`qwen3voice`).
+
+```bash
+# Once per (dataset, encoder): cache the activations entering the first adapted block.
+uv run python scripts/lora_warm.py  --task T13 --encoder whisper --device cuda
+# One LoRA cell (15 epochs, best-val checkpoint, one test evaluation).
+uv run python scripts/lora_train.py --task T13 --encoder whisper --device cuda
+```
+
+The full protocol, the split-parity check, and a step-by-step guide to adding
+another encoder are in [`sdx/lora/README.md`](sdx/lora/README.md). Nothing in
+`sdx/lora/` is imported by the frozen-probe pipeline, so the benchmark's own
+numbers cannot change because of it.
 
 ## Notes
 
@@ -794,8 +797,8 @@ CLAP requires `--warm-workers 1` because of 48 kHz memory pressure
 │   └── configs/            YAML hierarchy (tasks/, encoders/, probes/, registry.yaml)
 ├── model/                  Encoder + probe + pooling implementations
 ├── metadata_script/        One create_<dataset>_metadata.py per dataset
-├── scripts/                Download scripts, LoRA entry points (lora_*.py), warm checks
-├── tests/                  pytest suite (probe switch, LoRA); no downloads needed
+├── scripts/                Download scripts, LoRA entry points (lora_*.py)
+├── tests/                  pytest suite (probe switch, batched warm, WavLM attention, LoRA); no downloads needed
 ├── slurm/                  SLURM job templates
 ├── third_party/OPERA/      Vendored OPERA encoder loader
 ├── data/                   Audio + per-dataset CSVs (gitignored, large)
