@@ -4,7 +4,7 @@
 SpeechDx is a benchmark for evaluating speech foundation models on clinically motivated tasks. It spans 27 classification tasks across 12 datasets, covering a range of conditions, including dementia, depression, COVID-19, and dysarthria. Tasks are organized by a speech production taxonomy distinguishing health conditions affecting the conceptualization, formulation, and articulation of speech, grounding evaluation in established clinical theory rather than dataset provenance alone.
 The benchmark evaluates multiple state-of-the-art audio and speech encoders using a linear probing protocol, reporting AUC for classification and MAE for regression, with bootstrapped confidence intervals. 
 
-![Performance of state-of-the-art audio/speech encoders across all tasks in the benchmark.](all_tasks_results.png)
+![Performance of state-of-the-art audio/speech encoders across all tasks in the benchmark.](all_tasks_result.png)
 
 [**Leaderboard ↗**](https://chai.cs.toronto.edu/speechdx-leaderboard/)
 ## Contents
