@@ -20,12 +20,19 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
     augmentation variety; one is sampled uniformly at load time.
     """
 
-    def __init__(self, cache_location, file_mode="a", num_version=1, *args, **kwargs):
+    def __init__(self, cache_location, file_mode="a", num_version=1,
+                 read_max_frames: int = 0, *args, **kwargs):
         super().__init__(cache_location, *args, **kwargs)
 
         self.file_mode = file_mode
         self.cache_location /= "cache.hdf5"
         self.num_version = num_version
+        # Read-time crop along the time axis of a (T, D) entry: keep the
+        # first ``read_max_frames`` frames. <= 0 disables it (the default;
+        # every existing cache and the published protocol are unaffected).
+        # 1-D (D,) mean-pooled entries have no time axis and are never
+        # cropped. h5py slices on read, so dropped frames are never paged in.
+        self.read_max_frames = int(read_max_frames or 0)
         print(f"Opening HDF5 cache at {self.cache_location} with mode {file_mode}")
         open_kwargs = {"locking": False} if file_mode == "r" else {}
         self.hdf5file = h5py.File(self.cache_location, file_mode, **open_kwargs)
@@ -63,7 +70,11 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
 
     def _load(self, uid):
         version = random.randint(0, self.num_version - 1)
-        return self.hdf5file[self._version_key(uid, version)][:]
+        ds = self.hdf5file[self._version_key(uid, version)]
+        m = self.read_max_frames
+        if m > 0 and ds.ndim == 2 and ds.shape[0] > m:
+            return ds[:m]
+        return ds[:]
 
     def _cache(self, result, uid):
         for v in range(self.num_version):
@@ -82,7 +93,8 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
         self.hdf5file.close()
 
     @classmethod
-    def cache(cls, cache_location, file_mode="a", num_version=1):
+    def cache(cls, cache_location, file_mode="a", num_version=1,
+              read_max_frames: int = 0):
         """Decorator: wrap a ``DynamicItem`` factory into a cached one."""
 
         def decorator(obj):
@@ -92,6 +104,7 @@ class CachedHDF5DynamicItem(CachedDynamicItem):
                 cache_location,
                 file_mode,
                 num_version,
+                read_max_frames,
                 takes=obj.takes,
                 func=obj.func,
                 provides=obj.provides,

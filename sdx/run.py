@@ -72,7 +72,8 @@ def _execute_job(task_stem: str, model_name: str, role: str, *,
                  device: str | None, test_only: bool, cache_only: bool,
                  tag: str, log_path: Path,
                  overwrite: bool = False,
-                 overrides: str = "") -> tuple[str, bool, float]:
+                 overrides: str = "",
+                 probe: str | None = None) -> tuple[str, bool, float]:
     """Run one (task, encoder) job by chaining sdx subcommands.
 
     - role="writer": sdx single warm → sdx single train (full pipeline).
@@ -82,6 +83,8 @@ def _execute_job(task_stem: str, model_name: str, role: str, *,
                      with user overrides).
     - overwrite:     forwarded to subprocess train so its skip-if-complete
                      doesn't override our run-level decision to redo.
+    - probe:         forwarded to both warm (selects the cache layout) and
+                     train (selects the head + output folder).
     """
     label = f"{task_stem} × {model_name}"
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -98,6 +101,8 @@ def _execute_job(task_stem: str, model_name: str, role: str, *,
     train_extras = ["--leaf", "--tag", tag]
     if overwrite:
         train_extras.append("--overwrite")
+    probe_arg = [f"--probe={probe}"] if probe else []
+    train_extras += probe_arg
     user_ov = ["--overrides", overrides] if overrides else []
     base = ["python", "-m", "sdx", "single"]
     target = ["-t", task_stem, "-e", model_name]
@@ -106,7 +111,7 @@ def _execute_job(task_stem: str, model_name: str, role: str, *,
     success = True
 
     if cache_only:
-        cmd = [*base, "warm", *target]
+        cmd = [*base, "warm", *target, *probe_arg]
         if device:
             cmd.append(f"--device={device}")
         success = _run_subprocess(cmd, log_path, "warm")
@@ -116,7 +121,7 @@ def _execute_job(task_stem: str, model_name: str, role: str, *,
                "--overrides", merged]
         success = _run_subprocess(cmd, log_path, "test")
     elif role == "writer":
-        warm_cmd = [*base, "warm", *target]
+        warm_cmd = [*base, "warm", *target, *probe_arg]
         if device:
             warm_cmd.append(f"--device={device}")
         if not _run_subprocess(warm_cmd, log_path, "warm"):
@@ -147,6 +152,7 @@ def cmd_run(args: argparse.Namespace, *, logs_root: Path | None = None) -> None:
     overwrite = getattr(args, "overwrite", False)
     dry_run = getattr(args, "dry_run", False)
     tag = getattr(args, "tag", "run1")
+    probe = getattr(args, "probe", None)
     overrides = getattr(args, "overrides", "") or ""
 
     all_encoders = registry_encoders()
@@ -185,7 +191,7 @@ def cmd_run(args: argparse.Namespace, *, logs_root: Path | None = None) -> None:
     for task_stem in available_tasks:
         dataset, _ = get_task_info(task_stem)
         for model_name in encoders:
-            folder = get_output_folder(task_stem, model_name, tag)
+            folder = get_output_folder(task_stem, model_name, tag, probe=probe)
             if cache_only:
                 pass  # always queue; cache_only emits no result file
             elif test_only:
@@ -278,7 +284,7 @@ def cmd_run(args: argparse.Namespace, *, logs_root: Path | None = None) -> None:
             task_stem, model_name, role,
             device=args.device, test_only=test_only, cache_only=cache_only,
             tag=tag, log_path=log_path, overwrite=overwrite,
-            overrides=overrides,
+            overrides=overrides, probe=probe,
         )
         _, ok, elapsed = result
         dashboard.finish_job(idx, label, ok=ok, elapsed=elapsed, log_path=log_path)

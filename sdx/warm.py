@@ -418,7 +418,7 @@ def _drive_warm_batched(warmup, speech_encoder, cache_pool: str,
 
 
 def _warm_uncached(task: str, encoder: str, *,
-                   probe: str, device: str | None,
+                   probe: str | None, device: str | None,
                    data_dict: dict[str, dict],
                    all_ids: list[str],
                    num_versions: int) -> None:
@@ -487,7 +487,7 @@ def _warm_uncached(task: str, encoder: str, *,
 
 
 def run_warm(task: str, encoder: str, *,
-             probe: str = "AvgTProbe", device: str | None = None,
+             probe: str | None = None, device: str | None = None,
              num_aug_ver: int | None = None,
              overwrite: bool = False) -> None:
     """Warm the HDF5 cache for one (task, encoder) pair.
@@ -501,6 +501,10 @@ def run_warm(task: str, encoder: str, *,
     ``cross warm`` / ``cross-cat warm`` to extend the per-(dataset, encoder)
     cache to whatever aug count the cross task needs. The append-mode
     HDF5 writer extends the cache; existing aug versions are untouched.
+
+    ``probe`` selects which cache layout is warmed: a probe whose yaml
+    declares ``cache_pool: none`` (e.g. ``ASP``) warms the ``single/`` T x D
+    cache instead of the default mean-pooled ``single_avg/``.
     """
     # Phase 1 — pre-flight using the stub encoder so a warm cache check
     # never pays the real encoder's load cost.
@@ -537,10 +541,13 @@ def _execute_warm_job(task_stem: str, model_name: str, *,
                       device: str | None,
                       num_aug_ver: int | None,
                       overwrite: bool,
-                      log_path: Path) -> tuple[str, bool, float]:
+                      log_path: Path,
+                      probe: str | None = None) -> tuple[str, bool, float]:
     """Run one warm job and capture its stdout/stderr into a per-pair log file."""
     label = f"{task_stem} × {model_name}"
     detail_lines = [f"overwrite={overwrite}"]
+    if probe is not None:
+        detail_lines.append(f"probe={probe}")
     if num_aug_ver is not None:
         detail_lines.append(f"num_aug_ver={num_aug_ver}")
     success, elapsed = _run_logged_job(
@@ -548,7 +555,7 @@ def _execute_warm_job(task_stem: str, model_name: str, *,
         log_path,
         lambda: run_warm(
             task_stem, model_name,
-            device=device, num_aug_ver=num_aug_ver,
+            probe=probe, device=device, num_aug_ver=num_aug_ver,
             overwrite=overwrite,
         ),
         detail_lines=detail_lines,
@@ -560,7 +567,8 @@ def cmd_warm_jobs(jobs: list[tuple[str, str, int | None]], *,
                   device: str | None,
                   overwrite: bool = False,
                   max_workers: int = 1,
-                  logs_root: Path = WARM_LOGS_ROOT) -> None:
+                  logs_root: Path = WARM_LOGS_ROOT,
+                  probe: str | None = None) -> None:
     """Run one or more warm jobs with the same progress/log UX as ``run``."""
     total_jobs = len(jobs)
     max_workers = max(1, max_workers)
@@ -582,7 +590,7 @@ def cmd_warm_jobs(jobs: list[tuple[str, str, int | None]], *,
         result = _execute_warm_job(
             task_stem, model_name,
             device=device, num_aug_ver=num_aug_ver,
-            overwrite=overwrite, log_path=log_path,
+            overwrite=overwrite, log_path=log_path, probe=probe,
         )
         _, ok, elapsed = result
         dashboard.finish_job(idx, label, ok=ok, elapsed=elapsed, log_path=log_path)

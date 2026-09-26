@@ -11,6 +11,7 @@ The benchmark evaluates multiple state-of-the-art audio and speech encoders usin
 
 - [Install](#install)
 - [Reproducing the full benchmark](#reproducing-the-full-benchmark)
+- [Switching the readout to ASP](#switching-the-readout-to-asp)
 - [Modes](#modes)
 - [Commands](#commands) — [`prep`](#prep), [`warm`](#warm), [`train`](#train), [`run`](#run--warm--train--summary), [`status`](#status), [`summary`](#summary)
 - [Examples](#examples)
@@ -88,6 +89,77 @@ Each `_summary_<tag>/` directory holds per-metric CSVs (`AUC.csv`,
 encoders. The same matrices are pretty-printed to stdout at the end of
 the command.
 
+## Switching the readout to ASP
+
+The benchmark's default readout mean-pools each recording's frames at warm
+time and trains a linear probe on the pooled `(D,)` vector (`AvgTProbe`,
+cache `single_avg/`). The **ASP** readout keeps every frame instead
+(`single/`, a `(T, D)` matrix per recording) and trains
+[attentive statistics pooling](https://arxiv.org/abs/1803.10963) + a linear
+head: the probe learns which frames to attend to and pools an
+attention-weighted mean **and** standard deviation (`2D`). Tasks, splits,
+augmentation, losses, class weights, the HP search and the metrics are
+unchanged. Only the readout differs.
+
+Switching is one flag, `--probe ASP`, passed to every single-mode command:
+
+```bash
+# 1. Warm the temporal cache. ASP.yaml declares `cache_pool: none`, so this
+#    writes <dataset>/<encoder>/{train,val}/single/ next to single_avg/.
+uv run python -m sdx single warm  -t T13 -e whisper --probe ASP
+
+# 2. Train + evaluate. Results land in exps/single_task/T13/whisper-ASP-run1/,
+#    never on top of the mean-pool folder (whisper-AvgTProbe-run1/).
+uv run python -m sdx single train -t T13 -e whisper --probe ASP
+
+# Or both phases for many pairs at once:
+uv run python -m sdx single run -e whisper -e wavlm --probe ASP
+
+# Completion grid and CSVs for the ASP runs:
+uv run python -m sdx single status  --probe ASP
+uv run python -m sdx single summary --probe ASP   # → exps/single_task/_summary_ASP_run1/
+```
+
+Drop `--probe` (or pass `--probe AvgTProbe`) to go back to mean pooling;
+both caches and both result trees can live side by side.
+
+How it works: `--probe X` selects `sdx/configs/probes/X.yaml` as the head and
+labels the experiment folder `X`. If the probe yaml has a top-level
+`cache_pool:` line, that value replaces `main.yaml`'s `cache_pool: mean` at
+compose time, so the warm and the trainer agree on the cache layout. Any new
+probe yaml you drop into `probes/` is selectable the same way.
+
+Things to know before switching:
+
+- **Disk.** The temporal cache is roughly *frames-per-recording* times larger
+  than the pooled one, because it stores `T x D` instead of `D` per recording
+  and augmented version. Short-clip corpora are cheap, but the largest
+  (COVID-19 Sounds, ~53k recordings) is on the order of a terabyte per
+  encoder in fp32.
+- **Very long recordings.** SpeechBrain's ASP layer concatenates
+  `[x, mean, std]` into `3D` channels before a conv, and that tensor has to
+  stay under `2**31` elements. At the default `batch_size: 16` that is about
+  43.7k frames for `D=1024` and 35k for `D=1280`, which a few EDAIC and
+  AphasiaBank interviews exceed. `cache_max_frames` (default `-1`, off) keeps
+  only the first N frames of each recording at read time:
+
+  ```bash
+  uv run python -m sdx single train -t T9 -e whisper --probe ASP \
+      --overrides "cache_max_frames: 30000"
+  ```
+
+  It is a methodological change, so apply it only where needed and report it.
+  The ASP rows on the [leaderboard](https://chai.cs.toronto.edu/speechdx-leaderboard/)
+  capped reads at 30,000 frames (a no-op except on AphasiaBank and EDAIC),
+  and at 10,000 frames for most EDAIC (T1/T2) cells to fit GPU memory.
+- **Numerics.** The leaderboard's ASP track warmed fp16 caches on GPU and
+  trained the probe in bf16 (`--overrides "precision: bf16"`). The committed
+  configs here warm and train in fp32, so expect small differences, not
+  identical numbers.
+- **Capacity.** The ASP head has roughly 4000x the parameters of the linear
+  probe (about 4.2M vs about 1k for a 1024-d encoder on a binary task). An ASP-vs-mean
+  gap measures attentive pooling *and* extra capacity together.
+
 ## Modes
 
 The CLI surface is `python -m sdx <mode> <command> [flags]`. If the first
@@ -123,10 +195,15 @@ build manifests.
 
 ### `warm`
 Extract embeddings into the per-`(dataset, encoder)` HDF5 cache for every
-matching pair.
+matching pair. Chunks are batched through the encoder `warm_batch_size` at a
+time (encoder yaml, default `1`). A batch that runs out of CUDA memory is split
+in half and retried. See [Adding an encoder](#adding-an-encoder) for how to
+make a new encoder batch-safe.
 - `--device` — torch device override (e.g. `cuda:0`).
 - `--workers` — concurrent warm workers (default `1`).
 - `--overwrite` — wipe `cache.hdf5` and re-extract.
+- `single warm` only: `--probe` — warm the cache layout that probe needs
+  (see [Switching the readout to ASP](#switching-the-readout-to-asp)).
 
 ### `train`
 Ray-Tune HP search on top of warmed caches. Auto-routes to per-fold CV
@@ -140,6 +217,9 @@ when the task yaml sets `num_fold`.
   `--overwrite`.
 - `single train` only: `--level-dir` — reroute output into
   `exps/data_eff/<level_dir>/`.
+- `single train` only: `--probe` — readout head `probes/<PROBE>.yaml`
+  (default: the mean-pool linear probe); names the folder
+  `<encoder>-<PROBE>-<tag>`.
 - `data-eff train` only: `--level` — restrict to specific levels
   (repeatable; default: every level in `registry.yaml`).
 
@@ -154,17 +234,20 @@ every flag from the underlying phases plus orchestration flags.
 - `--dry-run` — print the plan and exit without doing work.
 - `--overwrite` redo prompts unless `-y`/`--yes`.
 - `data-eff run` / `all run` add `--level`.
+- `single run` adds `--probe` (forwarded to both warm and train).
 
 ### `status`
 Per-task × per-encoder ☑/☐ completion grid for `--tag`. data-eff and all
 add a `level` axis.
-- `--tag`.
+- `--tag`; `single status` also takes `--probe`.
 - `data-eff status` / `all status` only: `--level`.
 
 ### `summary`
 Aggregate `test_results.{txt,yaml}` into per-metric CSVs at
 `<mode-root>/_summary_<tag>/` and pretty-print to stdout.
 - `--out-dir` (default `<mode-root>/_summary_<tag>`), `--tag`.
+- `single summary` only: `--probe` (default out-dir becomes
+  `_summary_<PROBE>_<tag>`).
 - `data-eff summary` only: `--level`.
 
 ## Examples
@@ -615,6 +698,16 @@ knob themselves (no fall-through to single-task yamls).
    `min_length` and an `encoder: !new:…` construction.
 3. Register the encoder in `sdx/configs/registry.yaml` under `encoders:`.
    The key is the `--encoder` value and shows up in experiment folder names.
+4. Optional, for faster warms: set `warm_batch_size: N` in the encoder yaml.
+   The warmer right-zero-pads `N` chunks to one `(B, T)` tensor and calls
+   `forward(x, lengths)` with relative lengths, so the encoder must ignore the
+   padding. Slice each row back to its true length before any per-utterance
+   normalization and mask the transformer, as `model/wavlm.py` does. Expose
+   `feature_lengths(sample_lengths)` for an exact frame crop; without it the
+   warmer crops proportionally. Encoders whose chunks all have the same length
+   (`min_length == max_length`) never pad, so batching them is exact. Check
+   batched against serial before enabling it (`scripts/compare_warm_batched.py`
+   shows how).
 
 For the full encoder / probe / pool contracts and additional examples, see
 [`model/README.md`](model/README.md).

@@ -93,8 +93,11 @@ def _train_one(args: argparse.Namespace, task: str, encoder: str, *,
         from sdx.train_cv import cmd_train_cv as _fn
     else:
         from sdx.train import cmd_train as _fn
+    from sdx.config import resolve_probe
+    probe_name, probe_yaml = resolve_probe(getattr(args, "probe", None))
     _fn(
         task, encoder,
+        probe=probe_name, probe_yaml=probe_yaml,
         tag=args.tag, overrides=_merged_overrides(args),
         level_dir=level_dir,
     )
@@ -123,7 +126,8 @@ def _run_single_train_leaf(args: argparse.Namespace) -> None:
     for task, encoder in pairs:
         folder = (_level_output_folder(task, encoder, level_dir, args.tag)
                   if level_dir is not None
-                  else get_output_folder(task, encoder, args.tag))
+                  else get_output_folder(task, encoder, args.tag,
+                                         probe=getattr(args, "probe", None)))
         if test_only:
             if not _has_trained_model(folder, task):
                 print(f"  SKIP (no trained model): {task} × {encoder}")
@@ -311,6 +315,7 @@ def _h_single_warm(args: argparse.Namespace) -> None:
         device=args.device,
         overwrite=getattr(args, "overwrite", False),
         max_workers=getattr(args, "workers", 1),
+        probe=getattr(args, "probe", None),
     )
 
 
@@ -350,7 +355,8 @@ def _h_single_train(args: argparse.Namespace) -> None:
     for task, encoder in pairs:
         folder = (_level_output_folder(task, encoder, level_dir, args.tag)
                   if level_dir is not None
-                  else get_output_folder(task, encoder, args.tag))
+                  else get_output_folder(task, encoder, args.tag,
+                                         probe=getattr(args, "probe", None)))
         if test_only:
             if not _has_trained_model(folder, task):
                 print(f"  SKIP (no trained model): {task} × {encoder}")
@@ -895,6 +901,17 @@ def _add_filter_args(p: argparse.ArgumentParser) -> None:
                    help="Restrict to this task stem (repeatable; default: all)")
 
 
+def _add_probe_arg(p: argparse.ArgumentParser) -> None:
+    """``--probe`` for the single-mode commands (warm/train/run/status/summary)."""
+    p.add_argument("--probe", default=None,
+                   help="Downstream readout: probes/<PROBE>.yaml (e.g. ASP). "
+                        "Default: the mean-pool linear probe (AvgTProbe). A "
+                        "probe that declares `cache_pool: none` warms/reads "
+                        "the T x D single/ cache; results land in "
+                        "<encoder>-<PROBE>-<tag>/. Pass the same value to "
+                        "warm, train, run, status and summary.")
+
+
 def _add_prep_args(p: argparse.ArgumentParser) -> None:
     _add_filter_args(p)
     p.add_argument("--overwrite", action="store_true",
@@ -1031,14 +1048,19 @@ def build_parser() -> argparse.ArgumentParser:
     sp = mode_sub.add_parser("single", help="Single-dataset benchmark mode (default).")
     sub = sp.add_subparsers(dest="command", required=True)
     _add_prep_args(sub.add_parser("prep", help="Build manifests for one or more tasks."))
-    _add_warm_args(sub.add_parser("warm", help="Warm the HDF5 cache for one (task, encoder)."))
-    _add_train_args(sub.add_parser(
-        "train", help="Train probe (auto-routes to per-fold CV via task yaml)."),
-        include_level_dir=True)
-    _add_run_args(sub.add_parser("run", help="Sweep all incomplete (task, encoder) pairs."))
-    _add_status_args(sub.add_parser("status", help="Per-task × per-encoder completion grid."))
-    _add_summary_args(sub.add_parser("summary", help="Aggregate test results into per-metric CSVs."),
-                      default_root_hint="exps/single_task")
+    single_warm = sub.add_parser("warm", help="Warm the HDF5 cache for one (task, encoder).")
+    _add_warm_args(single_warm)
+    single_train = sub.add_parser(
+        "train", help="Train probe (auto-routes to per-fold CV via task yaml).")
+    _add_train_args(single_train, include_level_dir=True)
+    single_run = sub.add_parser("run", help="Sweep all incomplete (task, encoder) pairs.")
+    _add_run_args(single_run)
+    single_status = sub.add_parser("status", help="Per-task × per-encoder completion grid.")
+    _add_status_args(single_status)
+    single_summary = sub.add_parser("summary", help="Aggregate test results into per-metric CSVs.")
+    _add_summary_args(single_summary, default_root_hint="exps/single_task")
+    for _p in (single_warm, single_train, single_run, single_status, single_summary):
+        _add_probe_arg(_p)
 
     # ---- cross ----
     cp = mode_sub.add_parser("cross", help="Zero-shot cross-task mode.")

@@ -57,7 +57,8 @@ def _scan_single(args: argparse.Namespace) -> tuple[int, int, int]:
     for ts in tasks:
         row = [task_label(ts)]
         for enc in encoders:
-            folder = get_output_folder(ts, enc, tag)
+            folder = get_output_folder(ts, enc, tag,
+                                       probe=getattr(args, "probe", None))
             if _is_complete_any(folder):
                 row.append("☑"); complete += 1
             else:
