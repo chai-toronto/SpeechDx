@@ -65,6 +65,46 @@ def _resolve_task_subdir(task: str) -> tuple[Path, Path]:
     )
 
 
+def resolve_probe(probe: str | None) -> tuple[str, str]:
+    """``--probe`` value -> ``(probe_name, probe_yaml)``.
+
+    ``None`` (or the default name) selects the benchmark's default readout:
+    folder label ``AvgTProbe``, head ``probes/Probe.yaml`` (a linear probe
+    over the mean-pooled ``single_avg/`` cache). Any other value ``X``
+    selects ``probes/X.yaml`` and labels the experiment folder ``X``, so
+    e.g. ``--probe ASP`` writes ``<encoder>-ASP-<tag>/`` next to (never over)
+    the mean-pool results.
+    """
+    from sdx.paths import DEFAULT_PROBE_NAME
+
+    if probe is None or probe == DEFAULT_PROBE_NAME:
+        return DEFAULT_PROBE_NAME, "Probe.yaml"
+    if not (PROBES_DIR / f"{probe}.yaml").exists():
+        known = sorted(p.stem for p in PROBES_DIR.glob("*.yaml"))
+        raise FileNotFoundError(
+            f"no probe config sdx/configs/probes/{probe}.yaml (known: {known})")
+    return probe, f"{probe}.yaml"
+
+
+def probe_cache_pool(probe_yaml: str) -> str | None:
+    """The ``cache_pool`` a probe yaml declares it needs, or ``None``.
+
+    A probe that reads the time axis (e.g. ASP) cannot run on the
+    mean-pooled ``single_avg/`` cache, so its yaml carries a top-level
+    ``cache_pool: none`` line. ``compose_yaml_text`` copies it over
+    ``main.yaml``'s ``cache_pool:`` so the warm writes, and the trainer reads,
+    the ``single/`` (T x D) cache whenever that probe is selected. Probes
+    without the line inherit ``main.yaml``'s value (``mean``).
+    """
+    path = PROBES_DIR / probe_yaml
+    if not path.exists():
+        return None
+    for line in path.read_text().splitlines():
+        if line.startswith("cache_pool:"):
+            return line.split(":", 1)[1].split("#", 1)[0].strip()
+    return None
+
+
 def _task_yaml_include(task_subdir: Path, task_yaml: str) -> str:
     """Return the include path used in main.yaml's ``data_params:`` line.
 
@@ -127,6 +167,9 @@ def compose_yaml_text(
         "task_id:":        f"task_id: {task_id}",
         "skip_prep:":      "skip_prep: True",
     }
+    declared_pool = probe_cache_pool(probe_yaml)
+    if declared_pool is not None:
+        line_subs["cache_pool:"] = f"cache_pool: {declared_pool}"
     if experiment_tag is not None:
         line_subs["experiment_tag:"] = f"experiment_tag: {experiment_tag}"
     if warm_cache_override is not None and not cache_only:
@@ -183,8 +226,8 @@ def compose_config(
     task: str,
     encoder: str,
     *,
-    probe: str = "AvgTProbe",
-    probe_yaml: str = "Probe.yaml",
+    probe: str | None = None,
+    probe_yaml: str | None = None,
     tag: str | None = None,
     mode: str = "read",
     overrides: dict | None = None,
@@ -193,7 +236,8 @@ def compose_config(
     """Produce the resolved hparams dict for one (task, encoder, probe) job.
 
     ``mode`` selects the warm/read/test/cache flag combination (see module
-    docstring). ``overrides`` is forwarded to ``load_hyperpyyaml`` and can
+    docstring). ``probe`` alone resolves its yaml via :func:`resolve_probe`;
+    pass ``probe_yaml`` too to pin both explicitly (the cross modes do). ``overrides`` is forwarded to ``load_hyperpyyaml`` and can
     re-stamp scalar fields like ``output_folder`` for Ray-trial forks.
     """
     if mode not in _MODE_FLAGS:
@@ -203,6 +247,11 @@ def compose_config(
     encoder_yaml = registry_encoders().get(encoder)
     if encoder_yaml is None:
         raise KeyError(f"encoder {encoder!r} not found in sdx/configs/registry.yaml")
+
+    if probe_yaml is None:
+        probe, probe_yaml = resolve_probe(probe)
+    elif probe is None:
+        probe = resolve_probe(None)[0]
 
     base_main_yaml, task_subdir = _resolve_task_subdir(task)
     task_yaml = f"{task}.yaml"

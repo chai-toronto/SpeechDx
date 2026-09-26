@@ -1,5 +1,3 @@
-
-
 sample_rate: 16000
 feature_dim: 768
 num_layers: 12
@@ -7,6 +5,11 @@ layer_dim: 1
 max_length: 10e5
 min_length: 1
 
+# DO NOT BATCH (warm_batch_size must stay 1). Chunks are whole recordings
+# (max_length 10e5) => ragged batch, and forward() slices `xi[:li]` with a RELATIVE
+# float length, so a batched call raises
+# 'TypeError: only integer tensors of a single element can be converted to an index'.
+# Fix that slicing (and add an exact feature_lengths) before ever batching this.
 encoder: !new:model.wavjepa.WavJEPA
   ssl_encoder_source: "labhamlet/wavjepa-nat-base"
   freeze_encoder: True

@@ -1,0 +1,21 @@
+# Attentive Statistics Pooling probe over the full T x D temporal cache.
+#
+# Instead of mean-pooling the frozen encoder's frames at warm time, the cache
+# keeps every frame (single/ instead of single_avg/) and the probe learns frame
+# attention: SpeechBrain AttentiveStatisticsPooling returns an attention-
+# weighted mean and std (2D), then a linear head. Select it with --probe ASP on
+# warm/train/run/status/summary; results land in <encoder>-ASP-<tag>/.
+#
+# The line below is read by sdx.config.probe_cache_pool and replaces
+# main.yaml's cache_pool, so the warm writes (and the trainer reads) the
+# temporal cache whenever this probe is selected.
+cache_pool: none
+
+feature_dim: !PLACEHOLDER
+num_labels: !PLACEHOLDER
+
+probe: !new:model.probe.TemporalProbe
+  input_dim: !ref <feature_dim>
+  num_labels: !ref <num_labels>
+  temp_pooler: !new:model.pool.ASP
+    input_dim: !ref <feature_dim>

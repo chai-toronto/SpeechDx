@@ -6,8 +6,18 @@ layer_dim: 1
 max_length: 300 # to prevent OOM
 min_length: 1
 
+# Chunks per encoder forward() call during cache warming (the batched warm
+# path, sdx/warm.py:_drive_warm_batched). 1 = one chunk at a time; >1 pads
+# variable-length chunks and batches them. Lower it for long-audio datasets —
+# transformer attention is O(T^2), so a few long clips per batch dominate
+# memory.
+warm_batch_size: 8
+
 encoder: !new:model.wavlm.WavLM
   ssl_encoder_source: "microsoft/wavlm-large"
   freeze_encoder: True
   output_hidden_states: False
   sample_rate: !ref <sample_rate>
+  # sdpa: attention calls q/k/v_proj as modules (needed by sdx/lora), bit-
+  # identical to "original" (the stock transformers kernel).
+  attn_impl: sdpa

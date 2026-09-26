@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from transformers import ClapAudioModel, ClapFeatureExtractor
+from transformers import ClapFeatureExtractor, ClapModel
 
 
 class CLAP(nn.Module):
@@ -31,7 +31,14 @@ class CLAP(nn.Module):
         super().__init__(*args, **kwargs)
         # CLAP uses its own feature extractor that converts audio to mel-spectrograms
         self.processor = ClapFeatureExtractor.from_pretrained(ssl_encoder_source)
-        self.model = ClapAudioModel.from_pretrained(ssl_encoder_source)
+        # Load the full ClapModel and keep its audio tower. The laion CLAP repos
+        # ship ClapModel checkpoints, and ClapAudioModel.from_pretrained(src)
+        # does not map their weights (prefix mismatch): transformers reports
+        # the whole audio encoder as newly initialized and returns random
+        # weights. On laion/larger_clap_general, patch_embed.proj mean|w| is
+        # ~0.009 that way vs 0.0385 pretrained. .audio_model is a
+        # ClapAudioModel, so nothing downstream changes.
+        self.model = ClapModel.from_pretrained(ssl_encoder_source).audio_model
         
         # Check if model supports fusion
         self.enable_fusion = self.model.config.enable_fusion

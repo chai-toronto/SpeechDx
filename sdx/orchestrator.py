@@ -97,7 +97,8 @@ def task_label(task_stem: str) -> str:
 
 
 def get_output_folder(task_stem: str, model_name: str,
-                      tag: str = DEFAULT_EXPERIMENT_TAG) -> Path:
+                      tag: str = DEFAULT_EXPERIMENT_TAG,
+                      probe: str | None = None) -> Path:
     """``./exps/single_task/<task_stem>/<model>-<probe>-<tag>/``.
 
     ``task_stem`` is the YAML filename without the ``.yaml`` suffix —
@@ -105,8 +106,14 @@ def get_output_folder(task_stem: str, model_name: str,
     ``avfad_ageR`` etc. for auxiliary configs whose stem already equals
     ``<dataset>_<task>``. Folder names track the stem, so paper tasks
     get the paper ID and auxiliary tasks keep their old folder name.
+
+    ``probe`` is the ``--probe`` value the job ran with (``None`` = the
+    default ``AvgTProbe``). Every caller that skips, wipes or collects a
+    folder must pass it, or it will look at the mean-pool folder while the
+    job wrote ``<model>-<probe>-<tag>/``.
     """
-    return Path(f"./exps/single_task/{task_stem}/{model_name}-{DEFAULT_PROBE_NAME}-{tag}")
+    return Path(f"./exps/single_task/{task_stem}/"
+                f"{model_name}-{probe or DEFAULT_PROBE_NAME}-{tag}")
 
 
 _task_yaml_cache: dict[str, dict] = {}

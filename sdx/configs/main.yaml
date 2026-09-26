@@ -50,7 +50,16 @@ val_cache_dir: !ref <slurm_tmpdir>/<dataset>/<model_name>/val
 warm_cache: true
 # Pooling applied before saving to cache (single mode only): "none" stores T x D,
 # "mean" avg-pools over T to D sized vector and writes under a single_avg/ subdir.
+# A probe yaml may declare its own `cache_pool:` (probes/ASP.yaml says none);
+# selecting it with --probe replaces this line at compose time.
 cache_pool: mean
+# Read-time crop of a T x D cache: keep only the first N frames per recording.
+# -1 disables it (the published protocol). Only matters for a temporal probe
+# such as ASP, whose attentive-statistics conv cannot index B*3D*T >= 2**31
+# (about 43.7k frames at D=1024, 35k at D=1280, at batch_size 16); set it with
+# --overrides "cache_max_frames: 30000" on corpora with very long recordings
+# (edaic, aphasia). Mean-pooled (D,) caches are never cropped.
+cache_max_frames: -1
 
 # ----------------------------------
 # DYNAMIC SCRIPT CONFIGURATION (Generic)

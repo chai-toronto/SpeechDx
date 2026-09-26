@@ -5,6 +5,11 @@ layer_dim: 1
 max_length: 10
 min_length: 10
 
+# Chunks batched per encoder forward() during warm. min_length==max_length (10s @48kHz) -> uniform chunks; batched==serial to 5.5e-6 (raw frames, pretrained weights).
+# Validated batched==serial on real audio before enabling (re-check: tests/test_batched_warm.py).
+# Perf-only knob; OOM-safe halving shrinks it if a batch is too big.
+warm_batch_size: 16
+
 encoder: !new:model.clap.CLAP
   ssl_encoder_source: "laion/larger_clap_general"
   freeze_encoder: True

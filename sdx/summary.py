@@ -28,6 +28,7 @@ from sdx.orchestrator import (
     is_complete,
     task_label,
 )
+from sdx.paths import DEFAULT_PROBE_NAME
 from sdx.registry import encoders as registry_encoders
 from sdx.results import parse_results_txt, parse_results_yaml
 
@@ -208,8 +209,10 @@ def cmd_summary(args: argparse.Namespace) -> None:
     encoders = [e for e in registry_encoders().keys()
                 if not enc_filter or e in enc_filter]
 
+    probe = getattr(args, "probe", None)
+
     def folder_for(task_stem: str, model_name: str) -> Path:
-        return get_output_folder(task_stem, model_name, args.tag)
+        return get_output_folder(task_stem, model_name, args.tag, probe=probe)
 
     matrices, regression_tasks, classification_tasks, found, missing = _collect_matrices(
         tasks=tasks,
@@ -219,7 +222,12 @@ def cmd_summary(args: argparse.Namespace) -> None:
         task_type_for=lambda ts: _load_task_yaml(ts).get("task_type"),
     )
 
-    out_dir = Path(args.out_dir or f"exps/single_task/_summary_{args.tag}")
+    # Non-default probes get their own summary dir so an ASP summary never
+    # overwrites the mean-pool one for the same tag.
+    default_dir = (f"exps/single_task/_summary_{probe}_{args.tag}"
+                   if probe and probe != DEFAULT_PROBE_NAME
+                   else f"exps/single_task/_summary_{args.tag}")
+    out_dir = Path(args.out_dir or default_dir)
     written = _write_metric_csvs(
         matrices, encoders, regression_tasks, classification_tasks, out_dir,
         label_for=task_label,
