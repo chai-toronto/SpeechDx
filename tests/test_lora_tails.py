@@ -242,7 +242,23 @@ def _tiny_wavlm_wrapper():
 def test_wavlm_tail_matches_hf_and_lora_actually_takes_effect():
     """HF's WavLM attention reads q_proj.weight/.bias directly, so a wrapped
     projection used to crash (LoRALinear has no .bias) — and would otherwise
-    be ignored. The tail rebinds attention to call the modules."""
+    be ignored. Building the tail enables model/wavlm_sdpa_patch.py, which
+    calls the modules; the tail must still match the stock kernel."""
+    from model.wavlm_sdpa_patch import (
+        disable_wavlm_sdpa,
+        enable_wavlm_sdpa,
+        wavlm_sdpa_enabled,
+    )
+
+    was = wavlm_sdpa_enabled()
+    try:
+        disable_wavlm_sdpa()  # reference = transformers' stock kernel
+        _check_wavlm_tail()
+    finally:
+        (enable_wavlm_sdpa if was else disable_wavlm_sdpa)()
+
+
+def _check_wavlm_tail():
     from sdx.lora.layers import lora_branches
     from sdx.lora.model import LoRATailProbe
     from sdx.lora.targets import SPECS, plan_adapters

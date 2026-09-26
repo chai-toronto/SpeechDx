@@ -18,3 +18,6 @@ encoder: !new:model.wavlm.WavLM
   freeze_encoder: True
   output_hidden_states: False
   sample_rate: !ref <sample_rate>
+  # sdpa: attention calls q/k/v_proj as modules (needed by sdx/lora), bit-
+  # identical to "original" (the stock transformers kernel).
+  attn_impl: sdpa

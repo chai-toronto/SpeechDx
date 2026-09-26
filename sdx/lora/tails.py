@@ -36,12 +36,10 @@ blocks that thread state their parent builds need a runner of their own:
 from __future__ import annotations
 
 import contextlib
-import types
 from typing import Callable
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from sdx.lora.targets import SPECS, EncoderTargetSpec, _resolve
 
@@ -141,50 +139,15 @@ class EncoderTail(nn.Module):
         return hidden
 
 
-def _wavlm_attention_via_modules(self, hidden_states, attention_mask,
-                                 gated_position_bias, output_attentions):
-    """``WavLMAttention.torch_multi_head_self_attention`` that CALLS q/k/v_proj.
-
-    transformers' version hands ``q_proj.weight`` / ``.bias`` straight to
-    ``F.multi_head_attention_forward``, bypassing the projection modules, so a
-    LoRA adapter wrapped around ``q_proj`` / ``v_proj`` would crash (it has no
-    ``.bias``) or, worse, be silently ignored. Same math otherwise: separate
-    q/k/v projections, the gated relative position bias as an additive mask,
-    padded keys at -inf, scaled dot-product attention, then ``out_proj``.
-    """
-    if output_attentions:
-        raise NotImplementedError(
-            "LoRA WavLM tail: output_attentions=True is not supported")
-    bsz, seq_len, _ = hidden_states.shape
-    heads, head_dim = self.num_heads, self.head_dim
-
-    def split(x):
-        return x.view(bsz, seq_len, heads, head_dim).transpose(1, 2)
-
-    q = split(self.q_proj(hidden_states))
-    k = split(self.k_proj(hidden_states))
-    v = split(self.v_proj(hidden_states))
-    bias = gated_position_bias.view(bsz, heads, seq_len, seq_len)
-    if attention_mask is not None:
-        # WavLM convention: 1 = keep; HF derives the padding mask with ne(1).
-        bias = bias.masked_fill(attention_mask.ne(1)[:, None, None, :],
-                                float("-inf"))
-    out = F.scaled_dot_product_attention(
-        q, k, v, attn_mask=bias.to(q.dtype),
-        dropout_p=self.dropout if self.training else 0.0)
-    out = out.transpose(1, 2).reshape(bsz, seq_len, heads * head_dim)
-    return self.out_proj(out), None
-
-
 class WavLMTail(EncoderTail):
     """WavLM suffix: recompute position_bias and thread it through the blocks.
 
-    Also rebinds each tail block's attention so it calls ``q_proj`` / ``v_proj``
-    as modules (see :func:`_wavlm_attention_via_modules`); without that, HF's
-    WavLM attention reads the raw weights and LoRA never takes effect. Only
-    the tail's own blocks are rebound (per instance), so the frozen benchmark
-    warm keeps transformers' original kernel. ``scripts/lora_parity.py``
-    checks the rebound tail against the unmodified encoder.
+    Also makes sure ``model/wavlm_sdpa_patch.py`` is active. transformers'
+    stock WavLM attention reads the raw ``q_proj`` / ``v_proj`` weights, so a
+    LoRA adapter wrapped around them would crash or be bypassed; the patch
+    calls the modules instead and is bit-identical to the stock kernel.
+    ``model/wavlm.py`` enables it by default (``attn_impl: sdpa``); enabling it
+    here too covers ``attn_impl: original`` and WavLMs built elsewhere.
     """
 
     def __init__(self, encoder, model_name, cut, spec=None):
@@ -206,10 +169,8 @@ class WavLMTail(EncoderTail):
         import inspect as _inspect
         self._takes_index = "index" in _inspect.signature(
             type(self.blocks[0]).forward).parameters
-        for block in self.blocks:
-            attn = _resolve(block, self.spec.attn)
-            attn.torch_multi_head_self_attention = types.MethodType(
-                _wavlm_attention_via_modules, attn)
+        from model.wavlm_sdpa_patch import enable_wavlm_sdpa
+        enable_wavlm_sdpa()
 
     def _position_bias(self, hidden: torch.Tensor) -> torch.Tensor:
         attn = self.bias_source

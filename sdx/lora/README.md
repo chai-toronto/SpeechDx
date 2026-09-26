@@ -163,8 +163,13 @@ declares where the blocks and projections live and how to replay the tail.
 3. **Make sure attention calls the projection modules.** LoRA wraps `q_proj` /
    `v_proj`. If the attention reads `q_proj.weight` directly (HF's WavLM does,
    via `F.multi_head_attention_forward`), the adapter crashes or is silently
-   bypassed. `WavLMTail` rebinds its blocks' attention to call the modules. Do
-   the same in your runner if needed.
+   bypassed. For WavLM, `model/wavlm_sdpa_patch.py` replaces that attention
+   with one that calls the modules and replays the stock op sequence, so it is
+   bit-identical to the stock kernel (`tests/test_wavlm_patch.py`).
+   `model/wavlm.py` enables it by default (`attn_impl: sdpa` in
+   `wavlm.yaml`) and `WavLMTail` enables it too. For another encoder with the
+   same problem, write an equivalent patch and check it against the original
+   kernel with `torch.equal` before relying on it.
 4. **Register it** in `SPECS` (`sdx/lora/targets.py`) under the encoder's
    `registry.yaml` name. Optionally add a realistic chunk length to
    `DEFAULT_SECONDS` in `scripts/lora_parity.py`.

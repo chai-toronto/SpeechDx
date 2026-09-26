@@ -3,9 +3,27 @@ from speechbrain.dataio.dataio import length_to_mask
 from transformers import AutoFeatureExtractor, WavLMModel
 import torch.nn as nn
 
+from model.wavlm_sdpa_patch import disable_wavlm_sdpa, enable_wavlm_sdpa
+
+_ATTN_IMPLS = ("sdpa", "original")
+
+
 class WavLM(nn.Module):
-    def __init__(self, ssl_encoder_source, freeze_encoder, output_hidden_states, sample_rate, *args, **kwargs):
+    def __init__(self, ssl_encoder_source, freeze_encoder, output_hidden_states, sample_rate,
+                 *args, attn_impl: str = "sdpa", **kwargs):
         super().__init__(*args, **kwargs)
+        # attn_impl selects WavLMAttention's implementation (class-wide, so it
+        # applies to every WavLM in the process):
+        #   "sdpa"     — model/wavlm_sdpa_patch.py: calls q/k/v_proj as modules
+        #                so wrappers such as LoRA adapters take effect. Bit-
+        #                identical to "original" (same op sequence).
+        #   "original" — transformers' stock kernel, which reads the raw
+        #                projection weights.
+        if attn_impl not in _ATTN_IMPLS:
+            raise ValueError(f"WavLM attn_impl: expected one of {_ATTN_IMPLS}, "
+                             f"got {attn_impl!r}")
+        (enable_wavlm_sdpa if attn_impl == "sdpa" else disable_wavlm_sdpa)()
+        self.attn_impl = attn_impl
         self.processor = AutoFeatureExtractor.from_pretrained(ssl_encoder_source)
         self.feature_extractor = WavLMModel.from_pretrained(ssl_encoder_source)
 
